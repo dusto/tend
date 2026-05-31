@@ -1,0 +1,8 @@
+# Binaries
+/tend
+/tendd
+*.test
+*.out
+
+# Editor/OS
+.DS_Store
