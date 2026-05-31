@@ -12,10 +12,6 @@ import (
 	"github.com/dusto/tend/api"
 )
 
-// ErrNonContiguous is returned by Append when an event's Seq is not the next
-// sequence number for its stream. The log is contiguous within a stream.
-var ErrNonContiguous = errors.New("events: non-contiguous append")
-
 // Log is a durable, append-only event log with a per-stream replay index.
 // Records — raw events and compaction summary control records — are appended as
 // newline-delimited JSON and never rewritten or deleted; raw records are
@@ -79,25 +75,29 @@ func (l *Log) load() error {
 // Append durably writes a raw event and indexes it. ev.Seq must be the next
 // sequence number for its stream (1 for the first), matching the contiguous
 // seq the bus assigns; otherwise it returns ErrNonContiguous.
-func (l *Log) Append(ev api.Event) error {
+// Append assigns ev the next per-stream sequence number, stamps it as a
+// kind=event record (CursorSeq == Seq, TS defaulted), durably writes it, and
+// returns the stamped event. The log is the sequence authority for a stream, so
+// across a restart seq continues from the reloaded high-water.
+func (l *Log) Append(ev api.Event) (api.Event, error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
-	expect := uint64(1)
+	var tail uint64
 	if si := l.index[ev.StreamID]; si != nil {
-		expect = si.tail + 1
+		tail = si.tail
 	}
-	if ev.Seq != expect {
-		return fmt.Errorf("%w: stream %q seq %d, want %d", ErrNonContiguous, ev.StreamID, ev.Seq, expect)
-	}
-
 	ev.Kind = api.KindEvent
+	ev.Seq = tail + 1
 	ev.CursorSeq = ev.Seq
+	if ev.TS.IsZero() {
+		ev.TS = time.Now()
+	}
 	if err := l.write(ev); err != nil {
-		return err
+		return api.Event{}, err
 	}
 	l.indexRecord(ev)
-	return nil
+	return ev, nil
 }
 
 // AppendSummary records a compaction of [from, to] for a stream by appending a
@@ -145,36 +145,37 @@ func (l *Log) HighWater(streamID api.StreamID) uint64 {
 	return 0
 }
 
-// Replay returns the records to deliver for streamID in (lastSeq, tail], in seq
-// order, honoring compaction: a summary is served at its from_seq in place of
-// the raw records it subsumes. compactedFrom is non-zero when lastSeq fell
-// inside a summarized range [from, to): the returned records begin with that
-// summary (re-delivered) and compactedFrom is the resume boundary the caller
-// reports as cursor_compacted. Returned events are copies safe to deliver.
-func (l *Log) Replay(streamID api.StreamID, lastSeq uint64) (records []api.Event, compactedFrom uint64, err error) {
+// Read returns up to limit records to deliver for streamID after the cursor
+// after, in seq order, honoring compaction: a summary is served at its from_seq
+// in place of the raw records it subsumes. compactedFrom is non-zero when after
+// fell inside a summarized range [from, to): the returned records begin with
+// that summary and compactedFrom is the resume boundary the caller reports as
+// cursor_compacted. A non-positive limit returns no records. Returned events are
+// copies safe to deliver; advance the cursor by each record's CursorSeq.
+func (l *Log) Read(streamID api.StreamID, after uint64, limit int) (records []api.Event, compactedFrom uint64, err error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
 	si := l.index[streamID]
-	if si == nil {
+	if si == nil || limit <= 0 {
 		return nil, 0, nil
 	}
 
-	for p := uint64(1); p <= si.tail; {
+	for p := uint64(1); p <= si.tail && len(records) < limit; {
 		if sum, ok := si.summary[p]; ok {
 			to := sum.Summary.ToSeq
 			switch {
-			case lastSeq < p:
+			case after < p:
 				records = append(records, sum) // not yet reached: deliver in order
-			case lastSeq < to:
+			case after < to:
 				records = append(records, sum) // inside the range: re-deliver
 				compactedFrom = p
 			}
-			// lastSeq >= to: already consumed; skip the summary.
+			// after >= to: already consumed; skip the summary.
 			p = to + 1
 			continue
 		}
-		if ev, ok := si.raw[p]; ok && p > lastSeq {
+		if ev, ok := si.raw[p]; ok && p > after {
 			records = append(records, ev)
 		}
 		p++

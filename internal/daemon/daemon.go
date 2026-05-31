@@ -23,7 +23,7 @@ type Server struct {
 	ln        net.Listener
 	epoch     string
 	validator *dispatch.Validator
-	bus       *events.Bus
+	store     *events.Store
 	log       *events.Log
 
 	mu     sync.Mutex
@@ -45,7 +45,7 @@ func New(ln net.Listener, logPath string) (*Server, error) {
 		ln:        ln,
 		epoch:     rpc.NewEpoch(),
 		validator: newValidator(),
-		bus:       events.NewBus(),
+		store:     events.NewStore(log),
 		log:       log,
 		conns:     make(map[*rpc.Conn]struct{}),
 	}
@@ -59,7 +59,7 @@ func New(ln net.Listener, logPath string) (*Server, error) {
 // newMux builds a fresh plugin->daemon Mux for one connection: it registers the
 // connect handshake, the workspace methods (with a per-connection workspace
 // Manager), and the event subscription methods (with a per-connection Pusher
-// over the shared bus and log), and enables params validation when a validator
+// over the shared event store), and enables params validation when a validator
 // is available.
 func (s *Server) newMux() (*dispatch.Mux, error) {
 	mux := dispatch.NewMux(api.PluginToDaemon)
@@ -69,7 +69,7 @@ func (s *Server) newMux() (*dispatch.Mux, error) {
 	if err := workspace.Register(mux, workspace.NewManager(s.epoch)); err != nil {
 		return nil, err
 	}
-	if err := events.RegisterClient(mux, events.NewPusher(s.bus, s.log)); err != nil {
+	if err := events.RegisterClient(mux, events.NewPusher(s.store)); err != nil {
 		return nil, err
 	}
 	if s.validator != nil {

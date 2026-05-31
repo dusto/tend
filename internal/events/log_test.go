@@ -2,7 +2,6 @@ package events
 
 import (
 	"encoding/json"
-	"errors"
 	"path/filepath"
 	"testing"
 
@@ -20,16 +19,28 @@ func openLog(t *testing.T) (*Log, string) {
 	return l, path
 }
 
-// appendN appends n raw events to streamID starting at the stream's next seq.
-func appendN(t *testing.T, l *Log, streamID api.StreamID, n int) {
+// appendN appends n raw events to streamID and returns the seq of the last one.
+func appendN(t *testing.T, l *Log, streamID api.StreamID, n int) uint64 {
 	t.Helper()
-	start := l.HighWater(streamID) + 1
-	for i := range uint64(n) {
-		seq := start + i
-		if err := l.Append(api.Event{StreamID: streamID, Scope: api.ScopeSession, Type: "tool_call", Seq: seq}); err != nil {
-			t.Fatalf("Append seq %d: %v", seq, err)
+	var last uint64
+	for range n {
+		ev, err := l.Append(api.Event{StreamID: streamID, Scope: api.ScopeSession, Type: "tool_call"})
+		if err != nil {
+			t.Fatalf("Append: %v", err)
 		}
+		last = ev.Seq
 	}
+	return last
+}
+
+// readAll returns every record for streamID after the cursor.
+func readAll(t *testing.T, l *Log, streamID api.StreamID, after uint64) ([]api.Event, uint64) {
+	t.Helper()
+	recs, compactedFrom, err := l.Read(streamID, after, 1<<30)
+	if err != nil {
+		t.Fatalf("Read: %v", err)
+	}
+	return recs, compactedFrom
 }
 
 func seqs(records []api.Event) []uint64 {
@@ -40,41 +51,64 @@ func seqs(records []api.Event) []uint64 {
 	return out
 }
 
-func TestAppendContiguityEnforced(t *testing.T) {
+func TestAppendAssignsContiguousSeq(t *testing.T) {
 	l, _ := openLog(t)
-	if err := l.Append(api.Event{StreamID: "session:a", Seq: 1}); err != nil {
-		t.Fatalf("first append: %v", err)
+	for want := uint64(1); want <= 3; want++ {
+		ev, err := l.Append(api.Event{StreamID: "session:a"})
+		if err != nil {
+			t.Fatalf("Append: %v", err)
+		}
+		if ev.Seq != want || ev.CursorSeq != want || ev.Kind != api.KindEvent {
+			t.Fatalf("Append returned %+v, want seq %d kind event", ev, want)
+		}
+		if ev.TS.IsZero() {
+			t.Error("TS not stamped")
+		}
 	}
-	if err := l.Append(api.Event{StreamID: "session:a", Seq: 3}); !errors.Is(err, ErrNonContiguous) {
-		t.Fatalf("gap append err = %v, want ErrNonContiguous", err)
-	}
-	// First event on a fresh stream must be seq 1.
-	if err := l.Append(api.Event{StreamID: "session:b", Seq: 2}); !errors.Is(err, ErrNonContiguous) {
-		t.Fatalf("non-1 first append err = %v, want ErrNonContiguous", err)
+	// Streams sequence independently.
+	if ev, _ := l.Append(api.Event{StreamID: "session:b"}); ev.Seq != 1 {
+		t.Errorf("independent stream first Seq = %d, want 1", ev.Seq)
 	}
 }
 
-func TestReplayRange(t *testing.T) {
+func TestReadRange(t *testing.T) {
 	l, _ := openLog(t)
 	appendN(t, l, "session:a", 5)
 
-	got, compacted, err := l.Replay("session:a", 2)
-	if err != nil {
-		t.Fatalf("Replay: %v", err)
-	}
+	got, compacted := readAll(t, l, "session:a", 2)
 	if compacted != 0 {
 		t.Errorf("compactedFrom = %d, want 0", compacted)
 	}
 	if want := []uint64{3, 4, 5}; !equal(seqs(got), want) {
-		t.Errorf("Replay(2) seqs = %v, want %v", seqs(got), want)
+		t.Errorf("Read(after=2) seqs = %v, want %v", seqs(got), want)
 	}
 
-	// last_seq == tail yields nothing; an unknown stream yields nothing.
-	if got, _, _ := l.Replay("session:a", 5); len(got) != 0 {
-		t.Errorf("Replay(tail) = %v, want empty", seqs(got))
+	if got, _ := readAll(t, l, "session:a", 5); len(got) != 0 {
+		t.Errorf("Read(after=tail) = %v, want empty", seqs(got))
 	}
-	if got, _, _ := l.Replay("session:none", 0); got != nil {
-		t.Errorf("Replay(unknown) = %v, want nil", got)
+	if got, _, _ := l.Read("session:none", 0, 10); got != nil {
+		t.Errorf("Read(unknown) = %v, want nil", got)
+	}
+}
+
+func TestReadLimit(t *testing.T) {
+	l, _ := openLog(t)
+	appendN(t, l, "session:a", 10)
+
+	got, _, err := l.Read("session:a", 0, 4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []uint64{1, 2, 3, 4}; !equal(seqs(got), want) {
+		t.Errorf("Read(limit=4) = %v, want %v", seqs(got), want)
+	}
+	// Continuing from the last cursor returns the next batch.
+	got, _, _ = l.Read("session:a", 4, 4)
+	if want := []uint64{5, 6, 7, 8}; !equal(seqs(got), want) {
+		t.Errorf("Read(after=4, limit=4) = %v, want %v", seqs(got), want)
+	}
+	if n, _, _ := l.Read("session:a", 0, 0); n != nil {
+		t.Errorf("Read(limit=0) = %v, want nil", n)
 	}
 }
 
@@ -106,13 +140,13 @@ func TestSurvivesRestart(t *testing.T) {
 	if hw := reopened.HighWater("session:a"); hw != 4 {
 		t.Errorf("after restart HighWater(a) = %d, want 4", hw)
 	}
-	got, _, _ := reopened.Replay("session:a", 1)
+	got, _ := readAll(t, reopened, "session:a", 1)
 	if want := []uint64{2, 3, 4}; !equal(seqs(got), want) {
-		t.Errorf("after restart Replay(a,1) = %v, want %v", seqs(got), want)
+		t.Errorf("after restart Read(a, after=1) = %v, want %v", seqs(got), want)
 	}
-	// Appending continues from the persisted high-water.
-	if err := reopened.Append(api.Event{StreamID: "session:a", Seq: 5}); err != nil {
-		t.Errorf("append after restart: %v", err)
+	// Appending continues from the persisted high-water (seq authority survives).
+	if ev, err := reopened.Append(api.Event{StreamID: "session:a"}); err != nil || ev.Seq != 5 {
+		t.Errorf("append after restart = %+v, %v; want seq 5", ev, err)
 	}
 }
 
@@ -125,22 +159,22 @@ func TestSummaryReplaySemantics(t *testing.T) {
 	}
 
 	// before the range: 1,2 already consumed -> summary(3) + 8,9,10
-	got, comp, _ := l.Replay("session:a", 2)
+	got, comp := readAll(t, l, "session:a", 2)
 	assertSummaryReplay(t, got, comp, []uint64{3, 8, 9, 10}, 0)
 	if got[0].Kind != api.KindSummary || got[0].CursorSeq != 7 {
 		t.Errorf("first record = %+v, want summary with CursorSeq 7", got[0])
 	}
 
-	// inside the range (from <= last < to): re-deliver summary, compactedFrom=3
-	got, comp, _ = l.Replay("session:a", 4)
+	// inside the range (from <= after < to): re-deliver summary, compactedFrom=3
+	got, comp = readAll(t, l, "session:a", 4)
 	assertSummaryReplay(t, got, comp, []uint64{3, 8, 9, 10}, 3)
 
-	// last_seq == from also falls inside the range (ack is at to_seq).
-	got, comp, _ = l.Replay("session:a", 3)
+	// after == from also falls inside the range (ack is at to_seq).
+	got, comp = readAll(t, l, "session:a", 3)
 	assertSummaryReplay(t, got, comp, []uint64{3, 8, 9, 10}, 3)
 
-	// last_seq >= to: summary already consumed, resume after it.
-	got, comp, _ = l.Replay("session:a", 7)
+	// after >= to: summary already consumed, resume after it.
+	got, comp = readAll(t, l, "session:a", 7)
 	assertSummaryReplay(t, got, comp, []uint64{8, 9, 10}, 0)
 }
 
