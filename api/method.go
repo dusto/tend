@@ -14,7 +14,7 @@ const (
 
 // Method declares one JSON-RPC method in the contract. Params/Result hold a
 // zero value of the request/response struct; Result is nil for notifications.
-// Codegen (see E1.2) reflects Params/Result into schemas/ and docs/api.md.
+// Codegen reflects Params/Result into schemas/ and docs/api.md.
 type Method struct {
 	Name      string
 	Direction Direction
