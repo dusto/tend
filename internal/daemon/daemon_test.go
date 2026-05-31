@@ -92,6 +92,30 @@ func TestShutdownStopsServeAndClosesConns(t *testing.T) {
 	}
 }
 
+// TestShutdownWaitsForConnGoroutines pins the graceful-shutdown contract: once
+// Shutdown returns, every per-conn serving goroutine has finished, so no conn
+// remains tracked. It guards the invariant, not the specific accept/register
+// ordering hazard, which has no observable symptom from outside the package.
+func TestShutdownWaitsForConnGoroutines(t *testing.T) {
+	srv, path := newServer(t)
+	go func() { _ = srv.Serve() }()
+
+	const n = 8
+	for i := 0; i < n; i++ {
+		client := dial(t, path)
+		// Handshake so the server has accepted and is tracking the conn.
+		if _, err := handshake.Do(testCtx(t), client, api.Versions{}); err != nil {
+			t.Fatalf("handshake %d: %v", i, err)
+		}
+	}
+
+	srv.Shutdown()
+
+	if got := srv.connCount(); got != 0 {
+		t.Fatalf("after Shutdown: %d conns still tracked, want 0", got)
+	}
+}
+
 func TestShutdownIdempotent(t *testing.T) {
 	srv, _ := newServer(t)
 	go func() { _ = srv.Serve() }()

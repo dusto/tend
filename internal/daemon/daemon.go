@@ -122,3 +122,9 @@ func (s *Server) isClosed() bool {
 	defer s.mu.Unlock()
 	return s.closed
 }
+
+func (s *Server) connCount() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return len(s.conns)
+}
