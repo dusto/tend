@@ -68,7 +68,6 @@ func (s *Server) Serve() error {
 			_ = c.Close()
 			return nil
 		}
-		s.wg.Add(1)
 		go func() {
 			defer s.wg.Done()
 			<-c.Done()
@@ -106,6 +105,9 @@ func (s *Server) add(c *rpc.Conn) bool {
 		return false
 	}
 	s.conns[c] = struct{}{}
+	// Increment under the same lock that publishes the conn so Shutdown, which
+	// snapshots conns under this lock before Wait, can never miss it.
+	s.wg.Add(1)
 	return true
 }
 
