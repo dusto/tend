@@ -219,7 +219,7 @@ func (c *Conn) serve(m *message, notification bool) {
 	if err != nil {
 		resp.Error = toError(err)
 	} else if raw, mErr := toRaw(result); mErr != nil {
-		resp.Error = &Error{Code: codeInternalError, Message: "internal error: " + mErr.Error()}
+		resp.Error = &Error{Code: CodeInternalError, Message: "internal error: " + mErr.Error()}
 	} else {
 		resp.Result = raw
 	}
@@ -228,7 +228,7 @@ func (c *Conn) serve(m *message, notification bool) {
 
 func (c *Conn) handle(req *Request) (any, error) {
 	if c.h == nil {
-		return nil, &Error{Code: codeMethodNotFound, Message: "method not found: " + req.Method}
+		return nil, &Error{Code: CodeMethodNotFound, Message: "method not found: " + req.Method}
 	}
 	return c.h.Handle(c.ctx, req)
 }
@@ -255,7 +255,7 @@ func toError(err error) *Error {
 	if e, ok := errors.AsType[*Error](err); ok {
 		return e
 	}
-	return &Error{Code: codeInternalError, Message: err.Error()}
+	return &Error{Code: CodeInternalError, Message: err.Error()}
 }
 
 func idJSON(id int64) json.RawMessage {
