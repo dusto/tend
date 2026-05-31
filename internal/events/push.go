@@ -111,6 +111,16 @@ func (p *Pusher) tail(conn *rpc.Conn, sub *Sub, cursor uint64) {
 		}
 		if len(records) > 0 {
 			for _, ev := range records {
+				// Re-check cancellation before each record so unsubscribe (or a
+				// closed connection) stops delivery within one record, not one
+				// whole batch.
+				select {
+				case <-sub.Stop():
+					return
+				case <-conn.Done():
+					return
+				default:
+				}
 				if !push(conn, ev) {
 					return
 				}
