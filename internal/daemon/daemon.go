@@ -1,7 +1,8 @@
 // Package daemon assembles the tend daemon's serving loop: it accepts
-// connections on a listener and serves each as a bidirectional JSON-RPC peer,
-// routing plugin->daemon methods through a single dispatch.Mux with the connect
-// handshake registered.
+// connections on a listener and serves each as a bidirectional JSON-RPC peer.
+// Each connection gets its own plugin->daemon dispatch.Mux with the connect
+// handshake and workspace methods registered, so per-connection state (such as
+// the active workspace) is isolated between clients.
 package daemon
 
 import (
@@ -12,15 +13,15 @@ import (
 	"github.com/dusto/tend/internal/dispatch"
 	"github.com/dusto/tend/internal/handshake"
 	"github.com/dusto/tend/internal/rpc"
+	"github.com/dusto/tend/internal/workspace"
 )
 
-// Server accepts connections on a listener and serves each over JSON-RPC,
-// routing plugin->daemon methods through one Mux. It is safe for concurrent
-// use; Shutdown is idempotent.
+// Server accepts connections on a listener and serves each over JSON-RPC. It is
+// safe for concurrent use; Shutdown is idempotent.
 type Server struct {
-	ln    net.Listener
-	mux   *dispatch.Mux
-	epoch string
+	ln        net.Listener
+	epoch     string
+	validator *dispatch.Validator
 
 	mu     sync.Mutex
 	conns  map[*rpc.Conn]struct{}
@@ -28,24 +29,37 @@ type Server struct {
 	wg     sync.WaitGroup
 }
 
-// New builds a Server over ln: it creates a plugin->daemon Mux, registers the
-// connect handshake with a fresh per-process epoch, and enables params
-// validation when a validator is available for the build.
+// New builds a Server over ln with a fresh per-process epoch and the params
+// validator available for the build. It validates handler registration up front
+// so a registration bug fails at startup rather than per connection.
 func New(ln net.Listener) (*Server, error) {
-	epoch := rpc.NewEpoch()
-	mux := dispatch.NewMux(api.PluginToDaemon)
-	if err := handshake.Register(mux, epoch); err != nil {
+	s := &Server{
+		ln:        ln,
+		epoch:     rpc.NewEpoch(),
+		validator: newValidator(),
+		conns:     make(map[*rpc.Conn]struct{}),
+	}
+	if _, err := s.newMux(); err != nil {
 		return nil, err
 	}
-	if v := newValidator(); v != nil {
-		mux.UseValidator(v)
+	return s, nil
+}
+
+// newMux builds a fresh plugin->daemon Mux for one connection: it registers the
+// connect handshake and the workspace methods (with a per-connection workspace
+// Manager) and enables params validation when a validator is available.
+func (s *Server) newMux() (*dispatch.Mux, error) {
+	mux := dispatch.NewMux(api.PluginToDaemon)
+	if err := handshake.Register(mux, s.epoch); err != nil {
+		return nil, err
 	}
-	return &Server{
-		ln:    ln,
-		mux:   mux,
-		epoch: epoch,
-		conns: make(map[*rpc.Conn]struct{}),
-	}, nil
+	if err := workspace.Register(mux, workspace.NewManager(s.epoch)); err != nil {
+		return nil, err
+	}
+	if s.validator != nil {
+		mux.UseValidator(s.validator)
+	}
+	return mux, nil
 }
 
 // Epoch returns the daemon's process epoch.
@@ -63,7 +77,12 @@ func (s *Server) Serve() error {
 			}
 			return err
 		}
-		c := rpc.NewConn(nc, s.mux)
+		mux, err := s.newMux()
+		if err != nil {
+			_ = nc.Close()
+			return err // deterministic registration failure
+		}
+		c := rpc.NewConn(nc, mux)
 		if !s.add(c) {
 			_ = c.Close()
 			return nil

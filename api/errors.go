@@ -15,6 +15,9 @@ const (
 	// ErrNoWorkspaceMutation: a mutating operation was attempted outside git
 	// (only an ephemeral read-only workspace is available).
 	ErrNoWorkspaceMutation = 1004
+	// ErrNoActiveWorkspace: workspace.current was called before any workspace
+	// was opened on the connection.
+	ErrNoActiveWorkspace = 1005
 )
 
 // CursorCompactedData accompanies ErrCursorCompacted: the client should resume
@@ -45,4 +48,5 @@ var ErrorDefs = []ErrorDef{
 	{Code: ErrConflict, Name: "conflict", Data: ConflictData{}, Summary: "A file mutation's cited base no longer matches (disk hash or buffer changedtick changed)."},
 	{Code: ErrEditorUnavailable, Name: "editor_unavailable", Data: nil, Summary: "An editor-local capability was requested but no editor holds the session's binding."},
 	{Code: ErrNoWorkspaceMutation, Name: "no_workspace_mutation", Data: nil, Summary: "A mutating operation was attempted outside git (only an ephemeral read-only workspace is available)."},
+	{Code: ErrNoActiveWorkspace, Name: "no_active_workspace", Data: nil, Summary: "workspace.current was called before any workspace was opened on the connection."},
 }
