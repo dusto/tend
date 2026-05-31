@@ -203,9 +203,14 @@ func (c *Conn) dispatch(m *message) {
 			ch <- m // buffered (cap 1); the id is unique so this never blocks
 		}
 	case m.isRequest():
+		// Requests may run concurrently; one slow handler must not block others.
 		go c.serve(m, false)
 	case m.isNotification():
-		go c.serve(m, true)
+		// Notifications are served inline on the read loop so they are handled in
+		// receipt (wire) order — streamed notifications (e.g. event.push) rely on
+		// this. A notification handler must therefore not block on a Call over the
+		// same connection.
+		c.serve(m, true)
 	}
 }
 

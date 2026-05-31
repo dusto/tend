@@ -2,6 +2,7 @@ package events
 
 import (
 	"context"
+	"encoding/json"
 	"sync"
 
 	"github.com/dusto/tend/api"
@@ -68,14 +69,30 @@ func (p *Pusher) subscribe(ctx context.Context, params api.EventsSubscribeParams
 	p.mu.Unlock()
 
 	tail := p.log.HighWater(params.StreamID)
-	replay, _, err := p.log.Replay(params.StreamID, params.LastSeq)
+	replay, compactedFrom, err := p.log.Replay(params.StreamID, params.LastSeq)
 	if err != nil {
 		p.drop(params.StreamID)
 		return api.EventsSubscribeResult{}, &rpc.Error{Code: rpc.CodeInternalError, Message: err.Error()}
 	}
+	if compactedFrom != 0 {
+		// The cursor falls inside a summarized range: exact replay is no longer
+		// available. Tear down and tell the client to resume from the boundary.
+		p.drop(params.StreamID)
+		return api.EventsSubscribeResult{}, compactedError(params.StreamID, compactedFrom)
+	}
 
 	go p.run(conn, pm, replay)
 	return api.EventsSubscribeResult{Tail: tail}, nil
+}
+
+// compactedError builds the cursor_compacted error carrying the resume boundary.
+func compactedError(streamID api.StreamID, boundary uint64) *rpc.Error {
+	data, _ := json.Marshal(api.CursorCompactedData{StreamID: streamID, BoundarySeq: boundary})
+	return &rpc.Error{
+		Code:    api.ErrCursorCompacted,
+		Message: "events: cursor inside a compacted range; resume from the summary boundary",
+		Data:    data,
+	}
 }
 
 func (p *Pusher) unsubscribe(_ context.Context, params api.EventsUnsubscribeParams) (struct{}, error) {

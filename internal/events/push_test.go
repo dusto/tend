@@ -3,6 +3,7 @@ package events
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net"
 	"path/filepath"
 	"testing"
@@ -170,6 +171,44 @@ func TestPushCarriesFields(t *testing.T) {
 	ev := recvEvent(t, rec)
 	if ev.StreamID != "session:a" || ev.Kind != api.KindEvent || ev.Seq != 1 || ev.CursorSeq != 1 {
 		t.Fatalf("push event = %+v", ev)
+	}
+}
+
+func TestSubscribeInsideCompactedRangeReturnsCursorCompacted(t *testing.T) {
+	bus, log, client, rec := newPushPair(t)
+	_ = bus
+	for i := range uint64(10) {
+		if err := log.Append(api.Event{StreamID: "session:a", Seq: i + 1}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := log.AppendSummary("session:a", api.ScopeSession, 3, 7, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	// last_seq=4 is inside the summarized range [3,7]: expect cursor_compacted
+	// with from_seq=3 as the boundary, and no events delivered.
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	var res api.EventsSubscribeResult
+	err := client.Call(ctx, MethodSubscribe, api.EventsSubscribeParams{StreamID: "session:a", LastSeq: 4}, &res)
+	var rerr *rpc.Error
+	if !errors.As(err, &rerr) || rerr.Code != api.ErrCursorCompacted {
+		t.Fatalf("err = %v, want cursor_compacted (%d)", err, api.ErrCursorCompacted)
+	}
+	var data api.CursorCompactedData
+	if jerr := json.Unmarshal(rerr.Data, &data); jerr != nil {
+		t.Fatalf("decode data: %v", jerr)
+	}
+	if data.BoundarySeq != 3 || data.StreamID != "session:a" {
+		t.Errorf("data = %+v, want boundary 3 on session:a", data)
+	}
+	assertNoEvent(t, rec)
+
+	// A cursor before the range replays normally (summary served at 3, then 8..10).
+	subscribe(t, client, "session:a", 2)
+	if got := recvSeqs(t, rec, 4); !equal(got, []uint64{3, 8, 9, 10}) {
+		t.Fatalf("replay seqs = %v, want [3 8 9 10]", got)
 	}
 }
 
