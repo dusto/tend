@@ -31,7 +31,14 @@ jobs:
           fi
       - name: test
         run: go test ./...
-      - name: codegen drift
+
+  codegen:
+    name: codegen drift
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: jdx/mise-action@v2 # installs Go per .mise.toml
+      - name: regenerate and check for drift
         run: |
           go generate ./...
           git diff --exit-code schemas/ docs/
