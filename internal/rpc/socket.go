@@ -108,9 +108,8 @@ func checkOwnedByUser(fi os.FileInfo, name string) error {
 	return nil
 }
 
-// NewEpoch returns a fresh daemon epoch — a random hex string unique per daemon
-// process. It keys client cursor stores and invalidates stale per-stream
-// sequence numbers across daemon restarts; the daemon reports it on connect.
+// NewEpoch returns a fresh daemon epoch: a random hex string, distinct per call,
+// that identifies one daemon process so a restart can be distinguished.
 func NewEpoch() string {
 	var b [16]byte
 	if _, err := rand.Read(b[:]); err != nil {
