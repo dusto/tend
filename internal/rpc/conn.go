@@ -203,9 +203,14 @@ func (c *Conn) dispatch(m *message) {
 			ch <- m // buffered (cap 1); the id is unique so this never blocks
 		}
 	case m.isRequest():
+		// Requests may run concurrently; one slow handler must not block others.
 		go c.serve(m, false)
 	case m.isNotification():
-		go c.serve(m, true)
+		// Notifications are served inline on the read loop so they are handled in
+		// receipt (wire) order — streamed notifications (e.g. event.push) rely on
+		// this. A notification handler must therefore not block on a Call over the
+		// same connection.
+		c.serve(m, true)
 	}
 }
 
@@ -230,7 +235,21 @@ func (c *Conn) handle(req *Request) (any, error) {
 	if c.h == nil {
 		return nil, &Error{Code: CodeMethodNotFound, Message: "method not found: " + req.Method}
 	}
-	return c.h.Handle(c.ctx, req)
+	return c.h.Handle(contextWithConn(c.ctx, c), req)
+}
+
+type connCtxKey struct{}
+
+func contextWithConn(ctx context.Context, c *Conn) context.Context {
+	return context.WithValue(ctx, connCtxKey{}, c)
+}
+
+// ConnFromContext returns the Conn serving the current inbound request, so a
+// handler can send reverse-direction calls or notifications back to the peer.
+// It returns nil if ctx does not carry a Conn.
+func ConnFromContext(ctx context.Context) *Conn {
+	c, _ := ctx.Value(connCtxKey{}).(*Conn)
+	return c
 }
 
 func (c *Conn) closeWith(err error) {

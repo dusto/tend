@@ -33,12 +33,13 @@ func initRepo(t *testing.T) string {
 
 func newServer(t *testing.T) (*Server, string) {
 	t.Helper()
-	path := filepath.Join(t.TempDir(), "tend.sock")
+	dir := t.TempDir()
+	path := filepath.Join(dir, "tend.sock")
 	ln, err := net.Listen("unix", path)
 	if err != nil {
 		t.Fatalf("listen: %v", err)
 	}
-	srv, err := New(ln)
+	srv, err := New(ln, filepath.Join(dir, "events.log"))
 	if err != nil {
 		_ = ln.Close()
 		t.Fatalf("New: %v", err)
@@ -120,7 +121,7 @@ func TestShutdownWaitsForConnGoroutines(t *testing.T) {
 	go func() { _ = srv.Serve() }()
 
 	const n = 8
-	for i := 0; i < n; i++ {
+	for i := range n {
 		client := dial(t, path)
 		// Handshake so the server has accepted and is tracking the conn.
 		if _, err := handshake.Do(testCtx(t), client, api.Versions{}); err != nil {
@@ -203,6 +204,24 @@ func TestWorkspaceCurrentPerConnection(t *testing.T) {
 	}
 	if curA != a {
 		t.Errorf("conn A current = %+v, want its own %+v (not B's)", curA, a)
+	}
+}
+
+// TestEventsSubscribeWired confirms the event subscription methods are routed by
+// the live daemon: a client can subscribe over the socket and gets a Tail back
+// (0 for an empty stream).
+func TestEventsSubscribeWired(t *testing.T) {
+	srv, path := newServer(t)
+	go func() { _ = srv.Serve() }()
+	t.Cleanup(srv.Shutdown)
+
+	client := dial(t, path)
+	var res api.EventsSubscribeResult
+	if err := client.Call(testCtx(t), "events.subscribe", api.EventsSubscribeParams{StreamID: "session:x"}, &res); err != nil {
+		t.Fatalf("events.subscribe: %v", err)
+	}
+	if res.Tail != 0 {
+		t.Errorf("Tail = %d, want 0 for empty stream", res.Tail)
 	}
 }
 

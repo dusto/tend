@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 
 	"github.com/dusto/tend/internal/daemon"
@@ -33,7 +34,7 @@ func run() error {
 		return err
 	}
 
-	srv, err := daemon.New(ln)
+	srv, err := daemon.New(ln, filepath.Join(filepath.Dir(path), "events.log"))
 	if err != nil {
 		_ = ln.Close()
 		return err
