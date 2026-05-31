@@ -100,7 +100,10 @@ func (p *Pusher) unsubscribe(_ context.Context, params api.EventsUnsubscribePara
 	return struct{}{}, nil
 }
 
-// drop stops the pump for streamID (if any) and removes it.
+// drop stops the pump for streamID (if any), releases its bus subscription, and
+// removes it. Closing the subscription here covers the paths where run never
+// starts (a failed or compacted subscribe); Subscription.Close is idempotent
+// with run's own deferred close.
 func (p *Pusher) drop(streamID api.StreamID) {
 	p.mu.Lock()
 	pm := p.subs[streamID]
@@ -108,6 +111,7 @@ func (p *Pusher) drop(streamID api.StreamID) {
 	p.mu.Unlock()
 	if pm != nil {
 		close(pm.stop)
+		pm.sub.Close()
 	}
 }
 

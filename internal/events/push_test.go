@@ -212,6 +212,43 @@ func TestSubscribeInsideCompactedRangeReturnsCursorCompacted(t *testing.T) {
 	}
 }
 
+// TestFailedSubscribeReleasesBusSubscription guards against the leak where a
+// compacted/failed subscribe left an un-drained bus subscriber registered:
+// later publishes would fill its buffer and block. After such a subscribe,
+// publishing well past subBuffer must complete promptly.
+func TestFailedSubscribeReleasesBusSubscription(t *testing.T) {
+	bus, log, client, _ := newPushPair(t)
+	for i := range uint64(5) {
+		if err := log.Append(api.Event{StreamID: "session:a", Seq: i + 1}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := log.AppendSummary("session:a", api.ScopeSession, 2, 4, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	// Subscribe inside the compacted range -> cursor_compacted -> dropped.
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	var res api.EventsSubscribeResult
+	if err := client.Call(ctx, MethodSubscribe, api.EventsSubscribeParams{StreamID: "session:a", LastSeq: 3}, &res); err == nil {
+		t.Fatal("expected cursor_compacted error")
+	}
+
+	done := make(chan struct{})
+	go func() {
+		for range subBuffer + 5 {
+			bus.Publish(api.Event{StreamID: "session:a"})
+		}
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("publishing blocked: failed subscribe leaked a bus subscriber")
+	}
+}
+
 func TestDoubleSubscribeRejected(t *testing.T) {
 	_, _, client, _ := newPushPair(t)
 	subscribe(t, client, "session:a", 0)
