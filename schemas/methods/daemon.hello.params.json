@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$defs": {
+    "Versions": {
+      "properties": {
+        "plugin_to_daemon": {
+          "type": "string"
+        },
+        "daemon_to_editor": {
+          "type": "string"
+        },
+        "daemon_to_client": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "plugin_to_daemon",
+        "daemon_to_editor",
+        "daemon_to_client"
+      ]
+    }
+  },
+  "properties": {
+    "required": {
+      "$ref": "#/$defs/Versions"
+    }
+  },
+  "additionalProperties": false,
+  "type": "object"
+}

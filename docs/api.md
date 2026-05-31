@@ -8,6 +8,8 @@ Schemas live under `schemas/` (`methods/<name>.params.json` / `.result.json`, `e
 
 ### plugin → daemon
 
+- **`daemon.hello`** — Connect handshake: returns the daemon's contract versions and process epoch.
+  - Params: `HelloParams` · Result: `HelloResult`
 - **`workspace.open`** — Open/resolve a workspace from a directory: git-derived identity, or an ephemeral read-only workspace outside git.
   - Params: `WorkspaceOpenParams` · Result: `WorkspaceInfo`
 - **`workspace.current`** — Return the active workspace.
