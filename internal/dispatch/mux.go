@@ -24,12 +24,17 @@ type Func func(ctx context.Context, params json.RawMessage) (any, error)
 // Mux routes inbound requests for a single direction's method set to registered
 // handlers. It implements rpc.Handler, so it can be passed to rpc.NewConn.
 type Mux struct {
-	serves api.Direction
-	known  map[string]api.Method
+	serves    api.Direction
+	known     map[string]api.Method
+	validator *Validator
 
 	mu       sync.RWMutex
 	handlers map[string]Func
 }
+
+// UseValidator enables schema validation of inbound params before dispatch.
+// With no validator set (the default), params are not validated.
+func (m *Mux) UseValidator(v *Validator) { m.validator = v }
 
 // NewMux creates a Mux that serves the given direction's methods (those are the
 // only methods it will accept registrations for or dispatch).
@@ -65,6 +70,11 @@ func (m *Mux) Handle(ctx context.Context, req *rpc.Request) (any, error) {
 	m.mu.RUnlock()
 	if !ok {
 		return nil, &rpc.Error{Code: rpc.CodeMethodNotFound, Message: "method not found: " + req.Method}
+	}
+	if m.validator != nil {
+		if err := m.validator.ValidateParams(req.Method, req.Params); err != nil {
+			return nil, &rpc.Error{Code: rpc.CodeInvalidParams, Message: "invalid params: " + err.Error()}
+		}
 	}
 	return fn(ctx, req.Params)
 }
