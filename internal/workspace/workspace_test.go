@@ -110,6 +110,63 @@ func TestSymlinkedPathNormalizes(t *testing.T) {
 	}
 }
 
+func TestResolveGit(t *testing.T) {
+	repo := initRepo(t)
+	w, err := Resolve(context.Background(), repo)
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if w.Ephemeral {
+		t.Error("git workspace marked ephemeral")
+	}
+	if err := w.EnsureMutable(); err != nil {
+		t.Errorf("git workspace not mutable: %v", err)
+	}
+	if w.Identity != identify(t, repo) {
+		t.Errorf("Resolve identity = %+v, want %+v", w.Identity, identify(t, repo))
+	}
+}
+
+func TestResolveEphemeral(t *testing.T) {
+	dir := t.TempDir()
+	w, err := Resolve(context.Background(), dir)
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if !w.Ephemeral {
+		t.Fatal("non-git workspace not marked ephemeral")
+	}
+	wantID := "ephemeral:" + evalSymlinks(t, dir)
+	if string(w.WorkspaceID) != wantID {
+		t.Errorf("WorkspaceID = %q, want %q", w.WorkspaceID, wantID)
+	}
+	if w.WorktreeRoot != evalSymlinks(t, dir) {
+		t.Errorf("WorktreeRoot = %q, want %q", w.WorktreeRoot, evalSymlinks(t, dir))
+	}
+	if err := w.EnsureMutable(); !errors.Is(err, ErrReadOnly) {
+		t.Errorf("EnsureMutable = %v, want ErrReadOnly", err)
+	}
+}
+
+func TestResolveEphemeralSymlinkNormalizes(t *testing.T) {
+	dir := t.TempDir()
+	link := filepath.Join(t.TempDir(), "link")
+	if err := os.Symlink(dir, link); err != nil {
+		t.Fatalf("symlink: %v", err)
+	}
+	viaLink, err := Resolve(context.Background(), link)
+	if err != nil {
+		t.Fatalf("Resolve(link): %v", err)
+	}
+	viaReal, err := Resolve(context.Background(), dir)
+	if err != nil {
+		t.Fatalf("Resolve(dir): %v", err)
+	}
+	if viaLink != viaReal {
+		t.Errorf("symlinked ephemeral = %+v, want %+v", viaLink, viaReal)
+	}
+}
+
 func TestNotGit(t *testing.T) {
 	_, err := Identify(context.Background(), t.TempDir())
 	if err == nil {

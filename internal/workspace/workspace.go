@@ -27,6 +27,13 @@ const worktreeIDLen = 12
 // git-based identity can be derived.
 var ErrNotGit = errors.New("workspace: not a git working tree")
 
+// ErrReadOnly reports that a mutating operation was attempted on an ephemeral
+// (non-git) workspace, which is read-only.
+var ErrReadOnly = errors.New("workspace: ephemeral workspace is read-only")
+
+// ephemeralPrefix marks a WorkspaceID derived from a directory outside git.
+const ephemeralPrefix = "ephemeral:"
+
 // Identity is a workspace's git-derived identity.
 type Identity struct {
 	// WorkspaceID is the canonical path of the common git dir. Linked worktrees
@@ -36,6 +43,49 @@ type Identity struct {
 	WorktreeRoot string
 	// WorktreeID is a stable short hash of WorktreeRoot.
 	WorktreeID api.WorktreeID
+}
+
+// Workspace is a resolved directory: its identity plus whether it is ephemeral.
+// An ephemeral workspace (a directory outside git) is read-only and exists only
+// in memory; nothing it produces is persisted across daemon restarts.
+type Workspace struct {
+	Identity
+	Ephemeral bool
+}
+
+// EnsureMutable returns ErrReadOnly when w is ephemeral, and nil otherwise.
+// Mutating operations (task, session, file, and pane changes) call it to refuse
+// work outside git.
+func (w Workspace) EnsureMutable() error {
+	if w.Ephemeral {
+		return ErrReadOnly
+	}
+	return nil
+}
+
+// Resolve resolves dir to a Workspace. Inside a git working tree it carries the
+// git identity (see Identify). Outside git it is an ephemeral, read-only
+// workspace whose WorkspaceID is "ephemeral:<canonical-path>".
+func Resolve(ctx context.Context, dir string) (Workspace, error) {
+	id, err := Identify(ctx, dir)
+	if err == nil {
+		return Workspace{Identity: id}, nil
+	}
+	if !errors.Is(err, ErrNotGit) {
+		return Workspace{}, err
+	}
+	root, err := canonical(dir)
+	if err != nil {
+		return Workspace{}, err
+	}
+	return Workspace{
+		Identity: Identity{
+			WorkspaceID:  api.WorkspaceID(ephemeralPrefix + root),
+			WorktreeRoot: root,
+			WorktreeID:   worktreeID(root),
+		},
+		Ephemeral: true,
+	}, nil
 }
 
 // Identify derives the workspace identity for dir. It returns ErrNotGit when dir
@@ -70,10 +120,18 @@ func gitPath(ctx context.Context, dir, flag string) (string, error) {
 		}
 		return "", fmt.Errorf("workspace: running git: %w", err)
 	}
-	path := strings.TrimSpace(stdout.String())
-	resolved, err := filepath.EvalSymlinks(path)
+	return canonical(strings.TrimSpace(stdout.String()))
+}
+
+// canonical returns the absolute path of p with all symlinks resolved.
+func canonical(p string) (string, error) {
+	abs, err := filepath.Abs(p)
 	if err != nil {
-		return "", fmt.Errorf("workspace: resolving %s: %w", path, err)
+		return "", fmt.Errorf("workspace: resolving %s: %w", p, err)
+	}
+	resolved, err := filepath.EvalSymlinks(abs)
+	if err != nil {
+		return "", fmt.Errorf("workspace: resolving %s: %w", abs, err)
 	}
 	return resolved, nil
 }
