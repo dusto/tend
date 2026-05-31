@@ -7,6 +7,7 @@ import (
 	"io"
 	"strconv"
 	"sync"
+	"time"
 )
 
 // ErrClosed is returned by Call/Notify once the connection is closed.
@@ -35,8 +36,8 @@ type Conn struct {
 
 	dec *json.Decoder
 
-	writeMu sync.Mutex
-	enc     *json.Encoder
+	writeSem chan struct{} // cap-1 semaphore guarding enc; allows ctx-aware acquisition
+	enc      *json.Encoder
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -55,14 +56,15 @@ type Conn struct {
 func NewConn(rwc io.ReadWriteCloser, h Handler) *Conn {
 	ctx, cancel := context.WithCancel(context.Background())
 	c := &Conn{
-		rwc:     rwc,
-		h:       h,
-		dec:     json.NewDecoder(rwc),
-		enc:     json.NewEncoder(rwc),
-		ctx:     ctx,
-		cancel:  cancel,
-		done:    make(chan struct{}),
-		pending: make(map[int64]chan *message),
+		rwc:      rwc,
+		h:        h,
+		dec:      json.NewDecoder(rwc),
+		enc:      json.NewEncoder(rwc),
+		writeSem: make(chan struct{}, 1),
+		ctx:      ctx,
+		cancel:   cancel,
+		done:     make(chan struct{}),
+		pending:  make(map[int64]chan *message),
 	}
 	go c.readLoop()
 	return c
@@ -72,6 +74,9 @@ func NewConn(rwc io.ReadWriteCloser, h Handler) *Conn {
 // the connection closes. params and result may be nil. A JSON-RPC error from
 // the peer is returned as *Error.
 func (c *Conn) Call(ctx context.Context, method string, params, result any) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	raw, err := toRaw(params)
 	if err != nil {
 		return err
@@ -82,7 +87,7 @@ func (c *Conn) Call(ctx context.Context, method string, params, result any) erro
 	}
 	defer c.unregister(id)
 
-	if err := c.send(&message{JSONRPC: version, ID: idJSON(id), Method: method, Params: raw}); err != nil {
+	if err := c.send(ctx, &message{JSONRPC: version, ID: idJSON(id), Method: method, Params: raw}); err != nil {
 		return err
 	}
 
@@ -103,12 +108,15 @@ func (c *Conn) Call(ctx context.Context, method string, params, result any) erro
 }
 
 // Notify sends a notification (no response expected).
-func (c *Conn) Notify(_ context.Context, method string, params any) error {
+func (c *Conn) Notify(ctx context.Context, method string, params any) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	raw, err := toRaw(params)
 	if err != nil {
 		return err
 	}
-	return c.send(&message{JSONRPC: version, Method: method, Params: raw})
+	return c.send(ctx, &message{JSONRPC: version, Method: method, Params: raw})
 }
 
 // Close shuts down the connection; pending and future calls return ErrClosed.
@@ -139,13 +147,27 @@ func (c *Conn) unregister(id int64) {
 	c.mu.Unlock()
 }
 
-func (c *Conn) send(m *message) error {
-	c.writeMu.Lock()
-	defer c.writeMu.Unlock()
+func (c *Conn) send(ctx context.Context, m *message) error {
+	// Already-cancelled context must never put bytes on the wire.
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	// Acquire the write token, respecting ctx and connection close.
 	select {
+	case <-ctx.Done():
+		return ctx.Err()
 	case <-c.done:
 		return c.err()
-	default:
+	case c.writeSem <- struct{}{}:
+	}
+	defer func() { <-c.writeSem }()
+
+	// Honor a ctx deadline during the write when the conn supports it.
+	if dl, ok := ctx.Deadline(); ok {
+		if dc, ok := c.rwc.(interface{ SetWriteDeadline(time.Time) error }); ok {
+			_ = dc.SetWriteDeadline(dl)
+			defer func() { _ = dc.SetWriteDeadline(time.Time{}) }()
+		}
 	}
 	return c.enc.Encode(m)
 }
@@ -201,7 +223,7 @@ func (c *Conn) serve(m *message, notification bool) {
 	} else {
 		resp.Result = raw
 	}
-	_ = c.send(resp)
+	_ = c.send(c.ctx, resp)
 }
 
 func (c *Conn) handle(req *Request) (any, error) {

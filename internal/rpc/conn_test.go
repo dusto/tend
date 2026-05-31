@@ -169,6 +169,30 @@ func TestMethodNotFound(t *testing.T) {
 	}
 }
 
+func TestCanceledContextDoesNotDispatch(t *testing.T) {
+	called := make(chan struct{}, 1)
+	h := HandlerFunc(func(_ context.Context, _ *Request) (any, error) {
+		called <- struct{}{}
+		return nil, nil
+	})
+	a, _ := pair(t, nil, h)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	if err := a.Call(ctx, "x", nil, nil); !errors.Is(err, context.Canceled) {
+		t.Fatalf("Call: want context.Canceled, got %v", err)
+	}
+	if err := a.Notify(ctx, "x", nil); !errors.Is(err, context.Canceled) {
+		t.Fatalf("Notify: want context.Canceled, got %v", err)
+	}
+	select {
+	case <-called:
+		t.Fatal("handler invoked despite a canceled context")
+	case <-time.After(100 * time.Millisecond):
+	}
+}
+
 func TestCallAfterClose(t *testing.T) {
 	a, _ := pair(t, nil, nil)
 	_ = a.Close()
