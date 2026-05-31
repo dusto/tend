@@ -65,9 +65,10 @@ These are deliberate. Do not introduce the rejected alternatives without an expl
 
 ## Coding guidance (skill index)
 
-The following Go practice areas are the standards for this repo. They are encoded as
-Claude Code skills (from `samber/cc-skills-golang`), but the expectations apply under any
-harness — follow them even if the skill itself isn't loaded.
+The following Go practice areas are the standards for this repo. They are **vendored** as
+skills under `.claude/skills/` (from `samber/cc-skills-golang`, MIT, pinned — see
+`.claude/skills/ATTRIBUTION.md`) so they work across harnesses, not just Claude Code. The
+expectations apply under any harness — follow them even if the skill isn't auto-loaded.
 
 **Core**
 
@@ -81,6 +82,7 @@ harness — follow them even if the skill itself isn't loaded.
 - `golang-testing` — table-driven, fakes, goleak
 - `golang-lint`, `golang-continuous-integration`
 - `golang-safety` — nil/panic/concurrent-map/numeric safety
+- `golang-security` — injection (esp. `pane.run` command exec), socket/file safety, secrets
 - `golang-documentation`, `golang-modernize`, `golang-dependency-management`
 
 **Also in scope**
@@ -88,6 +90,7 @@ harness — follow them even if the skill itself isn't loaded.
 - `golang-performance`, `golang-benchmark` — for the event bus / process pool hot paths
 - `golang-observability`, `golang-samber-slog` — structured logging
 - `golang-database` — SQLite code-indexing store
+- `golang-troubleshooting` — debugging the concurrent daemon (pprof, delve, race, GODEBUG)
 
 **Deliberately excluded** (do not reach for these): cobra/viper, testify, gRPC, GraphQL,
 Swagger, DI frameworks (wire/dig/fx/samber-do), and the other `samber-*` libraries
