@@ -18,28 +18,26 @@ const (
 	MethodPush        = "event.push"
 )
 
+// batch bounds how many records one tailer read returns, so catch-up over a
+// busy stream proceeds in bounded steps rather than materializing the whole
+// backlog at once.
+const batch = 64
+
 // Pusher serves the event subscription methods for one connection. On subscribe
-// it replays a stream's history from the log, then forwards live bus events to
-// the client as event.push notifications, one ordered pump goroutine per
-// stream. It is bound to the connection that served the subscribe request and
-// is safe for concurrent use.
+// it starts a single tailer per stream that replays the log forward from the
+// client's cursor and then follows live appends, delivering each record as an
+// event.push notification. It is bound to the connection that served the
+// subscribe request and is safe for concurrent use.
 type Pusher struct {
-	bus *Bus
-	log *Log
+	store *Store
 
 	mu   sync.Mutex
-	subs map[api.StreamID]*pump
+	subs map[api.StreamID]*Sub
 }
 
-// pump is one stream's live forwarding goroutine state.
-type pump struct {
-	sub  *Subscription
-	stop chan struct{}
-}
-
-// NewPusher returns a Pusher backed by bus (live events) and log (replay).
-func NewPusher(bus *Bus, log *Log) *Pusher {
-	return &Pusher{bus: bus, log: log, subs: make(map[api.StreamID]*pump)}
+// NewPusher returns a Pusher backed by store.
+func NewPusher(store *Store) *Pusher {
+	return &Pusher{store: store, subs: make(map[api.StreamID]*Sub)}
 }
 
 // RegisterClient installs events.subscribe and events.unsubscribe on m, backed
@@ -62,27 +60,73 @@ func (p *Pusher) subscribe(ctx context.Context, params api.EventsSubscribeParams
 		p.mu.Unlock()
 		return api.EventsSubscribeResult{}, &rpc.Error{Code: rpc.CodeInvalidRequest, Message: "events: already subscribed to " + string(params.StreamID)}
 	}
-	// Subscribe to live events before reading the log so events published during
-	// replay are buffered and delivered after it, never dropped.
-	pm := &pump{sub: p.bus.Subscribe(params.StreamID), stop: make(chan struct{})}
-	p.subs[params.StreamID] = pm
+	// Register for live wakeups before reading, so appends during the first read
+	// are not missed: the tailer re-reads to the tail after each wake.
+	sub := p.store.Subscribe(params.StreamID)
+	p.subs[params.StreamID] = sub
 	p.mu.Unlock()
 
-	tail := p.log.HighWater(params.StreamID)
-	replay, compactedFrom, err := p.log.Replay(params.StreamID, params.LastSeq)
-	if err != nil {
+	// Reject a cursor that falls inside a compacted range before delivering
+	// anything; the client resumes from the summary boundary.
+	if _, compactedFrom, err := p.store.Read(params.StreamID, params.LastSeq, 1); err != nil {
 		p.drop(params.StreamID)
 		return api.EventsSubscribeResult{}, &rpc.Error{Code: rpc.CodeInternalError, Message: err.Error()}
-	}
-	if compactedFrom != 0 {
-		// The cursor falls inside a summarized range: exact replay is no longer
-		// available. Tear down and tell the client to resume from the boundary.
+	} else if compactedFrom != 0 {
 		p.drop(params.StreamID)
 		return api.EventsSubscribeResult{}, compactedError(params.StreamID, compactedFrom)
 	}
 
-	go p.run(conn, pm, replay)
+	tail := p.store.HighWater(params.StreamID)
+	go p.tail(conn, sub, params.LastSeq)
 	return api.EventsSubscribeResult{Tail: tail}, nil
+}
+
+func (p *Pusher) unsubscribe(_ context.Context, params api.EventsUnsubscribeParams) (struct{}, error) {
+	p.drop(params.StreamID)
+	return struct{}{}, nil
+}
+
+// drop stops the tailer for streamID (if any) and removes it.
+func (p *Pusher) drop(streamID api.StreamID) {
+	p.mu.Lock()
+	sub := p.subs[streamID]
+	delete(p.subs, streamID)
+	p.mu.Unlock()
+	if sub != nil {
+		sub.Close()
+	}
+}
+
+// tail is the single per-stream reader: it reads the log forward from cursor in
+// bounded batches until caught up, then waits for a wake and reads again. Replay
+// and live delivery are the same path, so live events are delivered strictly
+// after replayed history with no drops or reordering. It exits when the
+// subscription is closed or the connection ends.
+func (p *Pusher) tail(conn *rpc.Conn, sub *Sub, cursor uint64) {
+	defer sub.Close()
+	for {
+		records, _, err := p.store.Read(sub.streamID, cursor, batch)
+		if err != nil {
+			return
+		}
+		if len(records) > 0 {
+			for _, ev := range records {
+				if !push(conn, ev) {
+					return
+				}
+				cursor = ev.CursorSeq
+			}
+			continue // keep reading until the backlog is drained
+		}
+		// Caught up to the tail: wait for the next append (or stop).
+		select {
+		case <-sub.Stop():
+			return
+		case <-conn.Done():
+			return
+		case <-sub.Wake():
+		}
+	}
 }
 
 // compactedError builds the cursor_compacted error carrying the resume boundary.
@@ -92,57 +136,6 @@ func compactedError(streamID api.StreamID, boundary uint64) *rpc.Error {
 		Code:    api.ErrCursorCompacted,
 		Message: "events: cursor inside a compacted range; resume from the summary boundary",
 		Data:    data,
-	}
-}
-
-func (p *Pusher) unsubscribe(_ context.Context, params api.EventsUnsubscribeParams) (struct{}, error) {
-	p.drop(params.StreamID)
-	return struct{}{}, nil
-}
-
-// drop stops the pump for streamID (if any), releases its bus subscription, and
-// removes it. Closing the subscription here covers the paths where run never
-// starts (a failed or compacted subscribe); Subscription.Close is idempotent
-// with run's own deferred close.
-func (p *Pusher) drop(streamID api.StreamID) {
-	p.mu.Lock()
-	pm := p.subs[streamID]
-	delete(p.subs, streamID)
-	p.mu.Unlock()
-	if pm != nil {
-		close(pm.stop)
-		pm.sub.Close()
-	}
-}
-
-// run replays history then forwards live events for one stream, in order, until
-// the subscription is dropped or the connection closes. Live events at or below
-// the last delivered cursor (already covered by replay) are skipped.
-func (p *Pusher) run(conn *rpc.Conn, pm *pump, replay []api.Event) {
-	defer pm.sub.Close()
-
-	var delivered uint64
-	for _, ev := range replay {
-		if !push(conn, ev) {
-			return
-		}
-		delivered = ev.CursorSeq
-	}
-	for {
-		select {
-		case <-pm.stop:
-			return
-		case <-conn.Done():
-			return
-		case ev := <-pm.sub.C:
-			if ev.Seq <= delivered {
-				continue
-			}
-			if !push(conn, ev) {
-				return
-			}
-			delivered = ev.CursorSeq
-		}
 	}
 }
 
