@@ -11,6 +11,7 @@ import (
 
 	"github.com/dusto/tend/api"
 	"github.com/dusto/tend/internal/dispatch"
+	"github.com/dusto/tend/internal/events"
 	"github.com/dusto/tend/internal/handshake"
 	"github.com/dusto/tend/internal/rpc"
 	"github.com/dusto/tend/internal/workspace"
@@ -22,6 +23,8 @@ type Server struct {
 	ln        net.Listener
 	epoch     string
 	validator *dispatch.Validator
+	bus       *events.Bus
+	log       *events.Log
 
 	mu     sync.Mutex
 	conns  map[*rpc.Conn]struct{}
@@ -30,30 +33,43 @@ type Server struct {
 }
 
 // New builds a Server over ln with a fresh per-process epoch and the params
-// validator available for the build. It validates handler registration up front
-// so a registration bug fails at startup rather than per connection.
-func New(ln net.Listener) (*Server, error) {
+// validator available for the build. It opens the durable event log at logPath
+// and validates handler registration up front so a registration bug fails at
+// startup rather than per connection.
+func New(ln net.Listener, logPath string) (*Server, error) {
+	log, err := events.OpenLog(logPath)
+	if err != nil {
+		return nil, err
+	}
 	s := &Server{
 		ln:        ln,
 		epoch:     rpc.NewEpoch(),
 		validator: newValidator(),
+		bus:       events.NewBus(),
+		log:       log,
 		conns:     make(map[*rpc.Conn]struct{}),
 	}
 	if _, err := s.newMux(); err != nil {
+		_ = log.Close()
 		return nil, err
 	}
 	return s, nil
 }
 
 // newMux builds a fresh plugin->daemon Mux for one connection: it registers the
-// connect handshake and the workspace methods (with a per-connection workspace
-// Manager) and enables params validation when a validator is available.
+// connect handshake, the workspace methods (with a per-connection workspace
+// Manager), and the event subscription methods (with a per-connection Pusher
+// over the shared bus and log), and enables params validation when a validator
+// is available.
 func (s *Server) newMux() (*dispatch.Mux, error) {
 	mux := dispatch.NewMux(api.PluginToDaemon)
 	if err := handshake.Register(mux, s.epoch); err != nil {
 		return nil, err
 	}
 	if err := workspace.Register(mux, workspace.NewManager(s.epoch)); err != nil {
+		return nil, err
+	}
+	if err := events.RegisterClient(mux, events.NewPusher(s.bus, s.log)); err != nil {
 		return nil, err
 	}
 	if s.validator != nil {
@@ -115,6 +131,7 @@ func (s *Server) Shutdown() {
 		_ = c.Close()
 	}
 	s.wg.Wait()
+	_ = s.log.Close()
 }
 
 func (s *Server) add(c *rpc.Conn) bool {

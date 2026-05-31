@@ -230,7 +230,21 @@ func (c *Conn) handle(req *Request) (any, error) {
 	if c.h == nil {
 		return nil, &Error{Code: CodeMethodNotFound, Message: "method not found: " + req.Method}
 	}
-	return c.h.Handle(c.ctx, req)
+	return c.h.Handle(contextWithConn(c.ctx, c), req)
+}
+
+type connCtxKey struct{}
+
+func contextWithConn(ctx context.Context, c *Conn) context.Context {
+	return context.WithValue(ctx, connCtxKey{}, c)
+}
+
+// ConnFromContext returns the Conn serving the current inbound request, so a
+// handler can send reverse-direction calls or notifications back to the peer.
+// It returns nil if ctx does not carry a Conn.
+func ConnFromContext(ctx context.Context) *Conn {
+	c, _ := ctx.Value(connCtxKey{}).(*Conn)
+	return c
 }
 
 func (c *Conn) closeWith(err error) {
