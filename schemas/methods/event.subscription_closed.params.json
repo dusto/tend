@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "properties": {
+    "stream_id": {
+      "type": "string"
+    },
+    "reason": {
+      "type": "string"
+    },
+    "last_sent_seq": {
+      "type": "integer"
+    }
+  },
+  "additionalProperties": false,
+  "type": "object",
+  "required": [
+    "stream_id",
+    "reason"
+  ]
+}
