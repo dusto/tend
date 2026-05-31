@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "properties": {
+    "stream_id": {
+      "type": "string"
+    },
+    "boundary_seq": {
+      "type": "integer"
+    }
+  },
+  "additionalProperties": false,
+  "type": "object",
+  "required": [
+    "stream_id",
+    "boundary_seq"
+  ]
+}

@@ -1,0 +1,63 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$defs": {
+    "SummaryInfo": {
+      "properties": {
+        "from_seq": {
+          "type": "integer"
+        },
+        "to_seq": {
+          "type": "integer"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "from_seq",
+        "to_seq"
+      ]
+    }
+  },
+  "properties": {
+    "stream_id": {
+      "type": "string"
+    },
+    "scope": {
+      "type": "string"
+    },
+    "kind": {
+      "type": "string"
+    },
+    "seq": {
+      "type": "integer"
+    },
+    "cursor_seq": {
+      "type": "integer"
+    },
+    "type": {
+      "type": "string"
+    },
+    "ts": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "worktree_root": {
+      "type": "string"
+    },
+    "payload": true,
+    "summary": {
+      "$ref": "#/$defs/SummaryInfo"
+    }
+  },
+  "additionalProperties": false,
+  "type": "object",
+  "required": [
+    "stream_id",
+    "scope",
+    "kind",
+    "seq",
+    "cursor_seq",
+    "type",
+    "ts"
+  ]
+}
