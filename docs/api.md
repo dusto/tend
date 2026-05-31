@@ -60,3 +60,5 @@ TEND-specific JSON-RPC error codes (carried as the error `code`, with typed `dat
   - Data: _(none)_
 - **`1004` `no_workspace_mutation`** — A mutating operation was attempted outside git (only an ephemeral read-only workspace is available).
   - Data: _(none)_
+- **`1005` `no_active_workspace`** — workspace.current was called before any workspace was opened on the connection.
+  - Data: _(none)_
