@@ -45,3 +45,16 @@ Schemas live under `schemas/` (`methods/<name>.params.json` / `.result.json`, `e
   - Payload: `ToolCallUpdate`
 - **`turn_end`** (`session` stream) — The agent's turn ended.
   - Payload: `TurnEnd`
+
+## Errors
+
+TEND-specific JSON-RPC error codes (carried as the error `code`, with typed `data`).
+
+- **`1001` `cursor_compacted`** — Stream cursor predates the exact-replay retention window; resume at the summary boundary.
+  - Data: `CursorCompactedData`
+- **`1002` `conflict`** — A file mutation's cited base no longer matches (disk hash or buffer changedtick changed).
+  - Data: `ConflictData`
+- **`1003` `editor_unavailable`** — An editor-local capability was requested but no editor holds the session's binding.
+  - Data: _(none)_
+- **`1004` `no_workspace_mutation`** — A mutating operation was attempted outside git (only an ephemeral read-only workspace is available).
+  - Data: _(none)_

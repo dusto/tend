@@ -33,7 +33,7 @@ func run() error {
 	reflector := &jsonschema.Reflector{ExpandedStruct: true, Anonymous: true}
 
 	schemas := filepath.Join(root, "schemas")
-	for _, sub := range []string{"methods", "events"} {
+	for _, sub := range []string{"methods", "events", "errors"} {
 		if err := resetDir(filepath.Join(schemas, sub)); err != nil {
 			return err
 		}
@@ -60,6 +60,15 @@ func run() error {
 			continue
 		}
 		if err := writeSchema(reflector, filepath.Join(schemas, "events", e.Type+".json"), e.Payload); err != nil {
+			return err
+		}
+	}
+	// Error data types.
+	for _, e := range api.ErrorDefs {
+		if e.Data == nil {
+			continue
+		}
+		if err := writeSchema(reflector, filepath.Join(schemas, "errors", e.Name+".json"), e.Data); err != nil {
 			return err
 		}
 	}
@@ -113,6 +122,18 @@ func writeDocs(path string) error {
 			payload = "`" + typeName(e.Payload) + "`"
 		}
 		fmt.Fprintf(&b, "- **`%s`** (`%s` stream) — %s\n  - Payload: %s\n", e.Type, e.Scope, e.Summary, payload)
+	}
+
+	b.WriteString("\n## Errors\n\n")
+	b.WriteString("TEND-specific JSON-RPC error codes (carried as the error `code`, with typed `data`).\n\n")
+	errs := append([]api.ErrorDef(nil), api.ErrorDefs...)
+	sort.Slice(errs, func(i, j int) bool { return errs[i].Code < errs[j].Code })
+	for _, e := range errs {
+		data := "_(none)_"
+		if e.Data != nil {
+			data = "`" + typeName(e.Data) + "`"
+		}
+		fmt.Fprintf(&b, "- **`%d` `%s`** — %s\n  - Data: %s\n", e.Code, e.Name, e.Summary, data)
 	}
 
 	return os.WriteFile(path, []byte(b.String()), 0o644)
