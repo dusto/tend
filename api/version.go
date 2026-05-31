@@ -1,0 +1,104 @@
+package api
+
+import (
+	"fmt"
+	"strconv"
+	"strings"
+)
+
+// Contract version of each method set, as MAJOR.MINOR.PATCH. The sets version
+// independently: bump a set on a change to that set (major for a breaking change).
+const (
+	PluginToDaemonVersion = "0.1.0"
+	DaemonToEditorVersion = "0.1.0"
+	DaemonToClientVersion = "0.1.0"
+)
+
+// Versions reports the contract version of each method set.
+type Versions struct {
+	PluginToDaemon string `json:"plugin_to_daemon"`
+	DaemonToEditor string `json:"daemon_to_editor"`
+	DaemonToClient string `json:"daemon_to_client"`
+}
+
+// CurrentVersions returns the versions this build implements.
+func CurrentVersions() Versions {
+	return Versions{
+		PluginToDaemon: PluginToDaemonVersion,
+		DaemonToEditor: DaemonToEditorVersion,
+		DaemonToClient: DaemonToClientVersion,
+	}
+}
+
+// Satisfies reports whether have meets every version required by req. Empty
+// fields in req are not checked. A set is compatible when it shares the major
+// version and have >= req. It returns a descriptive error on the first
+// incompatible set, or nil when all required sets are satisfied.
+func (have Versions) Satisfies(req Versions) error {
+	for _, c := range []struct{ name, have, req string }{
+		{"plugin_to_daemon", have.PluginToDaemon, req.PluginToDaemon},
+		{"daemon_to_editor", have.DaemonToEditor, req.DaemonToEditor},
+		{"daemon_to_client", have.DaemonToClient, req.DaemonToClient},
+	} {
+		if c.req == "" {
+			continue
+		}
+		ok, err := versionAtLeast(c.have, c.req)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return fmt.Errorf("api: %s version %s does not satisfy required %s", c.name, c.have, c.req)
+		}
+	}
+	return nil
+}
+
+// versionAtLeast reports whether have >= req and shares its major version.
+func versionAtLeast(have, req string) (bool, error) {
+	h, err := parseVersion(have)
+	if err != nil {
+		return false, err
+	}
+	r, err := parseVersion(req)
+	if err != nil {
+		return false, err
+	}
+	if h[0] != r[0] {
+		return false, nil // different major: incompatible
+	}
+	for i := range 3 {
+		if h[i] != r[i] {
+			return h[i] > r[i], nil
+		}
+	}
+	return true, nil
+}
+
+func parseVersion(s string) ([3]int, error) {
+	parts := strings.SplitN(s, ".", 3)
+	var v [3]int
+	if len(parts) != 3 {
+		return v, fmt.Errorf("api: malformed version %q", s)
+	}
+	for i, p := range parts {
+		n, err := strconv.Atoi(p)
+		if err != nil {
+			return v, fmt.Errorf("api: malformed version %q", s)
+		}
+		v[i] = n
+	}
+	return v, nil
+}
+
+// HelloParams is the connect-handshake request. Required carries the client's
+// minimum acceptable versions per set; empty fields are not checked.
+type HelloParams struct {
+	Required Versions `json:"required,omitzero"`
+}
+
+// HelloResult reports the daemon's contract versions and process epoch.
+type HelloResult struct {
+	Versions    Versions    `json:"versions"`
+	DaemonEpoch DaemonEpoch `json:"daemon_epoch"`
+}

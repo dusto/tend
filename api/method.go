@@ -28,6 +28,7 @@ type Method struct {
 // features land.
 var Methods = []Method{
 	// plugin -> daemon
+	{Name: "daemon.hello", Direction: PluginToDaemon, Params: HelloParams{}, Result: HelloResult{}, Summary: "Connect handshake: returns the daemon's contract versions and process epoch."},
 	{Name: "workspace.open", Direction: PluginToDaemon, Params: WorkspaceOpenParams{}, Result: WorkspaceInfo{}, Summary: "Open/resolve a workspace from a directory: git-derived identity, or an ephemeral read-only workspace outside git."},
 	{Name: "workspace.current", Direction: PluginToDaemon, Params: WorkspaceCurrentParams{}, Result: WorkspaceInfo{}, Summary: "Return the active workspace."},
 	{Name: "events.subscribe", Direction: PluginToDaemon, Params: EventsSubscribeParams{}, Result: EventsSubscribeResult{}, Summary: "Subscribe to one logical stream from a cursor; replays then follows live. May return cursor_compacted."},

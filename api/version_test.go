@@ -1,0 +1,33 @@
+package api
+
+import "testing"
+
+func TestVersionsSatisfies(t *testing.T) {
+	cur := CurrentVersions() // 0.1.0 for every set
+	cases := []struct {
+		name string
+		req  Versions
+		ok   bool
+	}{
+		{"equal", cur, true},
+		{"empty requires nothing", Versions{}, true},
+		{"lower minor required", Versions{PluginToDaemon: "0.0.9"}, true},
+		{"equal patch", Versions{PluginToDaemon: "0.1.0"}, true},
+		{"higher minor required", Versions{PluginToDaemon: "0.2.0"}, false},
+		{"higher patch required", Versions{PluginToDaemon: "0.1.1"}, false},
+		{"different major", Versions{PluginToDaemon: "1.0.0"}, false},
+		{"other set incompatible", Versions{DaemonToEditor: "2.0.0"}, false},
+	}
+	for _, c := range cases {
+		err := cur.Satisfies(c.req)
+		if (err == nil) != c.ok {
+			t.Errorf("%s: Satisfies err=%v, want ok=%v", c.name, err, c.ok)
+		}
+	}
+}
+
+func TestVersionsSatisfiesMalformed(t *testing.T) {
+	if err := (Versions{PluginToDaemon: "x.y"}).Satisfies(Versions{PluginToDaemon: "0.1.0"}); err == nil {
+		t.Fatal("malformed version should error")
+	}
+}
