@@ -33,10 +33,13 @@ type Error struct {
 	Data    json.RawMessage `json:"data,omitempty"`
 }
 
-// JSON-RPC 2.0 reserved error codes used by the transport.
+// Reserved JSON-RPC 2.0 error codes.
 const (
-	codeMethodNotFound = -32601
-	codeInternalError  = -32603
+	CodeParseError     = -32700
+	CodeInvalidRequest = -32600
+	CodeMethodNotFound = -32601
+	CodeInvalidParams  = -32602
+	CodeInternalError  = -32603
 )
 
 func (e *Error) Error() string {

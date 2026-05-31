@@ -164,7 +164,7 @@ func TestMethodNotFound(t *testing.T) {
 	a, _ := pair(t, nil, nil) // b has no handler
 	err := a.Call(testCtx(t), "nope", nil, nil)
 	var rpcErr *Error
-	if !errors.As(err, &rpcErr) || rpcErr.Code != codeMethodNotFound {
+	if !errors.As(err, &rpcErr) || rpcErr.Code != CodeMethodNotFound {
 		t.Fatalf("want method-not-found, got %v", err)
 	}
 }
