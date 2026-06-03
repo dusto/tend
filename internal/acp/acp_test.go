@@ -25,8 +25,42 @@ func TestMain(m *testing.M) {
 		// Never reply to anything; drain stdin until the client closes it.
 		_, _ = io.Copy(io.Discard, os.Stdin)
 		return
+	case "codex":
+		runFakeCodex()
+		return
 	}
 	os.Exit(m.Run())
+}
+
+// runFakeCodex is a fuller fake ACP agent: it serves initialize and session/new,
+// and on session/prompt streams a few session/update notifications before
+// returning end_turn. It models the milestone-0 Codex turn shape.
+func runFakeCodex() {
+	h := rpc.HandlerFunc(func(ctx context.Context, req *rpc.Request) (any, error) {
+		switch req.Method {
+		case "initialize":
+			return InitializeResult{ProtocolVersion: ProtocolVersion}, nil
+		case MethodNewSession:
+			return NewSessionResult{SessionID: "sess-1"}, nil
+		case MethodPrompt:
+			var p PromptParams
+			_ = json.Unmarshal(req.Params, &p)
+			conn := rpc.ConnFromContext(ctx)
+			send := func(body map[string]any) {
+				_ = conn.Notify(context.Background(), SessionUpdateMethod, map[string]any{
+					"sessionId": p.SessionID, "update": body,
+				})
+			}
+			send(map[string]any{"sessionUpdate": "agent_message_chunk", "content": map[string]any{"text": "hello "}})
+			send(map[string]any{"sessionUpdate": "agent_message_chunk", "content": map[string]any{"text": "world"}})
+			send(map[string]any{"sessionUpdate": "tool_call", "toolCallId": "t1", "title": "read_file"})
+			send(map[string]any{"sessionUpdate": "tool_call_update", "toolCallId": "t1", "status": "completed"})
+			return PromptResult{StopReason: "end_turn"}, nil
+		}
+		return nil, &rpc.Error{Code: rpc.CodeMethodNotFound, Message: "fake codex: " + req.Method}
+	})
+	conn := rpc.NewConn(&fakeStdio{}, h)
+	<-conn.Done()
 }
 
 // runFakeAgent serves the ACP initialize handshake over stdio and exits when the
