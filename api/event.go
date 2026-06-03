@@ -13,7 +13,6 @@ const (
 	ScopeSession   EventScope = "session"
 	ScopeWorkspace EventScope = "workspace" // repo-wide, shared by all worktrees
 	ScopeWorktree  EventScope = "worktree"
-	ScopeProvider  EventScope = "provider"
 	ScopePane      EventScope = "pane"
 )
 
@@ -78,7 +77,7 @@ var EventDefs = []EventDef{
 	{Type: "approval_requested", Scope: ScopeSession, Payload: ApprovalRequested{}, Summary: "A mutating action is awaiting approval."},
 	{Type: "approval_resolved", Scope: ScopeSession, Payload: ApprovalResolved{}, Summary: "A pending approval was resolved."},
 	{Type: "agent_error", Scope: ScopeSession, Payload: AgentError{}, Summary: "A session's turn failed (e.g. its provider process exited mid-turn)."},
-	{Type: "provider_stopped", Scope: ScopeProvider, Payload: ProviderStopped{}, Summary: "A provider process left the pool (exit or crash)."},
+	{Type: "provider_stopped", Scope: ScopeWorkspace, Payload: ProviderStopped{}, Summary: "A provider process left the pool (exit or crash). Repo-wide: delivered on the workspace stream."},
 	{Type: "provider_notification", Scope: ScopeSession, Payload: ProviderNotification{}, Summary: "A provider-private ACP notification preserved verbatim as a metadata event."},
 }
 

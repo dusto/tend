@@ -314,7 +314,7 @@ func (p *Pool) watch(key Key, e *procEntry) {
 		if retiring {
 			return
 		}
-		p.emitStopped(key.Provider, "provider process exited")
+		p.emitStopped(key, "provider process exited")
 		if busy && sessionID != "" {
 			p.emitAgentError(sessionID, "provider process exited mid-turn")
 		}
@@ -404,14 +404,16 @@ func idleEntry(kp *keyPool) *procEntry {
 	return nil
 }
 
-func (p *Pool) emitStopped(provider api.ProviderID, reason string) {
+// emitStopped publishes provider_stopped on the workspace stream: a provider
+// leaving the pool is a repo-wide event, shared by all worktrees.
+func (p *Pool) emitStopped(key Key, reason string) {
 	if p.emit == nil {
 		return
 	}
-	payload, _ := json.Marshal(api.ProviderStopped{ProviderID: provider, Reason: reason})
+	payload, _ := json.Marshal(api.ProviderStopped{ProviderID: key.Provider, Reason: reason})
 	_, _ = p.emit.Publish(api.Event{
-		StreamID: api.StreamID("provider:" + provider),
-		Scope:    api.ScopeProvider,
+		StreamID: api.WorkspaceStream(key.Workspace),
+		Scope:    api.ScopeWorkspace,
 		Type:     "provider_stopped",
 		Payload:  payload,
 	})
@@ -423,7 +425,7 @@ func (p *Pool) emitAgentError(session api.SessionID, msg string) {
 	}
 	payload, _ := json.Marshal(api.AgentError{SessionID: session, Message: msg})
 	_, _ = p.emit.Publish(api.Event{
-		StreamID: api.StreamID("session:" + session),
+		StreamID: api.SessionStream(session),
 		Scope:    api.ScopeSession,
 		Type:     "agent_error",
 		Payload:  payload,

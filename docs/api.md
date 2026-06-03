@@ -45,7 +45,7 @@ Schemas live under `schemas/` (`methods/<name>.params.json` / `.result.json`, `e
   - Payload: `ApprovalResolved`
 - **`provider_notification`** (`session` stream) — A provider-private ACP notification preserved verbatim as a metadata event.
   - Payload: `ProviderNotification`
-- **`provider_stopped`** (`provider` stream) — A provider process left the pool (exit or crash).
+- **`provider_stopped`** (`workspace` stream) — A provider process left the pool (exit or crash). Repo-wide: delivered on the workspace stream.
   - Payload: `ProviderStopped`
 - **`tool_call`** (`session` stream) — An agent tool call started.
   - Payload: `ToolCall`
