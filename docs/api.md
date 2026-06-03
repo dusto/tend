@@ -35,12 +35,16 @@ Schemas live under `schemas/` (`methods/<name>.params.json` / `.result.json`, `e
 
 ## Events
 
+- **`agent_error`** (`session` stream) — A session's turn failed (e.g. its provider process exited mid-turn).
+  - Payload: `AgentError`
 - **`agent_message_chunk`** (`session` stream) — A streamed chunk of an agent message.
   - Payload: `AgentMessageChunk`
 - **`approval_requested`** (`session` stream) — A mutating action is awaiting approval.
   - Payload: `ApprovalRequested`
 - **`approval_resolved`** (`session` stream) — A pending approval was resolved.
   - Payload: `ApprovalResolved`
+- **`provider_stopped`** (`provider` stream) — A provider process left the pool (exit or crash).
+  - Payload: `ProviderStopped`
 - **`tool_call`** (`session` stream) — An agent tool call started.
   - Payload: `ToolCall`
 - **`tool_call_update`** (`session` stream) — Progress update for a tool call.

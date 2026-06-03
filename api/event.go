@@ -77,6 +77,8 @@ var EventDefs = []EventDef{
 	{Type: "turn_end", Scope: ScopeSession, Payload: TurnEnd{}, Summary: "The agent's turn ended."},
 	{Type: "approval_requested", Scope: ScopeSession, Payload: ApprovalRequested{}, Summary: "A mutating action is awaiting approval."},
 	{Type: "approval_resolved", Scope: ScopeSession, Payload: ApprovalResolved{}, Summary: "A pending approval was resolved."},
+	{Type: "agent_error", Scope: ScopeSession, Payload: AgentError{}, Summary: "A session's turn failed (e.g. its provider process exited mid-turn)."},
+	{Type: "provider_stopped", Scope: ScopeProvider, Payload: ProviderStopped{}, Summary: "A provider process left the pool (exit or crash)."},
 }
 
 // --- Event payloads (initial set) ---
@@ -119,5 +121,17 @@ type ApprovalResolved struct {
 	SessionID  SessionID  `json:"session_id"`
 	ApprovalID ApprovalID `json:"approval_id"`
 	Approved   bool       `json:"approved"`
+	Reason     string     `json:"reason,omitempty"`
+}
+
+// AgentError signals that a session's turn failed.
+type AgentError struct {
+	SessionID SessionID `json:"session_id"`
+	Message   string    `json:"message"`
+}
+
+// ProviderStopped signals that a provider process left the pool.
+type ProviderStopped struct {
+	ProviderID ProviderID `json:"provider_id"`
 	Reason     string     `json:"reason,omitempty"`
 }
