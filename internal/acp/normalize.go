@@ -150,7 +150,7 @@ func (n *Normalizer) publish(ev api.Event) {
 func sessionEvent(sessionID, typ string, payload any) api.Event {
 	raw, _ := json.Marshal(payload)
 	return api.Event{
-		StreamID: api.StreamID("session:" + sessionID),
+		StreamID: api.SessionStream(api.SessionID(sessionID)),
 		Scope:    api.ScopeSession,
 		Type:     typ,
 		Payload:  raw,
