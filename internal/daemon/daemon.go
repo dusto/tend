@@ -6,16 +6,26 @@
 package daemon
 
 import (
+	"context"
+	"fmt"
 	"net"
 	"sync"
 
 	"github.com/dusto/tend/api"
+	"github.com/dusto/tend/internal/acp"
+	"github.com/dusto/tend/internal/agent"
 	"github.com/dusto/tend/internal/dispatch"
 	"github.com/dusto/tend/internal/events"
 	"github.com/dusto/tend/internal/handshake"
 	"github.com/dusto/tend/internal/rpc"
+	"github.com/dusto/tend/internal/session"
 	"github.com/dusto/tend/internal/workspace"
 )
+
+// maxProcsPerProvider bounds the provider processes the pool keeps per
+// {workspace, provider}. Many task-scoped sessions may share one process, so a
+// small cap is enough.
+const maxProcsPerProvider = 8
 
 // Server accepts connections on a listener and serves each over JSON-RPC. It is
 // safe for concurrent use; Shutdown is idempotent.
@@ -25,6 +35,12 @@ type Server struct {
 	validator *dispatch.Validator
 	store     *events.Store
 	log       *events.Log
+
+	// Agent stack: shared across connections because sessions are workspace-bound
+	// and outlive any single client.
+	sessions *session.Registry
+	pool     *acp.Pool
+	agent    *agent.Service
 
 	mu     sync.Mutex
 	conns  map[*rpc.Conn]struct{}
@@ -47,20 +63,54 @@ func New(ln net.Listener, logPath string) (*Server, error) {
 		validator: newValidator(),
 		store:     events.NewStore(log),
 		log:       log,
+		sessions:  session.NewRegistry(),
 		conns:     make(map[*rpc.Conn]struct{}),
 	}
+
+	// Assemble the shared agent stack: a normalizer that streams turn output to
+	// the event store, a process pool that spawns providers with that normalizer
+	// installed, and the session manager/service over it.
+	norm := acp.NewNormalizer(s.store, nil)
+	cfg := acp.DefaultConfig()
+	s.pool = acp.NewPool(spawnProvider(cfg, norm), s.store, acp.Options{Max: maxProcsPerProvider})
+	s.agent = agent.NewService(s.sessions, acp.NewManager(s.pool), norm)
+
 	if _, err := s.newMux(); err != nil {
 		_ = log.Close()
+		_ = s.pool.Close()
 		return nil, err
 	}
 	return s, nil
 }
 
+// spawnProvider returns the pool's SpawnFunc: it launches the configured provider
+// for a key and runs the ACP initialize handshake, installing h as the inbound
+// handler so the agent's session/update notifications are normalized to events.
+func spawnProvider(cfg *acp.Config, h rpc.Handler) acp.SpawnFunc {
+	return func(ctx context.Context, key acp.Key) (acp.Process, error) {
+		prov, ok := cfg.Provider(string(key.Provider))
+		if !ok || !prov.Enabled {
+			return nil, fmt.Errorf("daemon: unknown or disabled provider %q", key.Provider)
+		}
+		cmd := prov.LaunchCommand(string(key.Workspace))
+		params := acp.InitializeParams{
+			ProtocolVersion:    acp.ProtocolVersion,
+			ClientCapabilities: acp.ClientCapabilities{FS: acp.FSCapabilities{ReadTextFile: true, WriteTextFile: true}},
+		}
+		cl, _, err := acp.SpawnAndInitialize(ctx, cmd, params, h)
+		if err != nil {
+			return nil, err
+		}
+		return cl, nil
+	}
+}
+
 // newMux builds a fresh plugin->daemon Mux for one connection: it registers the
 // connect handshake, the workspace methods (with a per-connection workspace
-// Manager), and the event subscription methods (with a per-connection Pusher
-// over the shared event store), and enables params validation when a validator
-// is available.
+// Manager), the event subscription methods (with a per-connection Pusher over
+// the shared event store), and the agent lifecycle methods (backed by the
+// shared, daemon-wide agent service), and enables params validation when a
+// validator is available.
 func (s *Server) newMux() (*dispatch.Mux, error) {
 	mux := dispatch.NewMux(api.PluginToDaemon)
 	if err := handshake.Register(mux, s.epoch); err != nil {
@@ -70,6 +120,9 @@ func (s *Server) newMux() (*dispatch.Mux, error) {
 		return nil, err
 	}
 	if err := events.RegisterClient(mux, events.NewPusher(s.store)); err != nil {
+		return nil, err
+	}
+	if err := agent.Register(mux, s.agent); err != nil {
 		return nil, err
 	}
 	if s.validator != nil {
@@ -131,6 +184,7 @@ func (s *Server) Shutdown() {
 		_ = c.Close()
 	}
 	s.wg.Wait()
+	_ = s.pool.Close()
 	_ = s.log.Close()
 }
 

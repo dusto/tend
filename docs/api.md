@@ -18,6 +18,14 @@ Schemas live under `schemas/` (`methods/<name>.params.json` / `.result.json`, `e
   - Params: `EventsSubscribeParams` · Result: `EventsSubscribeResult`
 - **`events.unsubscribe`** — Stop delivery for a stream.
   - Params: `EventsUnsubscribeParams` · Result: _(notification)_
+- **`agent.start`** — Open a task-scoped agent session on a provider process; returns the session id and its event stream.
+  - Params: `AgentStartParams` · Result: `AgentStartResult`
+- **`agent.prompt`** — Run one prompt turn on a session (blocks until the turn ends); output streams as events on the session stream.
+  - Params: `AgentPromptParams` · Result: `AgentPromptResult`
+- **`agent.cancel`** — Cancel the in-flight turn on a session, returning it to idle.
+  - Params: `AgentCancelParams` · Result: _(notification)_
+- **`agent.stop`** — End a session and release its hold on the provider process.
+  - Params: `AgentStopParams` · Result: _(notification)_
 
 ### daemon → bound editor
 

@@ -13,6 +13,7 @@ import (
 const (
 	MethodNewSession = "session/new"
 	MethodPrompt     = "session/prompt"
+	MethodCancel     = "session/cancel"
 )
 
 // ErrNoSession is returned when a prompt names an unknown session.
@@ -38,6 +39,11 @@ type PromptParams struct {
 // PromptResult is the agent's session/prompt reply.
 type PromptResult struct {
 	StopReason string `json:"stopReason"`
+}
+
+// CancelParams is the session/cancel notification.
+type CancelParams struct {
+	SessionID string `json:"sessionId"`
 }
 
 // Session is a task-scoped ACP session pinned to the process it was created on.
@@ -117,6 +123,19 @@ func (m *Manager) Prompt(ctx context.Context, sessionID api.SessionID, params Pr
 		return PromptResult{}, err
 	}
 	return res, nil
+}
+
+// Cancel asks the agent to abort the in-flight turn on a session by sending the
+// session/cancel notification to its process. It is a best-effort signal: the
+// turn ends when the agent acknowledges it by returning from session/prompt.
+func (m *Manager) Cancel(ctx context.Context, sessionID api.SessionID) error {
+	m.mu.Lock()
+	s := m.sessions[sessionID]
+	m.mu.Unlock()
+	if s == nil {
+		return ErrNoSession
+	}
+	return s.client.Notify(ctx, MethodCancel, CancelParams{SessionID: string(sessionID)})
 }
 
 // Close drops a session, releasing its hold on the hosting process so the

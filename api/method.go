@@ -33,6 +33,10 @@ var Methods = []Method{
 	{Name: "workspace.current", Direction: PluginToDaemon, Params: WorkspaceCurrentParams{}, Result: WorkspaceInfo{}, Summary: "Return the active workspace."},
 	{Name: "events.subscribe", Direction: PluginToDaemon, Params: EventsSubscribeParams{}, Result: EventsSubscribeResult{}, Summary: "Subscribe to one logical stream from a cursor; replays then follows live. May return cursor_compacted."},
 	{Name: "events.unsubscribe", Direction: PluginToDaemon, Params: EventsUnsubscribeParams{}, Result: nil, Summary: "Stop delivery for a stream."},
+	{Name: "agent.start", Direction: PluginToDaemon, Params: AgentStartParams{}, Result: AgentStartResult{}, Summary: "Open a task-scoped agent session on a provider process; returns the session id and its event stream."},
+	{Name: "agent.prompt", Direction: PluginToDaemon, Params: AgentPromptParams{}, Result: AgentPromptResult{}, Summary: "Run one prompt turn on a session (blocks until the turn ends); output streams as events on the session stream."},
+	{Name: "agent.cancel", Direction: PluginToDaemon, Params: AgentCancelParams{}, Result: nil, Summary: "Cancel the in-flight turn on a session, returning it to idle."},
+	{Name: "agent.stop", Direction: PluginToDaemon, Params: AgentStopParams{}, Result: nil, Summary: "End a session and release its hold on the provider process."},
 
 	// daemon -> bound editor
 	{Name: "editor.read_buffer", Direction: DaemonToEditor, Params: EditorReadBufferParams{}, Result: EditorReadBufferResult{}, Summary: "Read a file editor-aware; returns content and its base (changedtick for an open buffer, content hash for a closed file)."},
