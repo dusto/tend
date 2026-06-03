@@ -13,6 +13,10 @@ import (
 // ErrPoolClosed is returned by Acquire after the pool has been closed.
 var ErrPoolClosed = errors.New("acp: pool closed")
 
+// ErrProcessGone is returned by AcquireOn when the target process is no longer
+// in the pool (it crashed or was closed).
+var ErrProcessGone = errors.New("acp: process no longer in pool")
+
 // Process is the minimum a pooled ACP process must expose: a Done channel that
 // closes when it exits, and Close to terminate it. *Client satisfies it.
 type Process interface {
@@ -84,6 +88,7 @@ type procEntry struct {
 	retiring  bool // intentionally closed (evict/Close): no crash events
 	idleSince time.Time
 	sessionID api.SessionID // the current turn's session, for crash attribution
+	sessions  int           // sessions hosted on this process; >0 blocks eviction
 	dead      chan struct{} // closed when the process leaves the pool
 }
 
@@ -193,6 +198,59 @@ func (p *Pool) Acquire(ctx context.Context, key Key, sessionID api.SessionID) (*
 	}
 }
 
+// AcquireOn obtains a turn on a specific process: it waits until proc has no
+// in-flight turn, marks it busy, and returns a Lease. It is how a pinned session
+// runs a turn on its own process while still serializing turns through the pool
+// (so eviction never reaps a process mid-turn). It returns ErrProcessGone if
+// proc has left the pool.
+func (p *Pool) AcquireOn(ctx context.Context, key Key, proc Process, sessionID api.SessionID) (*Lease, error) {
+	for {
+		p.mu.Lock()
+		if p.closed {
+			p.mu.Unlock()
+			return nil, ErrPoolClosed
+		}
+		kp := p.pools[key]
+		e := findEntry(kp, proc)
+		if e == nil {
+			p.mu.Unlock()
+			return nil, ErrProcessGone
+		}
+		if !e.busy {
+			e.busy = true
+			e.sessionID = sessionID
+			lease := &Lease{pool: p, key: key, e: e}
+			p.mu.Unlock()
+			return lease, nil
+		}
+		wait := kp.notify
+		p.mu.Unlock()
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-wait:
+		}
+	}
+}
+
+// AddSession records that proc now hosts another session, so idle eviction will
+// not reap it while sessions remain. RemoveSession is the inverse.
+func (p *Pool) AddSession(key Key, proc Process) { p.adjustSessions(key, proc, +1) }
+
+// RemoveSession drops one hosted-session count from proc.
+func (p *Pool) RemoveSession(key Key, proc Process) { p.adjustSessions(key, proc, -1) }
+
+func (p *Pool) adjustSessions(key Key, proc Process, delta int) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if e := findEntry(p.pools[key], proc); e != nil {
+		e.sessions += delta
+		if e.sessions < 0 {
+			e.sessions = 0
+		}
+	}
+}
+
 // Close terminates all processes and stops the pool. Subsequent Acquire calls
 // return ErrPoolClosed. It waits for crash watchers to finish.
 func (p *Pool) Close() error {
@@ -274,7 +332,9 @@ func (p *Pool) evictIdle() {
 	var toClose []Process
 	for _, kp := range p.pools {
 		for _, e := range kp.procs {
-			if !e.busy && !e.removed && e.proc != nil && now.Sub(e.idleSince) >= p.ttl {
+			// Never evict a process that is busy, already retiring, or still
+			// hosting sessions (evicting it would fail those sessions).
+			if !e.busy && !e.removed && !e.retiring && e.sessions == 0 && e.proc != nil && now.Sub(e.idleSince) >= p.ttl {
 				e.retiring = true
 				toClose = append(toClose, e.proc)
 			}
@@ -319,6 +379,18 @@ func (p *Pool) removeLocked(kp *keyPool, e *procEntry) {
 			break
 		}
 	}
+}
+
+func findEntry(kp *keyPool, proc Process) *procEntry {
+	if kp == nil {
+		return nil
+	}
+	for _, e := range kp.procs {
+		if e.proc == proc {
+			return e
+		}
+	}
+	return nil
 }
 
 func idleEntry(kp *keyPool) *procEntry {
