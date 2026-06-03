@@ -79,6 +79,7 @@ var EventDefs = []EventDef{
 	{Type: "approval_resolved", Scope: ScopeSession, Payload: ApprovalResolved{}, Summary: "A pending approval was resolved."},
 	{Type: "agent_error", Scope: ScopeSession, Payload: AgentError{}, Summary: "A session's turn failed (e.g. its provider process exited mid-turn)."},
 	{Type: "provider_stopped", Scope: ScopeProvider, Payload: ProviderStopped{}, Summary: "A provider process left the pool (exit or crash)."},
+	{Type: "provider_notification", Scope: ScopeSession, Payload: ProviderNotification{}, Summary: "A provider-private ACP notification preserved verbatim as a metadata event."},
 }
 
 // --- Event payloads (initial set) ---
@@ -134,4 +135,12 @@ type AgentError struct {
 type ProviderStopped struct {
 	ProviderID ProviderID `json:"provider_id"`
 	Reason     string     `json:"reason,omitempty"`
+}
+
+// ProviderNotification preserves a provider-private ACP notification that has no
+// dedicated TEND event, so nothing the agent reports is silently dropped.
+type ProviderNotification struct {
+	SessionID SessionID       `json:"session_id"`
+	Method    string          `json:"method"`
+	Raw       json.RawMessage `json:"raw,omitempty"`
 }

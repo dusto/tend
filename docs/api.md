@@ -43,6 +43,8 @@ Schemas live under `schemas/` (`methods/<name>.params.json` / `.result.json`, `e
   - Payload: `ApprovalRequested`
 - **`approval_resolved`** (`session` stream) — A pending approval was resolved.
   - Payload: `ApprovalResolved`
+- **`provider_notification`** (`session` stream) — A provider-private ACP notification preserved verbatim as a metadata event.
+  - Payload: `ProviderNotification`
 - **`provider_stopped`** (`provider` stream) — A provider process left the pool (exit or crash).
   - Payload: `ProviderStopped`
 - **`tool_call`** (`session` stream) — An agent tool call started.
