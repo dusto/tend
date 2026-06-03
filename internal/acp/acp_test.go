@@ -66,50 +66,46 @@ func testCtx(t *testing.T, d time.Duration) context.Context {
 }
 
 func TestSpawnAndInitialize(t *testing.T) {
-	c, err := Spawn(fakeCommand(t, "respond"), nil)
+	c, res, err := SpawnAndInitialize(testCtx(t, 5*time.Second), fakeCommand(t, "respond"),
+		InitializeParams{
+			ProtocolVersion:    ProtocolVersion,
+			ClientCapabilities: ClientCapabilities{FS: FSCapabilities{ReadTextFile: true}},
+		}, nil)
 	if err != nil {
-		t.Fatalf("Spawn: %v", err)
+		t.Fatalf("SpawnAndInitialize: %v", err)
 	}
 	t.Cleanup(func() { _ = c.Close() })
-
-	res, err := c.Initialize(testCtx(t, 5*time.Second), InitializeParams{
-		ProtocolVersion:    ProtocolVersion,
-		ClientCapabilities: ClientCapabilities{FS: FSCapabilities{ReadTextFile: true}},
-	})
-	if err != nil {
-		t.Fatalf("Initialize: %v", err)
-	}
 	if res.ProtocolVersion != ProtocolVersion {
 		t.Errorf("ProtocolVersion = %d, want %d", res.ProtocolVersion, ProtocolVersion)
 	}
+}
 
+func TestSpawnAndInitializeTimeout(t *testing.T) {
+	c, _, err := SpawnAndInitialize(testCtx(t, 200*time.Millisecond), fakeCommand(t, "hang"),
+		InitializeParams{ProtocolVersion: ProtocolVersion}, nil)
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("err = %v, want DeadlineExceeded", err)
+	}
+	if c != nil {
+		t.Error("expected nil client on handshake failure")
+	}
+	// SpawnAndInitialize owns teardown on failure; nothing for the caller to do.
+}
+
+// TestCloseReapsProcess shows Close kills and reaps a spawned process — the
+// teardown SpawnAndInitialize relies on internally on failure.
+func TestCloseReapsProcess(t *testing.T) {
+	c, err := Spawn(fakeCommand(t, "hang"), nil)
+	if err != nil {
+		t.Fatalf("Spawn: %v", err)
+	}
 	if err := c.Close(); err != nil {
 		t.Fatalf("Close: %v", err)
 	}
 	if c.cmd.ProcessState == nil {
 		t.Error("process not reaped after Close")
 	}
-}
-
-func TestInitializeTimeoutTearsDown(t *testing.T) {
-	c, err := Spawn(fakeCommand(t, "hang"), nil)
-	if err != nil {
-		t.Fatalf("Spawn: %v", err)
-	}
-	t.Cleanup(func() { _ = c.Close() })
-
-	_, err = c.Initialize(testCtx(t, 200*time.Millisecond), InitializeParams{ProtocolVersion: ProtocolVersion})
-	if !errors.Is(err, context.DeadlineExceeded) {
-		t.Fatalf("Initialize err = %v, want DeadlineExceeded", err)
-	}
-
-	// Failure tears down cleanly: the process is killed and reaped.
-	if err := c.Close(); err != nil {
-		t.Fatalf("Close: %v", err)
-	}
-	if c.cmd.ProcessState == nil {
-		t.Error("hung process not reaped after Close")
-	}
+	_ = c.Close() // idempotent
 }
 
 func TestSpawnBadCommand(t *testing.T) {

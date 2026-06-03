@@ -19,8 +19,12 @@ const ProtocolVersion = 1
 type Command struct {
 	Path string   // executable to run
 	Args []string // arguments
-	Env  []string // environment (os.Environ()-style "K=V"); nil inherits none
-	Dir  string   // working directory ("" uses the caller's)
+	// Env is the process environment as "K=V" entries. Following os/exec, a nil
+	// Env makes the process inherit the daemon's environment; pass a non-nil
+	// slice (possibly empty) to set it explicitly. The provider/config layer is
+	// responsible for composing this deliberately.
+	Env []string
+	Dir string // working directory ("" uses the caller's)
 }
 
 // Client is a JSON-RPC 2.0 peer to one ACP provider process over its stdio. ACP
@@ -58,6 +62,24 @@ func Spawn(c Command, h rpc.Handler) (*Client, error) {
 	return &Client{conn: rpc.NewConn(&procStdio{r: stdout, w: stdin}, h), cmd: cmd}, nil
 }
 
+// SpawnAndInitialize spawns the process and runs the initialize handshake,
+// owning teardown: if spawning or the handshake fails (including an initialize
+// timeout via ctx), the process is killed and reaped before returning. Use a
+// deadline on ctx to bound the handshake. This is the path the process pool
+// uses so a hung provider cannot leak.
+func SpawnAndInitialize(ctx context.Context, c Command, params InitializeParams, h rpc.Handler) (*Client, InitializeResult, error) {
+	cl, err := Spawn(c, h)
+	if err != nil {
+		return nil, InitializeResult{}, err
+	}
+	res, err := cl.Initialize(ctx, params)
+	if err != nil {
+		_ = cl.Close()
+		return nil, InitializeResult{}, err
+	}
+	return cl, res, nil
+}
+
 // newClient wraps an existing stdio stream as a Client, for tests that drive a
 // fake ACP peer in-process.
 func newClient(rwc io.ReadWriteCloser, h rpc.Handler) *Client {
@@ -66,7 +88,8 @@ func newClient(rwc io.ReadWriteCloser, h rpc.Handler) *Client {
 
 // Initialize performs the ACP initialize handshake, blocking until the agent
 // replies, ctx is done (use a deadline for a timeout), or the connection closes.
-// On failure the caller should Close the client.
+// It does not tear the client down on failure; spawned callers should use
+// SpawnAndInitialize, which owns that contract.
 func (c *Client) Initialize(ctx context.Context, params InitializeParams) (InitializeResult, error) {
 	var res InitializeResult
 	if err := c.conn.Call(ctx, "initialize", params, &res); err != nil {
