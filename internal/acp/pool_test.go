@@ -17,12 +17,32 @@ type fakeProc struct {
 	id   int
 	done chan struct{}
 	once sync.Once
+
+	mu         sync.Mutex
+	blockClose bool // when set, Close does not exit the process (simulates a slow exit)
 }
 
 func (f *fakeProc) Done() <-chan struct{} { return f.done }
-func (f *fakeProc) Close() error          { f.stop(); return nil }
-func (f *fakeProc) crash()                { f.stop() }
-func (f *fakeProc) stop()                 { f.once.Do(func() { close(f.done) }) }
+
+func (f *fakeProc) Close() error {
+	f.mu.Lock()
+	block := f.blockClose
+	f.mu.Unlock()
+	if !block {
+		f.stop()
+	}
+	return nil
+}
+
+func (f *fakeProc) crash()   { f.stop() }
+func (f *fakeProc) unblock() { f.stop() }
+func (f *fakeProc) stop()    { f.once.Do(func() { close(f.done) }) }
+
+func (f *fakeProc) setBlockClose(b bool) {
+	f.mu.Lock()
+	f.blockClose = b
+	f.mu.Unlock()
+}
 
 // spawner hands out fakeProcs and counts spawns; it can be made to fail.
 type spawner struct {
@@ -322,6 +342,69 @@ func TestCloseTerminatesProcesses(t *testing.T) {
 	}
 	if _, err := p.Acquire(context.Background(), testKey, "s3"); !errors.Is(err, ErrPoolClosed) {
 		t.Errorf("Acquire after Close = %v, want ErrPoolClosed", err)
+	}
+}
+
+// TestRetiringProcessNotReused covers the eviction-reuse race: a process marked
+// retiring (Close called, but it has not exited yet, so the watcher has not
+// removed it) must not be handed to a new turn.
+func TestRetiringProcessNotReused(t *testing.T) {
+	sp := &spawner{}
+	clock := &fakeClock{t: time.Now()}
+	p := NewPool(sp.fn, nil, Options{Max: 2, IdleTTL: time.Minute, Now: clock.now})
+	t.Cleanup(func() { _ = p.Close() })
+
+	l := acquire(t, p, "s1")
+	proc := l.Process().(*fakeProc)
+	l.Release()
+	proc.setBlockClose(true) // its Close will not exit it, so the entry lingers as retiring
+
+	clock.advance(2 * time.Minute)
+	p.evictIdle() // marks proc retiring and calls Close (no exit yet)
+
+	l2 := acquire(t, p, "s2")
+	defer l2.Release()
+	if l2.Process() == proc {
+		t.Error("leased a process that is being retired")
+	}
+	if sp.count() != 2 {
+		t.Errorf("spawned %d, want 2 (retiring process not reused)", sp.count())
+	}
+	proc.unblock() // let the watcher remove it and exit so Close can finish
+}
+
+// TestCloseDuringSpawn covers the close-during-spawn race: if Close runs while a
+// spawn is in flight, the freshly spawned process must be terminated and Acquire
+// must fail with ErrPoolClosed rather than hand out a lease from a closed pool.
+func TestCloseDuringSpawn(t *testing.T) {
+	spawnStarted := make(chan struct{})
+	release := make(chan struct{})
+	var spawned *fakeProc
+	spawnFn := func(_ context.Context, _ Key) (Process, error) {
+		close(spawnStarted)
+		<-release
+		spawned = &fakeProc{done: make(chan struct{})}
+		return spawned, nil
+	}
+	p := NewPool(spawnFn, nil, Options{Max: 1})
+
+	errCh := make(chan error, 1)
+	go func() {
+		_, err := p.Acquire(context.Background(), testKey, "s1")
+		errCh <- err
+	}()
+
+	<-spawnStarted // Acquire is now blocked inside spawn
+	_ = p.Close()  // close while the spawn is in flight
+	close(release) // let spawn return
+
+	if err := <-errCh; !errors.Is(err, ErrPoolClosed) {
+		t.Fatalf("Acquire = %v, want ErrPoolClosed", err)
+	}
+	select {
+	case <-spawned.Done():
+	case <-time.After(2 * time.Second):
+		t.Fatal("process spawned during Close was not terminated")
 	}
 }
 

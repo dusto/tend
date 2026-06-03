@@ -166,6 +166,15 @@ func (p *Pool) Acquire(ctx context.Context, key Key, sessionID api.SessionID) (*
 				p.mu.Unlock()
 				return nil, err
 			}
+			if p.closed {
+				// Close ran during the spawn and could not see this process
+				// (e.proc was still nil), so terminate it here rather than hand
+				// out a lease from a closed pool.
+				p.removeLocked(kp, e)
+				p.mu.Unlock()
+				_ = proc.Close()
+				return nil, ErrPoolClosed
+			}
 			e.proc = proc
 			p.watch(key, e)
 			lease := &Lease{pool: p, key: key, e: e}
@@ -314,7 +323,9 @@ func (p *Pool) removeLocked(kp *keyPool, e *procEntry) {
 
 func idleEntry(kp *keyPool) *procEntry {
 	for _, e := range kp.procs {
-		if !e.busy && e.proc != nil {
+		// A retiring entry is being intentionally closed; never lease it (its
+		// exit is silent, so a turn assigned to it would fail without events).
+		if !e.busy && !e.retiring && e.proc != nil {
 			return e
 		}
 	}
