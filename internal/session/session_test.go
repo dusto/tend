@@ -72,6 +72,10 @@ func TestWaitingRequiresMatchingPending(t *testing.T) {
 	if err := s.SetStatus(api.StatusWaitingApproval, &Pending{Kind: api.PendingClarification, ID: "c1"}); err == nil {
 		t.Error("waiting_approval with a clarification pending should fail")
 	}
+	// Empty id: cannot be correlated to an approval.
+	if err := s.SetStatus(api.StatusWaitingApproval, &Pending{Kind: api.PendingApproval}); err == nil {
+		t.Error("waiting_approval with an empty pending id should fail")
+	}
 	// Correct.
 	mustTransition(t, s, api.StatusWaitingApproval, &Pending{Kind: api.PendingApproval, ID: "a1"})
 	if p, ok := s.Pending(); !ok || p.Kind != api.PendingApproval || p.ID != "a1" {

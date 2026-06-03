@@ -88,6 +88,9 @@ func (s *Session) SetStatus(to api.SessionStatus, pending *Pending) error {
 		if pending.Kind != want {
 			return fmt.Errorf("session %s: %s requires a %s, got %s", s.ID, to, want, pending.Kind)
 		}
+		if pending.ID == "" {
+			return fmt.Errorf("session %s: %s requires a pending id", s.ID, to)
+		}
 		p := *pending
 		s.pending = &p
 	} else {
