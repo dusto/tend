@@ -25,8 +25,28 @@ type Process interface {
 }
 
 // SpawnFunc creates and initializes a new process for key. The pool calls it
-// when it needs another process for a {workspace, provider}.
+// when it needs another process for a {workspace, provider}, passing the ctx of
+// the Acquire that triggered the spawn (see WorktreeRootFromContext).
 type SpawnFunc func(ctx context.Context, key Key) (Process, error)
+
+// worktreeRootKey types the spawn-context value carrying a worktree root.
+type worktreeRootKey struct{}
+
+// WithWorktreeRoot annotates ctx with the worktree root the session triggering a
+// spawn operates in. A pool process is shared per {workspace, provider} across
+// worktrees, so this is the root of whichever session first spawns it; per-session
+// working directories are still set on each session/new. A SpawnFunc reads it to
+// give the process a sensible startup cwd.
+func WithWorktreeRoot(ctx context.Context, root string) context.Context {
+	return context.WithValue(ctx, worktreeRootKey{}, root)
+}
+
+// WorktreeRootFromContext returns the worktree root set by WithWorktreeRoot, or
+// "" if none was set.
+func WorktreeRootFromContext(ctx context.Context) string {
+	root, _ := ctx.Value(worktreeRootKey{}).(string)
+	return root
+}
 
 // Emitter publishes events. *events.Store satisfies it.
 type Emitter interface {

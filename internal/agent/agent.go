@@ -86,6 +86,9 @@ func (s *Service) Start(ctx context.Context, p api.AgentStartParams) (api.AgentS
 	}
 
 	key := acp.Key{Workspace: p.Task.WorkspaceID, Provider: p.ProviderID}
+	// Carry the worktree root so a provider process spawned for this session
+	// starts in it; the session's own cwd is set on session/new below.
+	ctx = acp.WithWorktreeRoot(ctx, p.WorktreeRoot)
 	as, err := s.manager.Open(ctx, key, acp.NewSessionParams{Cwd: p.WorktreeRoot})
 	if err != nil {
 		return api.AgentStartResult{}, internalErr(err)
@@ -105,11 +108,19 @@ func (s *Service) Start(ctx context.Context, p api.AgentStartParams) (api.AgentS
 // turn's output streams as events on the session's stream via the normalizer
 // installed on the process. On success it publishes turn_end and returns the
 // session to idle; a cancelled turn also returns to idle; any other failure marks
-// the session errored.
+// the session errored. A prompt on an errored session first recovers it to idle,
+// so a failed turn can be retried.
 func (s *Service) Prompt(ctx context.Context, p api.AgentPromptParams) (api.AgentPromptResult, error) {
 	sess, ok := s.sessions.Get(p.SessionID)
 	if !ok {
 		return api.AgentPromptResult{}, unknownSession(p.SessionID)
+	}
+	// Recover an errored session: the state model requires error -> idle before a
+	// new turn can start (idle -> running), so a retry passes through idle.
+	if sess.Status() == api.StatusError {
+		if err := sess.SetStatus(api.StatusIdle, nil); err != nil {
+			return api.AgentPromptResult{}, invalidParams(err.Error())
+		}
 	}
 	if err := sess.SetStatus(api.StatusRunning, nil); err != nil {
 		return api.AgentPromptResult{}, invalidParams(err.Error())

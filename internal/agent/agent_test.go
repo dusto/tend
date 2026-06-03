@@ -19,9 +19,12 @@ import (
 type fakeManager struct {
 	mu sync.Mutex
 
-	openID     api.SessionID
-	openErr    error
-	openParams acp.NewSessionParams
+	openID       api.SessionID
+	openErr      error
+	openParams   acp.NewSessionParams
+	openSpawnDir string // worktree root carried on the Open ctx
+
+	promptCalls int // number of Prompt invocations
 
 	promptResult acp.PromptResult
 	promptErr    error
@@ -32,9 +35,10 @@ type fakeManager struct {
 	closed    []api.SessionID
 }
 
-func (m *fakeManager) Open(_ context.Context, _ acp.Key, params acp.NewSessionParams) (*acp.Session, error) {
+func (m *fakeManager) Open(ctx context.Context, _ acp.Key, params acp.NewSessionParams) (*acp.Session, error) {
 	m.mu.Lock()
 	m.openParams = params
+	m.openSpawnDir = acp.WorktreeRootFromContext(ctx)
 	m.mu.Unlock()
 	if m.openErr != nil {
 		return nil, m.openErr
@@ -43,14 +47,19 @@ func (m *fakeManager) Open(_ context.Context, _ acp.Key, params acp.NewSessionPa
 }
 
 func (m *fakeManager) Prompt(ctx context.Context, _ api.SessionID, _ acp.PromptParams) (acp.PromptResult, error) {
+	m.mu.Lock()
+	m.promptCalls++
+	block := m.promptBlock
+	res, errResult := m.promptResult, m.promptErr
+	m.mu.Unlock()
 	if m.promptStart != nil {
 		close(m.promptStart)
 	}
-	if m.promptBlock {
+	if block {
 		<-ctx.Done()
 		return acp.PromptResult{}, ctx.Err()
 	}
-	return m.promptResult, m.promptErr
+	return res, errResult
 }
 
 func (m *fakeManager) Cancel(_ context.Context, id api.SessionID) error {
@@ -100,9 +109,13 @@ func TestStartRegistersSession(t *testing.T) {
 	if res.SessionID != "sess-1" || res.StreamID != "session:sess-1" || res.Status != api.StatusIdle {
 		t.Fatalf("result = %+v", res)
 	}
-	// The worktree root is passed to the ACP session as its cwd.
+	// The worktree root is passed to the ACP session as its cwd, and carried on
+	// the spawn ctx so a freshly spawned provider process starts in it.
 	if mgr.openParams.Cwd != "/repo/wt" {
 		t.Errorf("session cwd = %q, want /repo/wt", mgr.openParams.Cwd)
+	}
+	if mgr.openSpawnDir != "/repo/wt" {
+		t.Errorf("spawn worktree root = %q, want /repo/wt", mgr.openSpawnDir)
 	}
 	if s, ok := svc.sessions.Get("sess-1"); !ok || s.Task != task || s.ProviderID != "codex" {
 		t.Errorf("registered session = %+v, ok=%v", s, ok)
@@ -181,6 +194,39 @@ func TestPromptFailureMarksError(t *testing.T) {
 	// A failed turn does not publish turn_end.
 	if hw := store.HighWater("session:sess-1"); hw != 0 {
 		t.Errorf("high water = %d, want 0 (no turn_end on failure)", hw)
+	}
+}
+
+func TestPromptRetriesAfterError(t *testing.T) {
+	mgr := &fakeManager{openID: "sess-1", promptErr: errors.New("boom")}
+	svc, _ := newService(t, mgr)
+	startSession(t, svc)
+
+	if _, err := svc.Prompt(context.Background(), api.AgentPromptParams{SessionID: "sess-1"}); err == nil {
+		t.Fatal("expected first turn to fail")
+	}
+	// Recover: the next turn succeeds, taking the errored session back through
+	// idle to running and on to idle.
+	mgr.mu.Lock()
+	mgr.promptErr = nil
+	mgr.promptResult = acp.PromptResult{StopReason: "end_turn"}
+	mgr.mu.Unlock()
+
+	res, err := svc.Prompt(context.Background(), api.AgentPromptParams{SessionID: "sess-1"})
+	if err != nil {
+		t.Fatalf("retry Prompt: %v", err)
+	}
+	if res.StopReason != "end_turn" || res.Status != api.StatusIdle {
+		t.Fatalf("retry result = %+v", res)
+	}
+	if s, _ := svc.sessions.Get("sess-1"); s.Status() != api.StatusIdle {
+		t.Errorf("status = %q, want idle", s.Status())
+	}
+	mgr.mu.Lock()
+	calls := mgr.promptCalls
+	mgr.mu.Unlock()
+	if calls != 2 {
+		t.Errorf("prompt calls = %d, want 2", calls)
 	}
 }
 

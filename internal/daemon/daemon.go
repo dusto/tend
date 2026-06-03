@@ -92,7 +92,14 @@ func spawnProvider(cfg *acp.Config, h rpc.Handler) acp.SpawnFunc {
 		if !ok || !prov.Enabled {
 			return nil, fmt.Errorf("daemon: unknown or disabled provider %q", key.Provider)
 		}
-		cmd := prov.LaunchCommand(string(key.Workspace))
+		// CwdWorkspace providers run in the worktree root of the session that
+		// triggered the spawn; the workspace id (the common git dir) is only a
+		// fallback when no root was supplied.
+		root := acp.WorktreeRootFromContext(ctx)
+		if root == "" {
+			root = string(key.Workspace)
+		}
+		cmd := prov.LaunchCommand(root)
 		params := acp.InitializeParams{
 			ProtocolVersion:    acp.ProtocolVersion,
 			ClientCapabilities: acp.ClientCapabilities{FS: acp.FSCapabilities{ReadTextFile: true, WriteTextFile: true}},
