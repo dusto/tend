@@ -9,7 +9,7 @@ import (
 	"github.com/BurntSushi/toml"
 )
 
-// planExamples is the provider config from tend-plan.md § ACP Provider Model.
+// planExamples is a three-provider config covering Codex, Claude, and Kiro.
 const planExamples = `
 [[acp.providers]]
 id = "codex"

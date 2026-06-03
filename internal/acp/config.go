@@ -17,8 +17,7 @@ const (
 	CwdInherit CwdMode = "inherit"
 )
 
-// Config is the parsed TEND configuration. Only the ACP provider section is
-// modeled here; other sections are added as their features land.
+// Config is the parsed TEND configuration. It models the ACP provider section.
 type Config struct {
 	ACP Settings `toml:"acp"`
 }
@@ -28,9 +27,8 @@ type Settings struct {
 	Providers []Provider `toml:"providers"`
 }
 
-// Provider is a generic ACP provider definition (one [[acp.providers]] entry).
-// It is provider-agnostic: Kiro, Claude, Codex, and future ACP servers are all
-// described by these fields without per-provider code.
+// Provider is a generic ACP provider definition (one [[acp.providers]] entry):
+// any ACP server is described by these fields without per-provider code.
 type Provider struct {
 	ID      string   `toml:"id"`
 	Command string   `toml:"command"`
@@ -115,7 +113,7 @@ func (c *Config) Provider(id string) (Provider, bool) {
 
 // LaunchCommand builds the launch Command for this provider in the given
 // workspace root. The process inherits the daemon's environment with the
-// provider's Env entries appended (so config adds to, rather than replaces, the
+// provider's Env entries appended (config adds to, rather than replaces, the
 // ambient environment). The working directory follows CwdMode.
 func (p Provider) LaunchCommand(workspaceRoot string) Command {
 	cmd := Command{Path: p.Command, Args: p.Args}
