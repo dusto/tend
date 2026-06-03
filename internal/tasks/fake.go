@@ -61,7 +61,7 @@ func (f *Fake) Create(_ context.Context, p CreateParams) (Task, error) {
 	}
 	f.tasks[id] = t
 	f.publish(Event{Ref: t.Ref, Kind: EventCreated})
-	return *t, nil
+	return clone(t), nil
 }
 
 // Show returns the task for ref.
@@ -72,7 +72,7 @@ func (f *Fake) Show(_ context.Context, ref api.TaskRef) (Task, error) {
 	if err != nil {
 		return Task{}, err
 	}
-	return *t, nil
+	return clone(t), nil
 }
 
 // List returns the tasks matching f.
@@ -82,7 +82,7 @@ func (f *Fake) List(_ context.Context, filter Filter) ([]Task, error) {
 	var out []Task
 	for _, t := range f.tasks {
 		if filter.Status == "" || t.Status == filter.Status {
-			out = append(out, *t)
+			out = append(out, clone(t))
 		}
 	}
 	return out, nil
@@ -160,12 +160,30 @@ func (f *Fake) Events(ctx context.Context) (<-chan Event, error) {
 	return ch, nil
 }
 
-// lookup returns the task for ref; callers hold f.mu.
+// lookup returns the task for ref; callers hold f.mu. It rejects a ref that does
+// not belong to this provider+workspace, so a forged or stale ref cannot reach
+// another workspace's task.
 func (f *Fake) lookup(ref api.TaskRef) (*Task, error) {
+	if ref.Provider != f.name || ref.WorkspaceID != f.ws {
+		return nil, fmt.Errorf("tasks: ref %s/%s does not belong to %s/%s", ref.Provider, ref.WorkspaceID, f.name, f.ws)
+	}
 	if t, ok := f.tasks[ref.ID]; ok {
 		return t, nil
 	}
 	return nil, fmt.Errorf("tasks: no such task %q", ref.ID)
+}
+
+// clone returns a deep copy of t so callers cannot mutate the fake's state
+// through the slices in a returned Task.
+func clone(t *Task) Task {
+	c := *t
+	if t.Labels != nil {
+		c.Labels = append([]string(nil), t.Labels...)
+	}
+	if t.Comments != nil {
+		c.Comments = append([]Comment(nil), t.Comments...)
+	}
+	return c
 }
 
 // publish delivers ev to current subscribers; callers hold f.mu. Delivery is

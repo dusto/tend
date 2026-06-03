@@ -75,8 +75,44 @@ func TestClaimCommentClose(t *testing.T) {
 
 func TestUnknownTaskErrors(t *testing.T) {
 	f := NewFake("ws1")
-	if _, err := f.Show(context.Background(), api.TaskRef{ID: "nope"}); err == nil {
+	if _, err := f.Show(context.Background(), f.ref("nope")); err == nil {
 		t.Error("Show of unknown task should error")
+	}
+}
+
+func TestForeignRefRejected(t *testing.T) {
+	f := NewFake("ws1")
+	ctx := context.Background()
+	tk, _ := f.Create(ctx, CreateParams{Title: "x"})
+
+	// Same id, but a different workspace / provider must not reach the task.
+	otherWS := api.TaskRef{Provider: "fake", WorkspaceID: "ws2", ID: tk.Ref.ID}
+	if _, err := f.Show(ctx, otherWS); err == nil {
+		t.Error("ref from another workspace should be rejected")
+	}
+	otherProvider := api.TaskRef{Provider: "beads", WorkspaceID: "ws1", ID: tk.Ref.ID}
+	if err := f.Claim(ctx, otherProvider, "a"); err == nil {
+		t.Error("ref from another provider should be rejected")
+	}
+}
+
+func TestReturnedTaskIsDeepCopied(t *testing.T) {
+	f := NewFake("ws1")
+	ctx := context.Background()
+	tk, _ := f.Create(ctx, CreateParams{Title: "x", Labels: []string{"a"}})
+	_ = f.Comment(ctx, tk.Ref, Comment{Text: "c1"})
+
+	got, _ := f.Show(ctx, tk.Ref)
+	// Mutating the returned slices must not affect the fake's state.
+	got.Labels[0] = "mutated"
+	got.Comments[0].Text = "mutated"
+
+	fresh, _ := f.Show(ctx, tk.Ref)
+	if fresh.Labels[0] != "a" {
+		t.Errorf("internal label mutated: %q", fresh.Labels[0])
+	}
+	if fresh.Comments[0].Text != "c1" {
+		t.Errorf("internal comment mutated: %q", fresh.Comments[0].Text)
 	}
 }
 
