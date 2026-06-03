@@ -124,11 +124,13 @@ func TestStartRegistersSession(t *testing.T) {
 
 func TestStartValidatesParams(t *testing.T) {
 	svc, _ := newService(t, &fakeManager{openID: "x"})
-	ws := api.TaskRef{WorkspaceID: "ws1"}
+	full := api.TaskRef{Provider: "beads", WorkspaceID: "ws1", ID: "t1"}
 	cases := []api.AgentStartParams{
-		{Task: ws, WorktreeRoot: "/r"},                                 // no provider
-		{ProviderID: "codex", Task: ws},                                // no worktree
-		{ProviderID: "codex", WorktreeRoot: "/r", Task: api.TaskRef{}}, // no workspace
+		{Task: full, WorktreeRoot: "/r"},  // no provider
+		{ProviderID: "codex", Task: full}, // no worktree
+		{ProviderID: "codex", WorktreeRoot: "/r", Task: api.TaskRef{WorkspaceID: "ws1", ID: "t1"}},          // no task.provider
+		{ProviderID: "codex", WorktreeRoot: "/r", Task: api.TaskRef{Provider: "beads", ID: "t1"}},           // no task.workspace_id
+		{ProviderID: "codex", WorktreeRoot: "/r", Task: api.TaskRef{Provider: "beads", WorkspaceID: "ws1"}}, // no task.id
 	}
 	for i, p := range cases {
 		if _, err := svc.Start(context.Background(), p); err == nil {
@@ -141,7 +143,7 @@ func TestStartOpenFailure(t *testing.T) {
 	mgr := &fakeManager{openErr: errors.New("spawn failed")}
 	svc, _ := newService(t, mgr)
 	_, err := svc.Start(context.Background(), api.AgentStartParams{
-		ProviderID: "codex", Task: api.TaskRef{WorkspaceID: "ws1"}, WorktreeRoot: "/r",
+		ProviderID: "codex", Task: api.TaskRef{Provider: "beads", WorkspaceID: "ws1", ID: "t1"}, WorktreeRoot: "/r",
 	})
 	if err == nil {
 		t.Fatal("expected error when Open fails")

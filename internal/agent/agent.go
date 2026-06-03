@@ -81,8 +81,12 @@ func (s *Service) Start(ctx context.Context, p api.AgentStartParams) (api.AgentS
 		return api.AgentStartResult{}, invalidParams("provider_id is required")
 	case p.WorktreeRoot == "":
 		return api.AgentStartResult{}, invalidParams("worktree_root is required")
+	case p.Task.Provider == "":
+		return api.AgentStartResult{}, invalidParams("task.provider is required")
 	case p.Task.WorkspaceID == "":
 		return api.AgentStartResult{}, invalidParams("task.workspace_id is required")
+	case p.Task.ID == "":
+		return api.AgentStartResult{}, invalidParams("task.id is required")
 	}
 
 	key := acp.Key{Workspace: p.Task.WorkspaceID, Provider: p.ProviderID}
