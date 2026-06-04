@@ -26,6 +26,8 @@ Schemas live under `schemas/` (`methods/<name>.params.json` / `.result.json`, `e
   - Params: `AgentCancelParams` · Result: _(notification)_
 - **`agent.stop`** — End a session and release its hold on the provider process.
   - Params: `AgentStopParams` · Result: _(notification)_
+- **`client.register`** — Register the connection's stable client id, role (editor/observer), and prompt capability.
+  - Params: `ClientRegisterParams` · Result: `ClientRegisterResult`
 
 ### daemon → bound editor
 

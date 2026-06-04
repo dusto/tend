@@ -231,3 +231,36 @@ func TestShutdownIdempotent(t *testing.T) {
 	srv.Shutdown()
 	srv.Shutdown() // must not panic or block
 }
+
+func TestClientRegisterAndDisconnect(t *testing.T) {
+	srv, path := newServer(t)
+	go func() { _ = srv.Serve() }()
+	t.Cleanup(srv.Shutdown)
+
+	client := dial(t, path)
+	var res api.ClientRegisterResult
+	if err := client.Call(testCtx(t), "client.register",
+		api.ClientRegisterParams{ClientID: "c1", Role: api.RoleEditor, PromptCapable: true}, &res); err != nil {
+		t.Fatalf("client.register: %v", err)
+	}
+	if res.ClientID != "c1" {
+		t.Fatalf("registered id = %q", res.ClientID)
+	}
+	cl, ok := srv.clients.Get("c1")
+	if !ok || !cl.IsEditor() || !cl.CanRespondToPrompts() {
+		t.Fatalf("registry entry = %+v, ok=%v", cl, ok)
+	}
+
+	// Disconnecting removes the client identity from the registry.
+	_ = client.Close()
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		if _, ok := srv.clients.Get("c1"); !ok {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("client identity not removed after disconnect")
+		}
+		time.Sleep(time.Millisecond)
+	}
+}
