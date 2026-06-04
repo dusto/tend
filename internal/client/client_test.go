@@ -113,3 +113,52 @@ func TestConnCloseWithoutRegisterIsSafe(t *testing.T) {
 	c, _ := newConn(t, NewRegistry())
 	c.Close() // must not panic when nothing was registered
 }
+
+func TestReconnectStaleCloseKeepsLiveIdentity(t *testing.T) {
+	r := NewRegistry()
+	old, _ := newConn(t, r)
+	if _, err := old.register(context.Background(), api.ClientRegisterParams{ClientID: "c1", Role: api.RoleObserver}); err != nil {
+		t.Fatalf("old register: %v", err)
+	}
+	// The same id reconnects on a new connection (e.g. as an editor) before the
+	// old connection's teardown runs.
+	fresh, _ := newConn(t, r)
+	if _, err := fresh.register(context.Background(), api.ClientRegisterParams{ClientID: "c1", Role: api.RoleEditor, PromptCapable: true}); err != nil {
+		t.Fatalf("fresh register: %v", err)
+	}
+
+	old.Close() // stale teardown must not evict the live replacement
+	cl, ok := r.Get("c1")
+	if !ok {
+		t.Fatal("live identity removed by stale connection close")
+	}
+	if !cl.IsEditor() || !cl.CanRespondToPrompts() {
+		t.Errorf("registry holds wrong identity after stale close: %+v", cl.Caps)
+	}
+
+	fresh.Close() // the owning connection does remove it
+	if _, ok := r.Get("c1"); ok {
+		t.Error("identity should be gone after the owning connection closes")
+	}
+}
+
+func TestReRegisterDifferentIDReleasesPrevious(t *testing.T) {
+	r := NewRegistry()
+	c, _ := newConn(t, r)
+	if _, err := c.register(context.Background(), api.ClientRegisterParams{ClientID: "c1", Role: api.RoleObserver}); err != nil {
+		t.Fatalf("first register: %v", err)
+	}
+	if _, err := c.register(context.Background(), api.ClientRegisterParams{ClientID: "c2", Role: api.RoleEditor}); err != nil {
+		t.Fatalf("second register: %v", err)
+	}
+	// The previous identity is released; only the new one remains.
+	if _, ok := r.Get("c1"); ok {
+		t.Error("previous identity c1 should be released on re-register")
+	}
+	if _, ok := r.Get("c2"); !ok {
+		t.Error("registry should hold the new identity c2")
+	}
+	if self, ok := c.Self(); !ok || self.ID != "c2" {
+		t.Errorf("self = %+v, ok=%v, want c2", self, ok)
+	}
+}

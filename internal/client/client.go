@@ -67,6 +67,17 @@ func (r *Registry) Remove(id api.ClientID) {
 	r.mu.Unlock()
 }
 
+// RemoveIf drops the client with id only if the current entry is c. This makes
+// removal ownership-aware: a stale connection closing after a reconnect already
+// replaced the entry will not delete the live replacement.
+func (r *Registry) RemoveIf(id api.ClientID, c *Client) {
+	r.mu.Lock()
+	if r.clients[id] == c {
+		delete(r.clients, id)
+	}
+	r.mu.Unlock()
+}
+
 // Get returns the client with id, if present.
 func (r *Registry) Get(id api.ClientID) (*Client, bool) {
 	r.mu.Lock()
@@ -115,10 +126,16 @@ func (c *Conn) register(_ context.Context, p api.ClientRegisterParams) (api.Clie
 	if !p.Role.Valid() {
 		return api.ClientRegisterResult{}, &rpc.Error{Code: rpc.CodeInvalidParams, Message: "client: invalid role " + string(p.Role)}
 	}
-	cl := c.registry.Register(p.ClientID, Capabilities{Role: p.Role, PromptCapable: p.PromptCapable})
 	c.mu.Lock()
+	defer c.mu.Unlock()
+	prev := c.self
+	cl := c.registry.Register(p.ClientID, Capabilities{Role: p.Role, PromptCapable: p.PromptCapable})
 	c.self = cl
-	c.mu.Unlock()
+	// If this connection previously registered a different id, release it so the
+	// old identity does not linger in the registry.
+	if prev != nil && prev.ID != cl.ID {
+		c.registry.RemoveIf(prev.ID, prev)
+	}
 	return api.ClientRegisterResult{ClientID: cl.ID}, nil
 }
 
@@ -129,14 +146,17 @@ func (c *Conn) Self() (*Client, bool) {
 	return c.self, c.self != nil
 }
 
-// Close removes this connection's registered identity from the shared registry.
-// It is the connection-teardown hook; it is safe to call when nothing was
-// registered.
+// Close removes this connection's registered identity from the shared registry,
+// but only if the registry still holds the exact entry this connection
+// registered: a stale connection closing after the same id reconnected on
+// another connection must not delete the live replacement. It is the
+// connection-teardown hook and is safe to call when nothing was registered.
 func (c *Conn) Close() {
 	c.mu.Lock()
 	self := c.self
+	c.self = nil
 	c.mu.Unlock()
 	if self != nil {
-		c.registry.Remove(self.ID)
+		c.registry.RemoveIf(self.ID, self)
 	}
 }
