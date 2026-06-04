@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "properties": {
+    "client_id": {
+      "type": "string"
+    },
+    "role": {
+      "type": "string"
+    },
+    "prompt_capable": {
+      "type": "boolean"
+    }
+  },
+  "additionalProperties": false,
+  "type": "object",
+  "required": [
+    "client_id",
+    "role",
+    "prompt_capable"
+  ]
+}

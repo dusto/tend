@@ -37,6 +37,7 @@ var Methods = []Method{
 	{Name: "agent.prompt", Direction: PluginToDaemon, Params: AgentPromptParams{}, Result: AgentPromptResult{}, Summary: "Run one prompt turn on a session (blocks until the turn ends); output streams as events on the session stream."},
 	{Name: "agent.cancel", Direction: PluginToDaemon, Params: AgentCancelParams{}, Result: nil, Summary: "Cancel the in-flight turn on a session, returning it to idle."},
 	{Name: "agent.stop", Direction: PluginToDaemon, Params: AgentStopParams{}, Result: nil, Summary: "End a session and release its hold on the provider process."},
+	{Name: "client.register", Direction: PluginToDaemon, Params: ClientRegisterParams{}, Result: ClientRegisterResult{}, Summary: "Register the connection's stable client id, role (editor/observer), and prompt capability."},
 
 	// daemon -> bound editor
 	{Name: "editor.read_buffer", Direction: DaemonToEditor, Params: EditorReadBufferParams{}, Result: EditorReadBufferResult{}, Summary: "Read a file editor-aware; returns content and its base (changedtick for an open buffer, content hash for a closed file)."},

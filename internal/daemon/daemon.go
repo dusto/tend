@@ -14,6 +14,7 @@ import (
 	"github.com/dusto/tend/api"
 	"github.com/dusto/tend/internal/acp"
 	"github.com/dusto/tend/internal/agent"
+	"github.com/dusto/tend/internal/client"
 	"github.com/dusto/tend/internal/dispatch"
 	"github.com/dusto/tend/internal/events"
 	"github.com/dusto/tend/internal/handshake"
@@ -41,6 +42,8 @@ type Server struct {
 	sessions *session.Registry
 	pool     *acp.Pool
 	agent    *agent.Service
+	// clients tracks connected-client identity/capabilities daemon-wide.
+	clients *client.Registry
 
 	mu     sync.Mutex
 	conns  map[*rpc.Conn]struct{}
@@ -64,6 +67,7 @@ func New(ln net.Listener, logPath string) (*Server, error) {
 		store:     events.NewStore(log),
 		log:       log,
 		sessions:  session.NewRegistry(),
+		clients:   client.NewRegistry(),
 		conns:     make(map[*rpc.Conn]struct{}),
 	}
 
@@ -75,7 +79,7 @@ func New(ln net.Listener, logPath string) (*Server, error) {
 	s.pool = acp.NewPool(spawnProvider(cfg, norm), s.store, acp.Options{Max: maxProcsPerProvider})
 	s.agent = agent.NewService(s.sessions, acp.NewManager(s.pool), norm)
 
-	if _, err := s.newMux(); err != nil {
+	if _, _, err := s.newMux(); err != nil {
 		_ = log.Close()
 		_ = s.pool.Close()
 		return nil, err
@@ -116,26 +120,33 @@ func spawnProvider(cfg *acp.Config, h rpc.Handler) acp.SpawnFunc {
 // connect handshake, the workspace methods (with a per-connection workspace
 // Manager), the event subscription methods (with a per-connection Pusher over
 // the shared event store), and the agent lifecycle methods (backed by the
-// shared, daemon-wide agent service), and enables params validation when a
-// validator is available.
-func (s *Server) newMux() (*dispatch.Mux, error) {
+// shared, daemon-wide agent service), and the client-registration method (with
+// a per-connection identity handler over the shared client registry), and
+// enables params validation when a validator is available. It returns a cleanup
+// to run when the connection ends, which drops the connection's registered
+// client identity.
+func (s *Server) newMux() (*dispatch.Mux, func(), error) {
 	mux := dispatch.NewMux(api.PluginToDaemon)
 	if err := handshake.Register(mux, s.epoch); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if err := workspace.Register(mux, workspace.NewManager(s.epoch)); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if err := events.RegisterClient(mux, events.NewPusher(s.store)); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if err := agent.Register(mux, s.agent); err != nil {
-		return nil, err
+		return nil, nil, err
+	}
+	cc := client.NewConn(s.clients)
+	if err := cc.Register(mux); err != nil {
+		return nil, nil, err
 	}
 	if s.validator != nil {
 		mux.UseValidator(s.validator)
 	}
-	return mux, nil
+	return mux, cc.Close, nil
 }
 
 // Epoch returns the daemon's process epoch.
@@ -153,19 +164,21 @@ func (s *Server) Serve() error {
 			}
 			return err
 		}
-		mux, err := s.newMux()
+		mux, cleanup, err := s.newMux()
 		if err != nil {
 			_ = nc.Close()
 			return err // deterministic registration failure
 		}
 		c := rpc.NewConn(nc, mux)
 		if !s.add(c) {
+			cleanup()
 			_ = c.Close()
 			return nil
 		}
 		go func() {
 			defer s.wg.Done()
 			<-c.Done()
+			cleanup()
 			s.remove(c)
 		}()
 	}
