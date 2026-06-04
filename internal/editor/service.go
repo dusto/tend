@@ -76,15 +76,17 @@ func (s *Service) Selection(ctx context.Context, sessionID api.SessionID) (api.E
 }
 
 // editorCaller resolves the reverse caller for a session's bound editor. It
-// returns ErrEditorUnavailable when the session is headless or the owner is no
-// longer a connected client with a reverse caller.
+// returns ErrEditorUnavailable when the session is headless or the owner's
+// current registry entry is no longer an editor-capable client with a reverse
+// caller — for example the same client id reconnected as an observer, in which
+// case it must not receive editor-local calls.
 func (s *Service) editorCaller(sessionID api.SessionID) (rpc.Caller, error) {
 	owner, err := s.binder.Owner(sessionID)
 	if err != nil {
 		return nil, err
 	}
 	cl, ok := s.clients.Get(owner)
-	if !ok || cl.Caller == nil {
+	if !ok || cl.Caller == nil || !cl.IsEditor() {
 		return nil, ErrEditorUnavailable
 	}
 	return cl.Caller, nil

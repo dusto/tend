@@ -114,6 +114,21 @@ func TestServiceHeadlessSessionUnavailable(t *testing.T) {
 	}
 }
 
+func TestServiceOwnerReRegisteredAsObserverUnavailable(t *testing.T) {
+	svc, editor := boundFixture(t)
+	// The bound editor id reconnects/re-registers as an observer; it must no
+	// longer receive editor-local reverse calls even though it still has a caller.
+	prev, _ := svc.clients.Get("ed1")
+	svc.clients.Register("ed1", client.Capabilities{Role: api.RoleObserver}, prev.Caller)
+
+	if _, err := svc.CurrentBuffer(ctx(t), "s1"); !errors.Is(err, ErrEditorUnavailable) {
+		t.Errorf("observer re-register err = %v, want ErrEditorUnavailable", err)
+	}
+	if len(editor.calls) != 0 {
+		t.Errorf("editor received calls after demotion: %v", editor.calls)
+	}
+}
+
 func TestServiceOwnerWithoutCallerUnavailable(t *testing.T) {
 	sessions := session.NewRegistry()
 	sessions.Create("s1", "codex", api.TaskRef{Provider: "beads", WorkspaceID: "ws1", ID: "t1"}, "/repo")
