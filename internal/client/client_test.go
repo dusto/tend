@@ -103,7 +103,9 @@ func TestConnCloseRemovesIdentity(t *testing.T) {
 		t.Fatalf("register: %v", err)
 	}
 
-	c.Close()
+	if !c.Close() {
+		t.Error("Close should report it removed the registered identity")
+	}
 	if _, ok := r.Get("c1"); ok {
 		t.Error("client should be removed from the registry on connection close")
 	}
@@ -111,7 +113,9 @@ func TestConnCloseRemovesIdentity(t *testing.T) {
 
 func TestConnCloseWithoutRegisterIsSafe(t *testing.T) {
 	c, _ := newConn(t, NewRegistry())
-	c.Close() // must not panic when nothing was registered
+	if c.Close() { // must not panic, and reports nothing was removed
+		t.Error("Close without a prior register should remove nothing")
+	}
 }
 
 func TestReconnectStaleCloseKeepsLiveIdentity(t *testing.T) {
@@ -127,7 +131,11 @@ func TestReconnectStaleCloseKeepsLiveIdentity(t *testing.T) {
 		t.Fatalf("fresh register: %v", err)
 	}
 
-	old.Close() // stale teardown must not evict the live replacement
+	// Stale teardown must not evict the live replacement and must report it did
+	// not remove the entry (so callers skip owner-only teardown).
+	if old.Close() {
+		t.Error("stale connection Close should report it removed nothing")
+	}
 	cl, ok := r.Get("c1")
 	if !ok {
 		t.Fatal("live identity removed by stale connection close")
@@ -136,7 +144,9 @@ func TestReconnectStaleCloseKeepsLiveIdentity(t *testing.T) {
 		t.Errorf("registry holds wrong identity after stale close: %+v", cl.Caps)
 	}
 
-	fresh.Close() // the owning connection does remove it
+	if !fresh.Close() { // the owning connection does remove it
+		t.Error("owning connection Close should report it removed the entry")
+	}
 	if _, ok := r.Get("c1"); ok {
 		t.Error("identity should be gone after the owning connection closes")
 	}
