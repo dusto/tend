@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$defs": {
+    "FileBase": {
+      "properties": {
+        "content_hash": {
+          "type": "string"
+        },
+        "changedtick": {
+          "type": "integer"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object"
+    }
+  },
+  "properties": {
+    "base": {
+      "$ref": "#/$defs/FileBase"
+    }
+  },
+  "additionalProperties": false,
+  "type": "object",
+  "required": [
+    "base"
+  ]
+}

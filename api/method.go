@@ -40,7 +40,10 @@ var Methods = []Method{
 	{Name: "client.register", Direction: PluginToDaemon, Params: ClientRegisterParams{}, Result: ClientRegisterResult{}, Summary: "Register the connection's stable client id, role (editor/observer), and prompt capability."},
 
 	// daemon -> bound editor
+	{Name: "editor.current_buffer", Direction: DaemonToEditor, Params: EditorCurrentBufferParams{}, Result: EditorCurrentBufferResult{}, Summary: "Return the editor's active buffer (its file URI, or empty when none)."},
 	{Name: "editor.read_buffer", Direction: DaemonToEditor, Params: EditorReadBufferParams{}, Result: EditorReadBufferResult{}, Summary: "Read a file editor-aware; returns content and its base (changedtick for an open buffer, content hash for a closed file)."},
+	{Name: "editor.write_buffer", Direction: DaemonToEditor, Params: EditorWriteBufferParams{}, Result: EditorWriteBufferResult{}, Summary: "Write whole-buffer content through the editor (respecting unsaved state); returns the new base."},
+	{Name: "editor.selection", Direction: DaemonToEditor, Params: EditorSelectionParams{}, Result: EditorSelectionResult{}, Summary: "Return the editor's current selection range, or empty when there is only a cursor."},
 
 	// daemon -> attached client
 	{Name: "event.push", Direction: DaemonToClient, Params: EventPushParams{}, Result: nil, Summary: "Deliver an event on a subscribed stream (at-least-once; clients dedup by (stream_id, seq, kind))."},
