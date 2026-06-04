@@ -30,6 +30,12 @@ type Session struct {
 	mu      sync.Mutex
 	status  api.SessionStatus
 	pending *Pending
+	// Editor binding: owner is the client currently serving editor-local calls
+	// ("" when headless); expectedEditor is the editor identity auto-bind matches,
+	// recorded when the binding is claimed and retained across disconnects so the
+	// same editor reattaches without a re-claim.
+	owner          api.ClientID
+	expectedEditor api.ClientID
 }
 
 // allowed lists the legal status transitions. ended is terminal.
@@ -98,6 +104,57 @@ func (s *Session) SetStatus(to api.SessionStatus, pending *Pending) error {
 	}
 	s.status = to
 	return nil
+}
+
+// Owner returns the session's editor-binding owner and whether one is bound.
+func (s *Session) Owner() (api.ClientID, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.owner, s.owner != ""
+}
+
+// ExpectedEditor returns the editor identity auto-bind matches, or "" if none
+// has been recorded yet.
+func (s *Session) ExpectedEditor() api.ClientID {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.expectedEditor
+}
+
+// BindOwner sets client as the editor-binding owner, taking over from any
+// existing owner, and records it as the expected editor identity. This is the
+// deliberate-claim path (manual takeover or initial bind).
+func (s *Session) BindOwner(client api.ClientID) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.owner = client
+	s.expectedEditor = client
+}
+
+// AutoBindOwner binds client only if the session is headless and client matches
+// the recorded expected editor identity. It reports whether it bound, so a
+// non-matching editor leaves the session headless rather than capturing it.
+func (s *Session) AutoBindOwner(client api.ClientID) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.owner != "" || s.expectedEditor == "" || client != s.expectedEditor {
+		return false
+	}
+	s.owner = client
+	return true
+}
+
+// ReleaseOwner clears the binding only if client is the current owner, leaving
+// the session headless. The expected editor identity is retained so the same
+// editor can reattach. It reports whether it released.
+func (s *Session) ReleaseOwner(client api.ClientID) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.owner == "" || s.owner != client {
+		return false
+	}
+	s.owner = ""
+	return true
 }
 
 // pendingKindFor reports the pending kind a waiting status requires, and whether

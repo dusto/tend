@@ -16,6 +16,7 @@ import (
 	"github.com/dusto/tend/internal/agent"
 	"github.com/dusto/tend/internal/client"
 	"github.com/dusto/tend/internal/dispatch"
+	"github.com/dusto/tend/internal/editor"
 	"github.com/dusto/tend/internal/events"
 	"github.com/dusto/tend/internal/handshake"
 	"github.com/dusto/tend/internal/rpc"
@@ -44,6 +45,8 @@ type Server struct {
 	agent    *agent.Service
 	// clients tracks connected-client identity/capabilities daemon-wide.
 	clients *client.Registry
+	// binder owns editor-binding decisions across sessions.
+	binder *editor.Binder
 
 	mu     sync.Mutex
 	conns  map[*rpc.Conn]struct{}
@@ -70,6 +73,7 @@ func New(ln net.Listener, logPath string) (*Server, error) {
 		clients:   client.NewRegistry(),
 		conns:     make(map[*rpc.Conn]struct{}),
 	}
+	s.binder = editor.NewBinder(s.sessions, s.clients)
 
 	// Assemble the shared agent stack: a normalizer that streams turn output to
 	// the event store, a process pool that spawns providers with that normalizer
@@ -146,7 +150,15 @@ func (s *Server) newMux() (*dispatch.Mux, func(), error) {
 	if s.validator != nil {
 		mux.UseValidator(s.validator)
 	}
-	return mux, cc.Close, nil
+	// On disconnect, release any editor bindings this client held (leaving those
+	// sessions headless) before dropping its identity from the registry.
+	cleanup := func() {
+		if self, ok := cc.Self(); ok {
+			s.binder.ReleaseClient(self.ID)
+		}
+		cc.Close()
+	}
+	return mux, cleanup, nil
 }
 
 // Epoch returns the daemon's process epoch.
