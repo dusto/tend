@@ -155,6 +155,42 @@ func TestRequestRequiresRunning(t *testing.T) {
 	}
 }
 
+func TestResolveStaleSessionDeniesAndErrors(t *testing.T) {
+	g, store := newGate(t)
+	sess := runningSession(t)
+
+	done := make(chan Outcome, 1)
+	go func() {
+		out, _ := g.Request(context.Background(), sess, "file_edit", nil)
+		done <- out
+	}()
+	waitFor(t, func() bool { _, ok := g.Get("appr-1"); return ok })
+
+	// The session leaves waiting_approval through another path (e.g. the turn was
+	// ended) before the approval is answered.
+	if err := sess.SetStatus(api.StatusEnded, nil); err != nil {
+		t.Fatalf("SetStatus ended: %v", err)
+	}
+
+	// Approving now must not let the gated tool proceed: Resolve fails and the
+	// waiter is unblocked with a denial.
+	if err := g.Resolve("appr-1", Decision{Approved: true}); err == nil {
+		t.Error("Resolve of a stale approval should return an error")
+	}
+	out := <-done
+	if out.Approved {
+		t.Errorf("stale approval delivered approved outcome: %+v", out)
+	}
+	if sess.Status() != api.StatusEnded {
+		t.Errorf("status = %q, want ended (resolve must not force running)", sess.Status())
+	}
+	// Only approval_requested was raised; no approval_resolved for a stale resolve.
+	evs, _, _ := store.Read("session:s1", 0, 10)
+	if len(evs) != 1 || evs[0].Type != "approval_requested" {
+		t.Errorf("events = %+v, want only approval_requested", evs)
+	}
+}
+
 func TestRequestCancelledDropsPending(t *testing.T) {
 	g, _ := newGate(t)
 	sess := runningSession(t)

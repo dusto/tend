@@ -14,6 +14,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"sync"
 	"time"
 
@@ -140,6 +141,11 @@ func (g *Gate) Request(ctx context.Context, sess *session.Session, kind string, 
 // Resolve settles the pending approval id with d: it returns the session to
 // running, raises approval_resolved, and unblocks the waiting Request. It returns
 // ErrUnknownApproval if no such pending approval exists.
+//
+// If the session has already left waiting_approval (for example it was ended or
+// cancelled through another path), the approval is stale: Resolve does not apply
+// the decision. It unblocks the waiting Request with a denial so the gated tool
+// cannot proceed, raises no approval_resolved, and returns an error.
 func (g *Gate) Resolve(id api.ApprovalID, d Decision) error {
 	p := g.claim(id)
 	if p == nil {
@@ -147,7 +153,10 @@ func (g *Gate) Resolve(id api.ApprovalID, d Decision) error {
 	}
 	// A resolved approval (approved or denied) returns the turn to running:
 	// either the action executes or the agent is told it was rejected.
-	_ = p.sess.SetStatus(api.StatusRunning, nil)
+	if err := p.sess.SetStatus(api.StatusRunning, nil); err != nil {
+		p.resolve <- Outcome{Approved: false, Reason: "session no longer awaiting approval"}
+		return fmt.Errorf("approvals: resolve %s: %w", id, err)
+	}
 
 	out := Outcome(d)
 	g.emit2(p.sess.Stream, "approval_resolved", api.ApprovalResolved{
