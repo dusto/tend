@@ -150,13 +150,15 @@ func (s *Server) newMux() (*dispatch.Mux, func(), error) {
 	if s.validator != nil {
 		mux.UseValidator(s.validator)
 	}
-	// On disconnect, release any editor bindings this client held (leaving those
-	// sessions headless) before dropping its identity from the registry.
+	// On disconnect, drop the identity (ownership-checked) and, only if this
+	// connection was the live owner of its client id, release the editor bindings
+	// it held so those sessions go headless. A stale connection whose id already
+	// reconnected on another connection removes nothing and releases nothing.
 	cleanup := func() {
-		if self, ok := cc.Self(); ok {
+		self, _ := cc.Self()
+		if cc.Close() {
 			s.binder.ReleaseClient(self.ID)
 		}
-		cc.Close()
 	}
 	return mux, cleanup, nil
 }

@@ -67,15 +67,18 @@ func (r *Registry) Remove(id api.ClientID) {
 	r.mu.Unlock()
 }
 
-// RemoveIf drops the client with id only if the current entry is c. This makes
-// removal ownership-aware: a stale connection closing after a reconnect already
-// replaced the entry will not delete the live replacement.
-func (r *Registry) RemoveIf(id api.ClientID, c *Client) {
+// RemoveIf drops the client with id only if the current entry is c, and reports
+// whether it removed it. This makes removal ownership-aware: a stale connection
+// closing after a reconnect already replaced the entry will not delete the live
+// replacement (and learns it was not the owner).
+func (r *Registry) RemoveIf(id api.ClientID, c *Client) bool {
 	r.mu.Lock()
+	defer r.mu.Unlock()
 	if r.clients[id] == c {
 		delete(r.clients, id)
+		return true
 	}
-	r.mu.Unlock()
+	return false
 }
 
 // Get returns the client with id, if present.
@@ -149,14 +152,17 @@ func (c *Conn) Self() (*Client, bool) {
 // Close removes this connection's registered identity from the shared registry,
 // but only if the registry still holds the exact entry this connection
 // registered: a stale connection closing after the same id reconnected on
-// another connection must not delete the live replacement. It is the
+// another connection must not delete the live replacement. It reports whether it
+// removed the entry (i.e. this connection was the live owner), so callers can
+// gate owner-only teardown such as releasing editor bindings. It is the
 // connection-teardown hook and is safe to call when nothing was registered.
-func (c *Conn) Close() {
+func (c *Conn) Close() bool {
 	c.mu.Lock()
 	self := c.self
 	c.self = nil
 	c.mu.Unlock()
-	if self != nil {
-		c.registry.RemoveIf(self.ID, self)
+	if self == nil {
+		return false
 	}
+	return c.registry.RemoveIf(self.ID, self)
 }
