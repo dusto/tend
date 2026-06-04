@@ -29,6 +29,10 @@ type Capabilities struct {
 type Client struct {
 	ID   api.ClientID
 	Caps Capabilities
+	// Caller reaches the client's connection for reverse-direction calls (e.g.
+	// editor-local methods routed to a bound editor). It is nil when the identity
+	// was registered without a connection (such as in unit tests).
+	Caller rpc.Caller
 }
 
 // IsEditor reports whether the client can serve editor-local operations.
@@ -50,12 +54,14 @@ func NewRegistry() *Registry {
 	return &Registry{clients: make(map[api.ClientID]*Client)}
 }
 
-// Register records id with caps, replacing any previous entry for that id (a
-// reconnecting client re-registers its identity), and returns the stored Client.
-func (r *Registry) Register(id api.ClientID, caps Capabilities) *Client {
+// Register records id with caps and a reverse caller, replacing any previous
+// entry for that id (a reconnecting client re-registers its identity), and
+// returns the stored Client. caller may be nil when no connection backs the
+// identity.
+func (r *Registry) Register(id api.ClientID, caps Capabilities, caller rpc.Caller) *Client {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	c := &Client{ID: id, Caps: caps}
+	c := &Client{ID: id, Caps: caps, Caller: caller}
 	r.clients[id] = c
 	return c
 }
@@ -122,7 +128,7 @@ func (c *Conn) Register(m *dispatch.Mux) error {
 	return dispatch.Handle(m, Method, c.register)
 }
 
-func (c *Conn) register(_ context.Context, p api.ClientRegisterParams) (api.ClientRegisterResult, error) {
+func (c *Conn) register(ctx context.Context, p api.ClientRegisterParams) (api.ClientRegisterResult, error) {
 	if p.ClientID == "" {
 		return api.ClientRegisterResult{}, &rpc.Error{Code: rpc.CodeInvalidParams, Message: "client: client_id is required"}
 	}
@@ -132,7 +138,9 @@ func (c *Conn) register(_ context.Context, p api.ClientRegisterParams) (api.Clie
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	prev := c.self
-	cl := c.registry.Register(p.ClientID, Capabilities{Role: p.Role, PromptCapable: p.PromptCapable})
+	// Capture the connection serving this request as the client's reverse caller,
+	// so editor-local methods can later be routed back to it.
+	cl := c.registry.Register(p.ClientID, Capabilities{Role: p.Role, PromptCapable: p.PromptCapable}, rpc.ConnFromContext(ctx))
 	c.self = cl
 	// If this connection previously registered a different id, release it so the
 	// old identity does not linger in the registry.

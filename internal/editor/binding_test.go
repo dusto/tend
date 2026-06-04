@@ -20,9 +20,9 @@ func newFixture(t *testing.T) fixture {
 	sessions := session.NewRegistry()
 	sessions.Create("s1", "codex", api.TaskRef{Provider: "beads", WorkspaceID: "ws1", ID: "t1"}, "/repo")
 	clients := client.NewRegistry()
-	clients.Register("ed1", client.Capabilities{Role: api.RoleEditor, PromptCapable: true})
-	clients.Register("ed2", client.Capabilities{Role: api.RoleEditor})
-	clients.Register("obs", client.Capabilities{Role: api.RoleObserver})
+	clients.Register("ed1", client.Capabilities{Role: api.RoleEditor, PromptCapable: true}, nil)
+	clients.Register("ed2", client.Capabilities{Role: api.RoleEditor}, nil)
+	clients.Register("obs", client.Capabilities{Role: api.RoleObserver}, nil)
 	return fixture{binder: NewBinder(sessions, clients), sessions: sessions, clients: clients}
 }
 

@@ -31,8 +31,14 @@ Schemas live under `schemas/` (`methods/<name>.params.json` / `.result.json`, `e
 
 ### daemon → bound editor
 
+- **`editor.current_buffer`** — Return the editor's active buffer (its file URI, or empty when none).
+  - Params: `EditorCurrentBufferParams` · Result: `EditorCurrentBufferResult`
 - **`editor.read_buffer`** — Read a file editor-aware; returns content and its base (changedtick for an open buffer, content hash for a closed file).
   - Params: `EditorReadBufferParams` · Result: `EditorReadBufferResult`
+- **`editor.write_buffer`** — Write whole-buffer content through the editor (respecting unsaved state); returns the new base.
+  - Params: `EditorWriteBufferParams` · Result: `EditorWriteBufferResult`
+- **`editor.selection`** — Return the editor's current selection range, or empty when there is only a cursor.
+  - Params: `EditorSelectionParams` · Result: `EditorSelectionResult`
 
 ### daemon → attached client
 

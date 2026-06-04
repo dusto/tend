@@ -10,8 +10,8 @@ import (
 
 func TestRegistryRegisterGetRemove(t *testing.T) {
 	r := NewRegistry()
-	ed := r.Register("c1", Capabilities{Role: api.RoleEditor, PromptCapable: true})
-	r.Register("c2", Capabilities{Role: api.RoleObserver})
+	ed := r.Register("c1", Capabilities{Role: api.RoleEditor, PromptCapable: true}, nil)
+	r.Register("c2", Capabilities{Role: api.RoleObserver}, nil)
 
 	if !ed.IsEditor() || !ed.CanRespondToPrompts() {
 		t.Errorf("editor caps = %+v", ed.Caps)
@@ -34,8 +34,8 @@ func TestRegistryRegisterGetRemove(t *testing.T) {
 
 func TestRegisterReplacesOnReconnect(t *testing.T) {
 	r := NewRegistry()
-	r.Register("c1", Capabilities{Role: api.RoleObserver})
-	r.Register("c1", Capabilities{Role: api.RoleEditor, PromptCapable: true})
+	r.Register("c1", Capabilities{Role: api.RoleObserver}, nil)
+	r.Register("c1", Capabilities{Role: api.RoleEditor, PromptCapable: true}, nil)
 
 	c, ok := r.Get("c1")
 	if !ok || !c.IsEditor() || !c.CanRespondToPrompts() {

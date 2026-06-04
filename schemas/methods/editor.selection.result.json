@@ -1,0 +1,55 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$defs": {
+    "Position": {
+      "properties": {
+        "line": {
+          "type": "integer"
+        },
+        "byte_col": {
+          "type": "integer"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "line",
+        "byte_col"
+      ]
+    },
+    "Range": {
+      "properties": {
+        "start": {
+          "$ref": "#/$defs/Position"
+        },
+        "end": {
+          "$ref": "#/$defs/Position"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "start",
+        "end"
+      ]
+    }
+  },
+  "properties": {
+    "uri": {
+      "type": "string"
+    },
+    "range": {
+      "$ref": "#/$defs/Range"
+    },
+    "empty": {
+      "type": "boolean"
+    }
+  },
+  "additionalProperties": false,
+  "type": "object",
+  "required": [
+    "uri",
+    "range",
+    "empty"
+  ]
+}

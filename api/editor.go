@@ -2,6 +2,55 @@ package api
 
 // Params/result types for daemon->editor methods (implemented by the bound editor).
 
+// Position is a location in a buffer: a 0-based line index and a byte offset
+// within that line's UTF-8 bytes — not a UTF-16 code unit and not a rune index.
+// This is the unambiguous column unit the file-mutation and selection contracts
+// share.
+type Position struct {
+	Line    int `json:"line"`
+	ByteCol int `json:"byte_col"`
+}
+
+// Range is a half-open span [Start, End) within a buffer.
+type Range struct {
+	Start Position `json:"start"`
+	End   Position `json:"end"`
+}
+
+// EditorCurrentBufferParams requests the editor's active buffer.
+type EditorCurrentBufferParams struct{}
+
+// EditorCurrentBufferResult reports the editor's active buffer. URI is empty
+// when no file-backed buffer is active.
+type EditorCurrentBufferResult struct {
+	URI string `json:"uri"`
+}
+
+// EditorSelectionParams requests the editor's current selection.
+type EditorSelectionParams struct{}
+
+// EditorSelectionResult reports the active selection. Empty is true when there
+// is only a cursor and no selected span.
+type EditorSelectionResult struct {
+	URI   string `json:"uri"`
+	Range Range  `json:"range"`
+	Empty bool   `json:"empty"`
+}
+
+// EditorWriteBufferParams writes whole-buffer content through the editor,
+// respecting unsaved state. Base, when set, is the revision the write expects;
+// the editor reports a conflict if the buffer has moved on.
+type EditorWriteBufferParams struct {
+	URI     string   `json:"uri"`
+	Content string   `json:"content"`
+	Base    FileBase `json:"base,omitzero"`
+}
+
+// EditorWriteBufferResult reports the buffer's new base after the write.
+type EditorWriteBufferResult struct {
+	Base FileBase `json:"base"`
+}
+
 // EditorReadBufferParams requests an editor-aware read of a file.
 type EditorReadBufferParams struct {
 	URI string `json:"uri"`
