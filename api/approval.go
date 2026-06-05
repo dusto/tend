@@ -1,5 +1,10 @@
 package api
 
+import (
+	"encoding/json"
+	"time"
+)
+
 // Approval kinds: the operation an approval gates.
 const (
 	ApprovalFileEdit   = "file_edit"
@@ -55,4 +60,37 @@ type PaneRunApproval struct {
 type CodeActionApproval struct {
 	Title string `json:"title"`
 	URI   string `json:"uri"`
+}
+
+// --- approval.list / approval.respond (plugin -> daemon) ---
+
+// ApprovalListParams lists pending approvals. SessionID, when set, filters to one
+// session; empty lists all.
+type ApprovalListParams struct {
+	SessionID SessionID `json:"session_id,omitempty"`
+}
+
+// ApprovalListResult is the set of pending approvals, each a self-contained
+// payload (envelope + detail).
+type ApprovalListResult struct {
+	Approvals []ApprovalSummary `json:"approvals"`
+}
+
+// ApprovalSummary is one pending approval as delivered to a client: the
+// gate-owned envelope (id, session, kind, expiry) plus the decision Detail
+// (api.ApprovalDetail).
+type ApprovalSummary struct {
+	ApprovalID ApprovalID      `json:"approval_id"`
+	SessionID  SessionID       `json:"session_id"`
+	Kind       string          `json:"kind"`
+	ExpiresAt  time.Time       `json:"expires_at,omitzero"`
+	Detail     json.RawMessage `json:"detail,omitempty"`
+}
+
+// ApprovalRespondParams resolves a pending approval. Only prompt-capable clients
+// may call it.
+type ApprovalRespondParams struct {
+	ApprovalID ApprovalID `json:"approval_id"`
+	Approved   bool       `json:"approved"`
+	Reason     string     `json:"reason,omitempty"`
 }

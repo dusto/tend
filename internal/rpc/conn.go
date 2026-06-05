@@ -21,12 +21,14 @@ type Handler interface {
 	Handle(ctx context.Context, req *Request) (any, error)
 }
 
-// Caller is the request side of a peer: it sends a request and waits for the
-// reply. *Conn satisfies it. It lets code that only needs to issue calls (such
-// as routing a reverse-direction call to a bound editor) depend on the
-// capability rather than the whole Conn.
+// Caller is the outbound side of a peer: it sends requests (and waits for the
+// reply) and fire-and-forget notifications. *Conn satisfies it. It lets code that
+// only needs to send to the peer (routing a reverse call to a bound editor,
+// broadcasting a prompt to a client) depend on the capability rather than the
+// whole Conn.
 type Caller interface {
 	Call(ctx context.Context, method string, params, result any) error
+	Notify(ctx context.Context, method string, params any) error
 }
 
 // HandlerFunc adapts a function to Handler.

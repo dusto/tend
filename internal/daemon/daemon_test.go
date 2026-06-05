@@ -260,6 +260,47 @@ func TestFilePatchWired(t *testing.T) {
 	}
 }
 
+func TestApprovalRespondCapabilityGated(t *testing.T) {
+	srv, path := newServer(t)
+	go func() { _ = srv.Serve() }()
+	t.Cleanup(srv.Shutdown)
+
+	respond := func(c *rpc.Conn) error {
+		return c.Call(testCtx(t), "approval.respond",
+			api.ApprovalRespondParams{ApprovalID: "ghost", Approved: true}, nil)
+	}
+
+	// An observer (not prompt-capable) is refused before the approval is even
+	// looked up.
+	observer := dial(t, path)
+	if _, err := register(t, observer, "obs", api.RoleObserver, false); err != nil {
+		t.Fatalf("register observer: %v", err)
+	}
+	err := respond(observer)
+	var rpcErr *rpc.Error
+	if !errors.As(err, &rpcErr) || rpcErr.Code != api.ErrNotPromptCapable {
+		t.Fatalf("observer respond err = %v, want not_prompt_capable", err)
+	}
+
+	// A prompt-capable client passes the gate and is told the approval is unknown.
+	editor := dial(t, path)
+	if _, err := register(t, editor, "ed", api.RoleEditor, true); err != nil {
+		t.Fatalf("register editor: %v", err)
+	}
+	err = respond(editor)
+	if !errors.As(err, &rpcErr) || rpcErr.Code != rpc.CodeInvalidParams {
+		t.Fatalf("editor respond err = %v, want invalid-params (unknown approval)", err)
+	}
+}
+
+func register(t *testing.T, c *rpc.Conn, id string, role api.ClientRole, promptCapable bool) (api.ClientRegisterResult, error) {
+	t.Helper()
+	var res api.ClientRegisterResult
+	err := c.Call(testCtx(t), "client.register",
+		api.ClientRegisterParams{ClientID: api.ClientID(id), Role: role, PromptCapable: promptCapable}, &res)
+	return res, err
+}
+
 func TestShutdownIdempotent(t *testing.T) {
 	srv, _ := newServer(t)
 	go func() { _ = srv.Serve() }()

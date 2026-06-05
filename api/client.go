@@ -1,6 +1,9 @@
 package api
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"time"
+)
 
 // Params types for daemon->attached-client methods (notifications; no result).
 
@@ -15,10 +18,14 @@ type PromptRaiseParams struct {
 	Kind      string    `json:"kind"` // "approval" | "clarification"
 	// ApprovalID is set when Kind == "approval".
 	ApprovalID ApprovalID `json:"approval_id,omitempty"`
-	// Prompt is human-facing text. Detail carries decision context (a diff,
-	// command + cwd, code-action target, base hashes, expiry) for approvals.
+	// Prompt is human-facing text. Detail carries the decision context
+	// (api.ApprovalDetail: a diff + bases, command + cwd, or code-action target)
+	// for approvals.
 	Prompt string          `json:"prompt"`
 	Detail json.RawMessage `json:"detail,omitempty"`
+	// ExpiresAt is the approval's deadline, if any (the gate-owned envelope value
+	// that accompanies the detail).
+	ExpiresAt time.Time `json:"expires_at,omitzero"`
 }
 
 // SubscriptionClosedParams signals that one stream subscription was dropped.

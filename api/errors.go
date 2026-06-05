@@ -18,6 +18,9 @@ const (
 	// ErrNoActiveWorkspace: workspace.current was called before any workspace
 	// was opened on the connection.
 	ErrNoActiveWorkspace = 1005
+	// ErrNotPromptCapable: a client that did not register as prompt-capable tried
+	// to resolve a prompt (approval.respond / session.clarify).
+	ErrNotPromptCapable = 1006
 )
 
 // CursorCompactedData accompanies ErrCursorCompacted: the client should resume
@@ -49,4 +52,5 @@ var ErrorDefs = []ErrorDef{
 	{Code: ErrEditorUnavailable, Name: "editor_unavailable", Data: nil, Summary: "An editor-local capability was requested but no editor holds the session's binding."},
 	{Code: ErrNoWorkspaceMutation, Name: "no_workspace_mutation", Data: nil, Summary: "A mutating operation was attempted outside git (only an ephemeral read-only workspace is available)."},
 	{Code: ErrNoActiveWorkspace, Name: "no_active_workspace", Data: nil, Summary: "workspace.current was called before any workspace was opened on the connection."},
+	{Code: ErrNotPromptCapable, Name: "not_prompt_capable", Data: nil, Summary: "A client that did not register as prompt-capable tried to resolve a prompt."},
 }

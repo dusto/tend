@@ -13,7 +13,11 @@
     "prompt": {
       "type": "string"
     },
-    "detail": true
+    "detail": true,
+    "expires_at": {
+      "type": "string",
+      "format": "date-time"
+    }
   },
   "additionalProperties": false,
   "type": "object",
