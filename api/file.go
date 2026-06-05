@@ -2,6 +2,15 @@ package api
 
 // Params/result types for the plugin->daemon file methods.
 
+// TextEdit replaces the bytes spanned by Range with NewText. The edits in a
+// patch are expressed against the base snapshot and must be non-overlapping; see
+// the patch package for application semantics and the {line, byte_col} position
+// unit.
+type TextEdit struct {
+	Range   Range  `json:"range"`
+	NewText string `json:"new_text"`
+}
+
 // FileReadParams reads a repo file editor-aware. SessionID selects the session
 // whose bound editor (if any) provides live buffer content.
 type FileReadParams struct {

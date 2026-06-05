@@ -7,8 +7,6 @@ package files
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"net/url"
@@ -19,6 +17,7 @@ import (
 	"github.com/dusto/tend/api"
 	"github.com/dusto/tend/internal/dispatch"
 	"github.com/dusto/tend/internal/editor"
+	"github.com/dusto/tend/internal/patch"
 	"github.com/dusto/tend/internal/rpc"
 	"github.com/dusto/tend/internal/session"
 )
@@ -106,10 +105,9 @@ func (s *Service) Read(ctx context.Context, p api.FileReadParams) (api.FileReadR
 	if err != nil {
 		return api.FileReadResult{}, fmt.Errorf("files: reading %s: %w", p.URI, err)
 	}
-	sum := sha256.Sum256(data)
 	return api.FileReadResult{
 		Content: string(data),
-		Base:    api.FileBase{ContentHash: hex.EncodeToString(sum[:])},
+		Base:    api.FileBase{ContentHash: patch.ContentHash(data)},
 		Open:    false,
 	}, nil
 }
