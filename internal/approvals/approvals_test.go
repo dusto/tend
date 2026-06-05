@@ -136,6 +136,37 @@ func TestRequestResolvedDenied(t *testing.T) {
 	}
 }
 
+func TestPendingCarriesExpiry(t *testing.T) {
+	base := time.Unix(1000, 0)
+	g := NewGate(nil, Options{
+		NewID: func() api.ApprovalID { return "appr-1" },
+		Now:   func() time.Time { return base },
+		TTL:   30 * time.Second,
+	})
+	sess := runningSession(t)
+	go func() { _, _ = g.Request(context.Background(), sess, "file_edit", nil) }()
+	waitFor(t, func() bool { _, ok := g.Get("appr-1"); return ok })
+
+	p, _ := g.Get("appr-1")
+	if !p.Created.Equal(base) {
+		t.Errorf("created = %v, want %v", p.Created, base)
+	}
+	if want := base.Add(30 * time.Second); !p.ExpiresAt.Equal(want) {
+		t.Errorf("expires = %v, want %v", p.ExpiresAt, want)
+	}
+}
+
+func TestPendingNoExpiryWithoutTTL(t *testing.T) {
+	g := NewGate(nil, Options{NewID: func() api.ApprovalID { return "appr-1" }})
+	sess := runningSession(t)
+	go func() { _, _ = g.Request(context.Background(), sess, "file_edit", nil) }()
+	waitFor(t, func() bool { _, ok := g.Get("appr-1"); return ok })
+
+	if p, _ := g.Get("appr-1"); !p.ExpiresAt.IsZero() {
+		t.Errorf("expires = %v, want zero (no TTL)", p.ExpiresAt)
+	}
+}
+
 func TestResolveUnknown(t *testing.T) {
 	g, _ := newGate(t)
 	if err := g.Resolve("nope", Decision{Approved: true}); !errors.Is(err, ErrUnknownApproval) {

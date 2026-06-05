@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"net"
 	"sync"
+	"time"
 
 	"github.com/dusto/tend/api"
 	"github.com/dusto/tend/internal/acp"
@@ -30,6 +31,10 @@ import (
 // {workspace, provider}. Many task-scoped sessions may share one process, so a
 // small cap is enough.
 const maxProcsPerProvider = 8
+
+// approvalTTL is how long a pending approval's payload advertises before it is
+// considered expired. Enforcing the deadline is layered on separately.
+const approvalTTL = 5 * time.Minute
 
 // Server accepts connections on a listener and serves each over JSON-RPC. It is
 // safe for concurrent use; Shutdown is idempotent.
@@ -80,7 +85,7 @@ func New(ln net.Listener, logPath string) (*Server, error) {
 		conns:     make(map[*rpc.Conn]struct{}),
 	}
 	s.binder = editor.NewBinder(s.sessions, s.clients)
-	s.gate = approvals.NewGate(s.store, approvals.Options{})
+	s.gate = approvals.NewGate(s.store, approvals.Options{TTL: approvalTTL})
 	s.files = files.NewService(s.sessions, editor.NewService(s.binder, s.clients), s.gate, files.Options{})
 
 	// Assemble the shared agent stack: a normalizer that streams turn output to

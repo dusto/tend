@@ -44,22 +44,26 @@ type Emitter interface {
 	Publish(api.Event) (api.Event, error)
 }
 
-// Pending is a snapshot of an approval still awaiting a decision.
+// Pending is a snapshot of an approval still awaiting a decision. ExpiresAt is
+// the gate's deadline (zero when no TTL is configured); enforcing it is layered
+// on separately.
 type Pending struct {
 	ID        api.ApprovalID
 	SessionID api.SessionID
 	Kind      string
 	Detail    json.RawMessage
 	Created   time.Time
+	ExpiresAt time.Time
 }
 
 type pending struct {
-	id      api.ApprovalID
-	sess    *session.Session
-	kind    string
-	detail  json.RawMessage
-	created time.Time
-	resolve chan Outcome
+	id        api.ApprovalID
+	sess      *session.Session
+	kind      string
+	detail    json.RawMessage
+	created   time.Time
+	expiresAt time.Time
+	resolve   chan Outcome
 }
 
 // Gate owns the set of pending approvals and the block/resolve handshake. It is
@@ -68,18 +72,22 @@ type Gate struct {
 	emit  Emitter
 	newID func() api.ApprovalID
 	now   func() time.Time
+	ttl   time.Duration
 
 	mu      sync.Mutex
 	pending map[api.ApprovalID]*pending
 }
 
-// Options configures a Gate. The zero value is valid: crypto/rand ids and
-// time.Now.
+// Options configures a Gate. The zero value is valid: crypto/rand ids, time.Now,
+// and no expiry.
 type Options struct {
 	// NewID returns a fresh approval id; nil uses a random hex generator.
 	NewID func() api.ApprovalID
 	// Now returns the current time; nil uses time.Now.
 	Now func() time.Time
+	// TTL stamps each approval's ExpiresAt as created+TTL. Zero leaves ExpiresAt
+	// zero (no expiry). Enforcing the deadline is layered on separately.
+	TTL time.Duration
 }
 
 // NewGate returns a Gate that raises events through emit (which may be nil to
@@ -93,7 +101,7 @@ func NewGate(emit Emitter, opts Options) *Gate {
 	if now == nil {
 		now = time.Now
 	}
-	return &Gate{emit: emit, newID: newID, now: now, pending: make(map[api.ApprovalID]*pending)}
+	return &Gate{emit: emit, newID: newID, now: now, ttl: opts.TTL, pending: make(map[api.ApprovalID]*pending)}
 }
 
 // Request gates a mutating action on sess: it marks the session waiting_approval
@@ -107,13 +115,19 @@ func (g *Gate) Request(ctx context.Context, sess *session.Session, kind string, 
 	if err := sess.SetStatus(api.StatusWaitingApproval, &session.Pending{Kind: api.PendingApproval, ID: string(id)}); err != nil {
 		return Outcome{}, err
 	}
+	created := g.now()
+	var expiresAt time.Time
+	if g.ttl > 0 {
+		expiresAt = created.Add(g.ttl)
+	}
 	p := &pending{
-		id:      id,
-		sess:    sess,
-		kind:    kind,
-		detail:  detail,
-		created: g.now(),
-		resolve: make(chan Outcome, 1),
+		id:        id,
+		sess:      sess,
+		kind:      kind,
+		detail:    detail,
+		created:   created,
+		expiresAt: expiresAt,
+		resolve:   make(chan Outcome, 1),
 	}
 	g.mu.Lock()
 	g.pending[id] = p
@@ -225,6 +239,7 @@ func (p *pending) snapshot() Pending {
 		Kind:      p.kind,
 		Detail:    append(json.RawMessage(nil), p.detail...),
 		Created:   p.created,
+		ExpiresAt: p.expiresAt,
 	}
 }
 

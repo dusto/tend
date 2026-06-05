@@ -23,6 +23,7 @@ import (
 
 	"github.com/dusto/tend/api"
 	"github.com/dusto/tend/internal/approvals"
+	"github.com/dusto/tend/internal/diff"
 	"github.com/dusto/tend/internal/editor"
 	"github.com/dusto/tend/internal/patch"
 	"github.com/dusto/tend/internal/session"
@@ -34,9 +35,6 @@ const (
 	MethodPatch = "file.patch"
 	MethodWrite = "file.write"
 )
-
-// approvalKind labels a file-edit approval.
-const approvalKind = "file_edit"
 
 // Errors returned by the file service.
 var (
@@ -155,8 +153,18 @@ func (s *Service) mutate(ctx context.Context, sessionID api.SessionID, uri strin
 	}
 
 	csid := s.newID()
-	detail, _ := json.Marshal(mutationDetail{ChangeSetID: csid, URI: uri, Base: base})
-	outcome, err := s.approver.Request(ctx, sess, approvalKind, detail)
+	detail, _ := json.Marshal(api.ApprovalDetail{
+		Kind: api.ApprovalFileEdit,
+		FileEdit: &api.FileEditApproval{
+			ChangeSetID: csid,
+			Targets: []api.FileEditTarget{{
+				URI:  uri,
+				Base: base,
+				Diff: diff.Unified(string(st.content), string(newContent)),
+			}},
+		},
+	})
+	outcome, err := s.approver.Request(ctx, sess, api.ApprovalFileEdit, detail)
 	if err != nil {
 		return api.FileMutationResult{}, err
 	}
@@ -274,14 +282,6 @@ func writeFileAtomic(path string, data []byte) error {
 		return fmt.Errorf("files: rename: %w", err)
 	}
 	return nil
-}
-
-// mutationDetail is the decision context carried on a file-edit approval. Richer
-// self-contained payloads (diff, expiry) are layered on separately.
-type mutationDetail struct {
-	ChangeSetID api.ChangeSetID `json:"change_set_id"`
-	URI         string          `json:"uri"`
-	Base        api.FileBase    `json:"base"`
 }
 
 // resolvePath converts a file:// uri to a filesystem path and verifies it falls

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/dusto/tend/api"
@@ -72,8 +73,41 @@ func TestPatchAppliedToDisk(t *testing.T) {
 	if res.Base.ContentHash != patch.ContentHash(got) {
 		t.Errorf("result base hash = %q, want hash of new content", res.Base.ContentHash)
 	}
-	if ap.kind != approvalKind {
-		t.Errorf("approval kind = %q, want %q", ap.kind, approvalKind)
+	if ap.kind != api.ApprovalFileEdit {
+		t.Errorf("approval kind = %q, want %q", ap.kind, api.ApprovalFileEdit)
+	}
+}
+
+func TestPatchApprovalDetailIsSelfContained(t *testing.T) {
+	ed := &fakeEditor{err: editor.ErrEditorUnavailable}
+	ap := &fakeApprover{outcome: approvals.Outcome{Approved: true}}
+	svc, _, path := newMutator(t, ed, ap, "a\nb\nc\n")
+
+	if _, err := svc.Patch(context.Background(), api.FilePatchParams{
+		SessionID: "s1", URI: fileURI(path),
+		Edits: []api.TextEdit{{Range: api.Range{Start: api.Position{Line: 1, ByteCol: 0}, End: api.Position{Line: 1, ByteCol: 1}}, NewText: "B"}},
+		Base:  diskBase("a\nb\nc\n"),
+	}); err != nil {
+		t.Fatalf("Patch: %v", err)
+	}
+
+	var detail api.ApprovalDetail
+	if err := json.Unmarshal(ap.detail, &detail); err != nil {
+		t.Fatalf("approval detail: %v", err)
+	}
+	if detail.Kind != api.ApprovalFileEdit || detail.FileEdit == nil {
+		t.Fatalf("detail = %+v", detail)
+	}
+	if detail.FileEdit.ChangeSetID != "cs1" || len(detail.FileEdit.Targets) != 1 {
+		t.Fatalf("file edit = %+v", detail.FileEdit)
+	}
+	tgt := detail.FileEdit.Targets[0]
+	if tgt.URI != fileURI(path) || tgt.Base.ContentHash == "" {
+		t.Errorf("target = %+v", tgt)
+	}
+	// The diff shows the b -> B line change, so a non-editor client can review it.
+	if !strings.Contains(tgt.Diff, "-b") || !strings.Contains(tgt.Diff, "+B") {
+		t.Errorf("diff missing the change:\n%s", tgt.Diff)
 	}
 }
 
