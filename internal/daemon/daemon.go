@@ -14,6 +14,7 @@ import (
 	"github.com/dusto/tend/api"
 	"github.com/dusto/tend/internal/acp"
 	"github.com/dusto/tend/internal/agent"
+	"github.com/dusto/tend/internal/approvals"
 	"github.com/dusto/tend/internal/client"
 	"github.com/dusto/tend/internal/dispatch"
 	"github.com/dusto/tend/internal/editor"
@@ -46,9 +47,11 @@ type Server struct {
 	agent    *agent.Service
 	// clients tracks connected-client identity/capabilities daemon-wide.
 	clients *client.Registry
-	// binder owns editor-binding decisions across sessions; files serves repo-file
-	// tools (editor-aware reads) over the editor reverse-RPC.
+	// binder owns editor-binding decisions across sessions; gate is the shared
+	// approval gate; files serves repo-file tools (editor-aware reads and gated
+	// mutations) over the editor reverse-RPC and the gate.
 	binder *editor.Binder
+	gate   *approvals.Gate
 	files  *files.Service
 
 	mu     sync.Mutex
@@ -77,7 +80,8 @@ func New(ln net.Listener, logPath string) (*Server, error) {
 		conns:     make(map[*rpc.Conn]struct{}),
 	}
 	s.binder = editor.NewBinder(s.sessions, s.clients)
-	s.files = files.NewService(s.sessions, editor.NewService(s.binder, s.clients))
+	s.gate = approvals.NewGate(s.store, approvals.Options{})
+	s.files = files.NewService(s.sessions, editor.NewService(s.binder, s.clients), s.gate, files.Options{})
 
 	// Assemble the shared agent stack: a normalizer that streams turn output to
 	// the event store, a process pool that spawns providers with that normalizer

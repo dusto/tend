@@ -30,6 +30,10 @@ Schemas live under `schemas/` (`methods/<name>.params.json` / `.result.json`, `e
   - Params: `ClientRegisterParams` · Result: `ClientRegisterResult`
 - **`file.read`** — Read a repo file editor-aware (non-mutating): live buffer content + changedtick when open, else disk content + content hash.
   - Params: `FileReadParams` · Result: `FileReadResult`
+- **`file.patch`** — Apply non-overlapping text edits to a repo file (task-bound, approval-gated, base-checked); single-target change set.
+  - Params: `FilePatchParams` · Result: `FileMutationResult`
+- **`file.write`** — Replace a repo file's whole content (task-bound, approval-gated, base-checked); single-target change set.
+  - Params: `FileWriteParams` · Result: `FileMutationResult`
 
 ### daemon → bound editor
 
