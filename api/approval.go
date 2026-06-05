@@ -1,7 +1,5 @@
 package api
 
-import "time"
-
 // Approval kinds: the operation an approval gates.
 const (
 	ApprovalFileEdit   = "file_edit"
@@ -9,15 +7,14 @@ const (
 	ApprovalCodeAction = "code_action"
 )
 
-// ApprovalDetail is the self-contained decision context for a pending approval:
-// everything a client needs to review and decide without an editor preview. It
-// carries the operation kind and exactly one matching body. ExpiresAt is the
-// gate's deadline for the approval (zero when no expiry applies).
+// ApprovalDetail is the decision context for a pending approval: everything about
+// the operation a client needs to review and decide without an editor preview. It
+// carries the operation kind and exactly one matching body. The gate-owned
+// envelope — approval id, created/expiry timestamps — is delivered alongside this
+// detail (see the approval gate's pending state and the prompt/list methods), so
+// it is not duplicated here.
 type ApprovalDetail struct {
-	ApprovalID ApprovalID `json:"approval_id"`
-	SessionID  SessionID  `json:"session_id"`
-	Kind       string     `json:"kind"`
-	ExpiresAt  time.Time  `json:"expires_at,omitzero"`
+	Kind string `json:"kind"`
 
 	FileEdit   *FileEditApproval   `json:"file_edit,omitempty"`
 	PaneRun    *PaneRunApproval    `json:"pane_run,omitempty"`

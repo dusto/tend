@@ -154,8 +154,7 @@ func (s *Service) mutate(ctx context.Context, sessionID api.SessionID, uri strin
 
 	csid := s.newID()
 	detail, _ := json.Marshal(api.ApprovalDetail{
-		SessionID: sessionID,
-		Kind:      api.ApprovalFileEdit,
+		Kind: api.ApprovalFileEdit,
 		FileEdit: &api.FileEditApproval{
 			ChangeSetID: csid,
 			Targets: []api.FileEditTarget{{
