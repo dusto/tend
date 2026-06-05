@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$defs": {
+    "ApprovalSummary": {
+      "properties": {
+        "approval_id": {
+          "type": "string"
+        },
+        "session_id": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "expires_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "detail": true
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "approval_id",
+        "session_id",
+        "kind"
+      ]
+    }
+  },
+  "properties": {
+    "approvals": {
+      "items": {
+        "$ref": "#/$defs/ApprovalSummary"
+      },
+      "type": "array"
+    }
+  },
+  "additionalProperties": false,
+  "type": "object",
+  "required": [
+    "approvals"
+  ]
+}

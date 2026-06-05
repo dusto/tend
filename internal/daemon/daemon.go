@@ -85,7 +85,10 @@ func New(ln net.Listener, logPath string) (*Server, error) {
 		conns:     make(map[*rpc.Conn]struct{}),
 	}
 	s.binder = editor.NewBinder(s.sessions, s.clients)
-	s.gate = approvals.NewGate(s.store, approvals.Options{TTL: approvalTTL})
+	s.gate = approvals.NewGate(s.store, approvals.Options{
+		TTL:      approvalTTL,
+		Prompter: &promptBroadcaster{clients: s.clients},
+	})
 	s.files = files.NewService(s.sessions, editor.NewService(s.binder, s.clients), s.gate, files.Options{})
 
 	// Assemble the shared agent stack: a normalizer that streams turn output to
@@ -161,6 +164,15 @@ func (s *Server) newMux() (*dispatch.Mux, func(), error) {
 		return nil, nil, err
 	}
 	if err := files.Register(mux, s.files); err != nil {
+		return nil, nil, err
+	}
+	// approval.respond is capability-gated on the calling connection's identity.
+	if err := approvals.RegisterResponder(mux, s.gate, func() (approvals.Responder, bool) {
+		if self, ok := cc.Self(); ok {
+			return self, true
+		}
+		return nil, false
+	}); err != nil {
 		return nil, nil, err
 	}
 	if s.validator != nil {

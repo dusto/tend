@@ -44,6 +44,13 @@ type Emitter interface {
 	Publish(api.Event) (api.Event, error)
 }
 
+// Prompter is notified when an approval is requested, so it can raise the prompt
+// to attached clients (via prompt.raise). It is called with a snapshot and must
+// not block.
+type Prompter interface {
+	RaiseApproval(Pending)
+}
+
 // Pending is a snapshot of an approval still awaiting a decision. ExpiresAt is
 // the gate's deadline (zero when no TTL is configured); enforcing it is layered
 // on separately.
@@ -69,10 +76,11 @@ type pending struct {
 // Gate owns the set of pending approvals and the block/resolve handshake. It is
 // safe for concurrent use.
 type Gate struct {
-	emit  Emitter
-	newID func() api.ApprovalID
-	now   func() time.Time
-	ttl   time.Duration
+	emit     Emitter
+	prompter Prompter
+	newID    func() api.ApprovalID
+	now      func() time.Time
+	ttl      time.Duration
 
 	mu      sync.Mutex
 	pending map[api.ApprovalID]*pending
@@ -88,6 +96,8 @@ type Options struct {
 	// TTL stamps each approval's ExpiresAt as created+TTL. Zero leaves ExpiresAt
 	// zero (no expiry). Enforcing the deadline is layered on separately.
 	TTL time.Duration
+	// Prompter, if set, is notified to raise each requested approval to clients.
+	Prompter Prompter
 }
 
 // NewGate returns a Gate that raises events through emit (which may be nil to
@@ -101,7 +111,7 @@ func NewGate(emit Emitter, opts Options) *Gate {
 	if now == nil {
 		now = time.Now
 	}
-	return &Gate{emit: emit, newID: newID, now: now, ttl: opts.TTL, pending: make(map[api.ApprovalID]*pending)}
+	return &Gate{emit: emit, prompter: opts.Prompter, newID: newID, now: now, ttl: opts.TTL, pending: make(map[api.ApprovalID]*pending)}
 }
 
 // Request gates a mutating action on sess: it marks the session waiting_approval
@@ -138,6 +148,9 @@ func (g *Gate) Request(ctx context.Context, sess *session.Session, kind string, 
 		ApprovalID: id,
 		Kind:       kind,
 	})
+	if g.prompter != nil {
+		g.prompter.RaiseApproval(p.snapshot())
+	}
 
 	select {
 	case <-ctx.Done():

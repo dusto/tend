@@ -34,6 +34,10 @@ Schemas live under `schemas/` (`methods/<name>.params.json` / `.result.json`, `e
   - Params: `FilePatchParams` · Result: `FileMutationResult`
 - **`file.write`** — Replace a repo file's whole content (task-bound, approval-gated, base-checked); single-target change set.
   - Params: `FileWriteParams` · Result: `FileMutationResult`
+- **`approval.list`** — List pending approvals (self-contained payloads), optionally filtered by session.
+  - Params: `ApprovalListParams` · Result: `ApprovalListResult`
+- **`approval.respond`** — Resolve a pending approval (approve/deny); returns an ack. Only prompt-capable clients may call it.
+  - Params: `ApprovalRespondParams` · Result: `ApprovalRespondResult`
 
 ### daemon → bound editor
 
@@ -89,4 +93,6 @@ TEND-specific JSON-RPC error codes (carried as the error `code`, with typed `dat
 - **`1004` `no_workspace_mutation`** — A mutating operation was attempted outside git (only an ephemeral read-only workspace is available).
   - Data: _(none)_
 - **`1005` `no_active_workspace`** — workspace.current was called before any workspace was opened on the connection.
+  - Data: _(none)_
+- **`1006` `not_prompt_capable`** — A client that did not register as prompt-capable tried to resolve a prompt.
   - Data: _(none)_
