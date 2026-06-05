@@ -225,6 +225,25 @@ func TestEventsSubscribeWired(t *testing.T) {
 	}
 }
 
+func TestFileReadWired(t *testing.T) {
+	srv, path := newServer(t)
+	go func() { _ = srv.Serve() }()
+	t.Cleanup(srv.Shutdown)
+
+	client := dial(t, path)
+	// No such session: proves file.read is registered and routed (it reaches the
+	// service, which rejects the unknown session) rather than method-not-found.
+	err := client.Call(testCtx(t), "file.read",
+		api.FileReadParams{SessionID: "nope", URI: "file:///repo/a.go"}, nil)
+	if err == nil {
+		t.Fatal("file.read with an unknown session should error")
+	}
+	var rpcErr *rpc.Error
+	if !errors.As(err, &rpcErr) || rpcErr.Code != rpc.CodeInvalidParams {
+		t.Fatalf("err = %v, want invalid-params rpc error", err)
+	}
+}
+
 func TestShutdownIdempotent(t *testing.T) {
 	srv, _ := newServer(t)
 	go func() { _ = srv.Serve() }()

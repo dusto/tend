@@ -18,6 +18,7 @@ import (
 	"github.com/dusto/tend/internal/dispatch"
 	"github.com/dusto/tend/internal/editor"
 	"github.com/dusto/tend/internal/events"
+	"github.com/dusto/tend/internal/files"
 	"github.com/dusto/tend/internal/handshake"
 	"github.com/dusto/tend/internal/rpc"
 	"github.com/dusto/tend/internal/session"
@@ -45,8 +46,10 @@ type Server struct {
 	agent    *agent.Service
 	// clients tracks connected-client identity/capabilities daemon-wide.
 	clients *client.Registry
-	// binder owns editor-binding decisions across sessions.
+	// binder owns editor-binding decisions across sessions; files serves repo-file
+	// tools (editor-aware reads) over the editor reverse-RPC.
 	binder *editor.Binder
+	files  *files.Service
 
 	mu     sync.Mutex
 	conns  map[*rpc.Conn]struct{}
@@ -74,6 +77,7 @@ func New(ln net.Listener, logPath string) (*Server, error) {
 		conns:     make(map[*rpc.Conn]struct{}),
 	}
 	s.binder = editor.NewBinder(s.sessions, s.clients)
+	s.files = files.NewService(s.sessions, editor.NewService(s.binder, s.clients))
 
 	// Assemble the shared agent stack: a normalizer that streams turn output to
 	// the event store, a process pool that spawns providers with that normalizer
@@ -145,6 +149,9 @@ func (s *Server) newMux() (*dispatch.Mux, func(), error) {
 	}
 	cc := client.NewConn(s.clients)
 	if err := cc.Register(mux); err != nil {
+		return nil, nil, err
+	}
+	if err := files.Register(mux, s.files); err != nil {
 		return nil, nil, err
 	}
 	if s.validator != nil {
