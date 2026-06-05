@@ -36,8 +36,8 @@ Schemas live under `schemas/` (`methods/<name>.params.json` / `.result.json`, `e
   - Params: `FileWriteParams` · Result: `FileMutationResult`
 - **`approval.list`** — List pending approvals (self-contained payloads), optionally filtered by session.
   - Params: `ApprovalListParams` · Result: `ApprovalListResult`
-- **`approval.respond`** — Resolve a pending approval (approve/deny). Only prompt-capable clients may call it.
-  - Params: `ApprovalRespondParams` · Result: _(notification)_
+- **`approval.respond`** — Resolve a pending approval (approve/deny); returns an ack. Only prompt-capable clients may call it.
+  - Params: `ApprovalRespondParams` · Result: `ApprovalRespondResult`
 
 ### daemon → bound editor
 

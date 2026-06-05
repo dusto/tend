@@ -60,18 +60,18 @@ func (h *responder) list(_ context.Context, p api.ApprovalListParams) (api.Appro
 	return api.ApprovalListResult{Approvals: out}, nil
 }
 
-func (h *responder) respond(_ context.Context, p api.ApprovalRespondParams) (struct{}, error) {
+func (h *responder) respond(_ context.Context, p api.ApprovalRespondParams) (api.ApprovalRespondResult, error) {
 	who, ok := h.self()
 	if !ok || !who.CanRespondToPrompts() {
-		return struct{}{}, &rpc.Error{Code: api.ErrNotPromptCapable, Message: "approvals: client is not prompt-capable"}
+		return api.ApprovalRespondResult{}, &rpc.Error{Code: api.ErrNotPromptCapable, Message: "approvals: client is not prompt-capable"}
 	}
 	err := h.gate.Resolve(p.ApprovalID, Decision{Approved: p.Approved, Reason: p.Reason})
 	switch {
 	case err == nil:
-		return struct{}{}, nil
+		return api.ApprovalRespondResult{}, nil
 	case errors.Is(err, ErrUnknownApproval):
-		return struct{}{}, &rpc.Error{Code: rpc.CodeInvalidParams, Message: err.Error()}
+		return api.ApprovalRespondResult{}, &rpc.Error{Code: rpc.CodeInvalidParams, Message: err.Error()}
 	default:
-		return struct{}{}, &rpc.Error{Code: rpc.CodeInternalError, Message: err.Error()}
+		return api.ApprovalRespondResult{}, &rpc.Error{Code: rpc.CodeInternalError, Message: err.Error()}
 	}
 }

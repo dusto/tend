@@ -94,3 +94,9 @@ type ApprovalRespondParams struct {
 	Approved   bool       `json:"approved"`
 	Reason     string     `json:"reason,omitempty"`
 }
+
+// ApprovalRespondResult is the (empty) acknowledgement that a respond was
+// accepted. It is a request, not a notification: the caller must be able to
+// observe capability and validity errors. The resolution itself is broadcast to
+// clients as an approval_resolved event.
+type ApprovalRespondResult struct{}

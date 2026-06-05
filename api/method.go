@@ -42,7 +42,7 @@ var Methods = []Method{
 	{Name: "file.patch", Direction: PluginToDaemon, Params: FilePatchParams{}, Result: FileMutationResult{}, Summary: "Apply non-overlapping text edits to a repo file (task-bound, approval-gated, base-checked); single-target change set."},
 	{Name: "file.write", Direction: PluginToDaemon, Params: FileWriteParams{}, Result: FileMutationResult{}, Summary: "Replace a repo file's whole content (task-bound, approval-gated, base-checked); single-target change set."},
 	{Name: "approval.list", Direction: PluginToDaemon, Params: ApprovalListParams{}, Result: ApprovalListResult{}, Summary: "List pending approvals (self-contained payloads), optionally filtered by session."},
-	{Name: "approval.respond", Direction: PluginToDaemon, Params: ApprovalRespondParams{}, Result: nil, Summary: "Resolve a pending approval (approve/deny). Only prompt-capable clients may call it."},
+	{Name: "approval.respond", Direction: PluginToDaemon, Params: ApprovalRespondParams{}, Result: ApprovalRespondResult{}, Summary: "Resolve a pending approval (approve/deny); returns an ack. Only prompt-capable clients may call it."},
 
 	// daemon -> bound editor
 	{Name: "editor.current_buffer", Direction: DaemonToEditor, Params: EditorCurrentBufferParams{}, Result: EditorCurrentBufferResult{}, Summary: "Return the editor's active buffer (its file URI, or empty when none)."},
