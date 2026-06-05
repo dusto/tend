@@ -27,3 +27,33 @@ type FileReadResult struct {
 	Base    FileBase `json:"base"`
 	Open    bool     `json:"open"`
 }
+
+// FilePatchParams applies an ordered set of non-overlapping text edits to a repo
+// file. SessionID makes the edit task-bound; Base is the revision the edits were
+// computed against (from file.read) and is re-verified before applying.
+type FilePatchParams struct {
+	SessionID SessionID  `json:"session_id"`
+	URI       string     `json:"uri"`
+	Edits     []TextEdit `json:"edits"`
+	Base      FileBase   `json:"base"`
+}
+
+// FileWriteParams replaces a repo file's whole content. Base is the revision the
+// new content was computed against and is re-verified before applying.
+type FileWriteParams struct {
+	SessionID SessionID `json:"session_id"`
+	URI       string    `json:"uri"`
+	Content   string    `json:"content"`
+	Base      FileBase  `json:"base"`
+}
+
+// FileMutationResult reports the outcome of a file.patch or file.write. Every
+// mutation is a change set with a daemon-assigned id. Applied is false when the
+// approval was denied (Reason explains); a stale base instead returns a conflict
+// error. Base is the file's new base after a successful apply.
+type FileMutationResult struct {
+	ChangeSetID ChangeSetID `json:"change_set_id"`
+	Applied     bool        `json:"applied"`
+	Reason      string      `json:"reason,omitempty"`
+	Base        FileBase    `json:"base,omitzero"`
+}

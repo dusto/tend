@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$defs": {
+    "FileBase": {
+      "properties": {
+        "content_hash": {
+          "type": "string"
+        },
+        "changedtick": {
+          "type": "integer"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object"
+    }
+  },
+  "properties": {
+    "session_id": {
+      "type": "string"
+    },
+    "uri": {
+      "type": "string"
+    },
+    "content": {
+      "type": "string"
+    },
+    "base": {
+      "$ref": "#/$defs/FileBase"
+    }
+  },
+  "additionalProperties": false,
+  "type": "object",
+  "required": [
+    "session_id",
+    "uri",
+    "content",
+    "base"
+  ]
+}

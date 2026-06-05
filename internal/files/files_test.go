@@ -16,11 +16,15 @@ import (
 )
 
 // fakeEditor stands in for editor.Service: it returns a canned read result or an
-// error (e.g. editor.ErrEditorUnavailable for a headless session).
+// error (e.g. editor.ErrEditorUnavailable for a headless session), and records
+// writes routed to it.
 type fakeEditor struct {
 	res  api.EditorReadBufferResult
 	err  error
 	uris []string
+
+	wrote     *api.EditorWriteBufferParams // last write routed here
+	writeBase api.FileBase                 // base returned from a write
 }
 
 func (f *fakeEditor) ReadBuffer(_ context.Context, _ api.SessionID, p api.EditorReadBufferParams) (api.EditorReadBufferResult, error) {
@@ -28,18 +32,25 @@ func (f *fakeEditor) ReadBuffer(_ context.Context, _ api.SessionID, p api.Editor
 	return f.res, f.err
 }
 
+func (f *fakeEditor) WriteBuffer(_ context.Context, _ api.SessionID, p api.EditorWriteBufferParams) (api.EditorWriteBufferResult, error) {
+	cp := p
+	f.wrote = &cp
+	return api.EditorWriteBufferResult{Base: f.writeBase}, nil
+}
+
 func fileURI(path string) string {
 	return (&url.URL{Scheme: "file", Path: path}).String()
 }
 
 // newService creates a session rooted at a temp worktree and a file service with
-// the given fake editor, returning the service and the worktree root.
-func newService(t *testing.T, ed editorReader) (*Service, string) {
+// the given fake editor, returning the service and the worktree root. The
+// approver is nil (the read tests do not mutate); mutation tests use newMutator.
+func newService(t *testing.T, ed editorClient) (*Service, string) {
 	t.Helper()
 	root := t.TempDir()
 	r := session.NewRegistry()
 	r.Create("s1", "codex", api.TaskRef{Provider: "beads", WorkspaceID: "ws1", ID: "t1"}, root)
-	return NewService(r, ed), root
+	return NewService(r, ed, nil, Options{}), root
 }
 
 func TestReadFromDiskWhenHeadless(t *testing.T) {

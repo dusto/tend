@@ -244,6 +244,22 @@ func TestFileReadWired(t *testing.T) {
 	}
 }
 
+func TestFilePatchWired(t *testing.T) {
+	srv, path := newServer(t)
+	go func() { _ = srv.Serve() }()
+	t.Cleanup(srv.Shutdown)
+
+	client := dial(t, path)
+	// Unknown session: reaches the file service (rejected) rather than
+	// method-not-found, proving file.patch is registered and routed.
+	err := client.Call(testCtx(t), "file.patch",
+		api.FilePatchParams{SessionID: "nope", URI: "file:///repo/a.go"}, nil)
+	var rpcErr *rpc.Error
+	if !errors.As(err, &rpcErr) || rpcErr.Code != rpc.CodeInvalidParams {
+		t.Fatalf("err = %v, want invalid-params rpc error", err)
+	}
+}
+
 func TestShutdownIdempotent(t *testing.T) {
 	srv, _ := newServer(t)
 	go func() { _ = srv.Serve() }()
