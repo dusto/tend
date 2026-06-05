@@ -115,17 +115,39 @@ func (s *Service) Read(ctx context.Context, p api.FileReadParams) (api.FileReadR
 }
 
 // resolvePath converts a file:// uri to a filesystem path and verifies it falls
-// within the worktree root, refusing path-traversal outside it.
+// within the worktree root, refusing traversal outside it. Symlinks are resolved
+// before the check, so a link inside the worktree that points outside cannot
+// escape it.
 func resolvePath(uri, worktreeRoot string) (string, error) {
 	u, err := url.Parse(uri)
 	if err != nil || u.Scheme != "file" || u.Path == "" {
 		return "", ErrBadURI
 	}
-	path := filepath.Clean(u.Path)
-	if !within(worktreeRoot, path) {
+	root := resolveSymlinks(filepath.Clean(worktreeRoot))
+	path := resolveSymlinks(filepath.Clean(u.Path))
+	if !within(root, path) {
 		return "", ErrOutsideWorkspace
 	}
 	return path, nil
+}
+
+// resolveSymlinks returns path with symlinks resolved. When the leaf does not
+// exist yet (so EvalSymlinks fails), it resolves the longest existing ancestor
+// and re-appends the remaining components, so a symlinked parent still cannot
+// disguise a path that escapes the worktree.
+func resolveSymlinks(path string) string {
+	suffix := ""
+	for p := path; ; {
+		if resolved, err := filepath.EvalSymlinks(p); err == nil {
+			return filepath.Join(resolved, suffix)
+		}
+		parent := filepath.Dir(p)
+		if parent == p {
+			return path // nothing along the path resolves
+		}
+		suffix = filepath.Join(filepath.Base(p), suffix)
+		p = parent
+	}
 }
 
 // within reports whether path is root itself or lies beneath it.

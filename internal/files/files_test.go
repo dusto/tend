@@ -137,6 +137,34 @@ func TestReadRejectsPathOutsideWorktree(t *testing.T) {
 	}
 }
 
+func TestReadRejectsSymlinkEscape(t *testing.T) {
+	ed := &fakeEditor{err: editor.ErrEditorUnavailable}
+	svc, root := newService(t, ed)
+
+	// A secret outside the worktree, reachable through a symlink inside it.
+	outside := t.TempDir()
+	secret := filepath.Join(outside, "secret.txt")
+	if err := os.WriteFile(secret, []byte("top secret\n"), 0o644); err != nil {
+		t.Fatalf("write secret: %v", err)
+	}
+
+	// A symlinked directory inside the worktree pointing outside it.
+	if err := os.Symlink(outside, filepath.Join(root, "link")); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	if _, err := svc.Read(context.Background(), api.FileReadParams{SessionID: "s1", URI: fileURI(filepath.Join(root, "link", "secret.txt"))}); !errors.Is(err, ErrOutsideWorkspace) {
+		t.Errorf("through symlinked dir: err = %v, want ErrOutsideWorkspace", err)
+	}
+
+	// A symlinked file inside the worktree pointing at the secret directly.
+	if err := os.Symlink(secret, filepath.Join(root, "ln.txt")); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	if _, err := svc.Read(context.Background(), api.FileReadParams{SessionID: "s1", URI: fileURI(filepath.Join(root, "ln.txt"))}); !errors.Is(err, ErrOutsideWorkspace) {
+		t.Errorf("through symlinked file: err = %v, want ErrOutsideWorkspace", err)
+	}
+}
+
 func TestReadRejectsNonFileURI(t *testing.T) {
 	svc, _ := newService(t, &fakeEditor{err: editor.ErrEditorUnavailable})
 	if _, err := svc.Read(context.Background(), api.FileReadParams{SessionID: "s1", URI: "http://example.com/a"}); !errors.Is(err, ErrBadURI) {
