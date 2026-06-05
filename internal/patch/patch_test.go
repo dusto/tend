@@ -127,6 +127,19 @@ func TestApplyAdjacentEditsAllowed(t *testing.T) {
 	}
 }
 
+func TestApplyInsertAtReplacementStartIsOrderIndependent(t *testing.T) {
+	// A zero-length insert at the start of a replacement is touching, not
+	// overlapping, and must apply before the replacement regardless of input
+	// order: "abcd" with [1,3)->"X" and [1,1)->"Y" -> "aYXd".
+	want := "aYXd"
+	if got := mustApply(t, "abcd", edit(0, 1, 0, 3, "X"), edit(0, 1, 0, 1, "Y")); got != want {
+		t.Errorf("replacement-first = %q, want %q", got, want)
+	}
+	if got := mustApply(t, "abcd", edit(0, 1, 0, 1, "Y"), edit(0, 1, 0, 3, "X")); got != want {
+		t.Errorf("insert-first = %q, want %q", got, want)
+	}
+}
+
 func TestApplyEmptyBase(t *testing.T) {
 	if got := mustApply(t, "", edit(0, 0, 0, 0, "hi")); got != "hi" {
 		t.Errorf("insert into empty = %q", got)

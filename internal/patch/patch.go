@@ -33,7 +33,9 @@ var (
 // Apply returns base transformed by edits. All ranges are interpreted against
 // base (the snapshot), not against already-mutated content, so an earlier edit
 // never shifts a later edit's offsets. Edits may be given in any order; they must
-// be in range and non-overlapping (touching ranges are allowed).
+// be in range and non-overlapping (touching ranges are allowed). A zero-length
+// insert that shares its start with another edit applies before that edit, so
+// the result does not depend on input order.
 func Apply(base []byte, edits []api.TextEdit) ([]byte, error) {
 	li := indexLines(base)
 
@@ -58,11 +60,18 @@ func Apply(base []byte, edits []api.TextEdit) ([]byte, error) {
 		rs[i] = resolved{start: start, end: end, text: e.NewText, order: i}
 	}
 
-	// Apply in position order; ties keep input order so adjacent inserts at the
-	// same offset compose predictably.
+	// Apply in position order. At a shared start a zero-length insert sorts before
+	// an edit that consumes bytes, so an insert at the boundary of a replacement
+	// is deterministic regardless of input order (the insert lands before the
+	// replaced span). Among edits that tie on both, input order is kept so
+	// adjacent inserts at the same offset compose predictably.
 	sort.SliceStable(rs, func(i, j int) bool {
 		if rs[i].start != rs[j].start {
 			return rs[i].start < rs[j].start
+		}
+		iInsert, jInsert := rs[i].start == rs[i].end, rs[j].start == rs[j].end
+		if iInsert != jInsert {
+			return iInsert
 		}
 		return rs[i].order < rs[j].order
 	})
