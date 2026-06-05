@@ -38,6 +38,7 @@ var Methods = []Method{
 	{Name: "agent.cancel", Direction: PluginToDaemon, Params: AgentCancelParams{}, Result: nil, Summary: "Cancel the in-flight turn on a session, returning it to idle."},
 	{Name: "agent.stop", Direction: PluginToDaemon, Params: AgentStopParams{}, Result: nil, Summary: "End a session and release its hold on the provider process."},
 	{Name: "client.register", Direction: PluginToDaemon, Params: ClientRegisterParams{}, Result: ClientRegisterResult{}, Summary: "Register the connection's stable client id, role (editor/observer), and prompt capability."},
+	{Name: "file.read", Direction: PluginToDaemon, Params: FileReadParams{}, Result: FileReadResult{}, Summary: "Read a repo file editor-aware (non-mutating): live buffer content + changedtick when open, else disk content + content hash."},
 
 	// daemon -> bound editor
 	{Name: "editor.current_buffer", Direction: DaemonToEditor, Params: EditorCurrentBufferParams{}, Result: EditorCurrentBufferResult{}, Summary: "Return the editor's active buffer (its file URI, or empty when none)."},

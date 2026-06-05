@@ -28,6 +28,8 @@ Schemas live under `schemas/` (`methods/<name>.params.json` / `.result.json`, `e
   - Params: `AgentStopParams` · Result: _(notification)_
 - **`client.register`** — Register the connection's stable client id, role (editor/observer), and prompt capability.
   - Params: `ClientRegisterParams` · Result: `ClientRegisterResult`
+- **`file.read`** — Read a repo file editor-aware (non-mutating): live buffer content + changedtick when open, else disk content + content hash.
+  - Params: `FileReadParams` · Result: `FileReadResult`
 
 ### daemon → bound editor
 
