@@ -53,6 +53,7 @@ var Methods = []Method{
 	{Name: "pane.list", Direction: PluginToDaemon, Params: PaneListParams{}, Result: PaneListResult{}, Summary: "List panes with running and view state, optionally filtered by workspace."},
 	{Name: "pane.read", Direction: PluginToDaemon, Params: PaneReadParams{}, Result: PaneReadResult{}, Summary: "Read a pane's captured output (optionally the last Tail bytes)."},
 	{Name: "pane.close", Direction: PluginToDaemon, Params: PaneCloseParams{}, Result: PaneCloseResult{}, Summary: "Close a pane: terminate its process group and release the PTY."},
+	{Name: "pane.run", Direction: PluginToDaemon, Params: PaneRunParams{}, Result: PaneRunResult{}, Summary: "Run a command in a pane (task-bound, approval-gated); output arrives on the pane stream."},
 
 	// daemon -> bound editor
 	{Name: "editor.current_buffer", Direction: DaemonToEditor, Params: EditorCurrentBufferParams{}, Result: EditorCurrentBufferResult{}, Summary: "Return the editor's active buffer (its file URI, or empty when none)."},

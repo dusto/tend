@@ -99,7 +99,7 @@ func New(ln net.Listener, logPath string) (*Server, error) {
 	// adapter is wired; the task.* contract and event bridge are independent of it.
 	s.tasks = tasks.NewService(func(ws api.WorkspaceID) tasks.Provider { return tasks.NewFake(ws) }, s.store)
 	s.ptyMgr = pty.NewManager()
-	s.panes = pty.NewService(s.ptyMgr, s.sessions, s.gate, "")
+	s.panes = pty.NewService(s.ptyMgr, s.sessions, s.gate, s.store, "")
 
 	// Assemble the shared agent stack: a normalizer that streams turn output to
 	// the event store, a process pool that spawns providers with that normalizer

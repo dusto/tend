@@ -83,6 +83,8 @@ var EventDefs = []EventDef{
 	{Type: "task_updated", Scope: ScopeWorkspace, Payload: TaskChange{}, Summary: "A task changed (e.g. claimed or linked). Repo-wide: delivered on the workspace stream."},
 	{Type: "task_commented", Scope: ScopeWorkspace, Payload: TaskChange{}, Summary: "A comment was added to a task. Repo-wide: delivered on the workspace stream."},
 	{Type: "task_closed", Scope: ScopeWorkspace, Payload: TaskChange{}, Summary: "A task was closed. Repo-wide: delivered on the workspace stream."},
+	{Type: "pane_output", Scope: ScopePane, Payload: PaneOutput{}, Summary: "A chunk of a pane's output, on the pane stream. Lossy under load; pane.read is the authoritative scrollback."},
+	{Type: "pane_exited", Scope: ScopePane, Payload: PaneExited{}, Summary: "A pane's process exited."},
 }
 
 // --- Event payloads (initial set) ---

@@ -351,6 +351,14 @@ func TestPaneMethodsWired(t *testing.T) {
 	if err := client.Call(testCtx(t), "pane.close", api.PaneCloseParams{PaneID: opened.PaneID}, &api.PaneCloseResult{}); err != nil {
 		t.Fatalf("pane.close: %v", err)
 	}
+
+	// pane.run is registered and routes to the service (unknown pane is rejected
+	// there rather than method-not-found).
+	err := client.Call(testCtx(t), "pane.run", api.PaneRunParams{PaneID: "nope", Command: "ls", SessionID: "s1"}, &api.PaneRunResult{})
+	var rpcErr *rpc.Error
+	if !errors.As(err, &rpcErr) || rpcErr.Code != rpc.CodeInvalidParams {
+		t.Fatalf("pane.run err = %v, want invalid-params rpc error", err)
+	}
 }
 
 func TestShutdownIdempotent(t *testing.T) {

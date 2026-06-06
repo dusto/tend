@@ -64,3 +64,28 @@ type PaneCloseParams struct {
 
 // PaneCloseResult acknowledges a close.
 type PaneCloseResult struct{}
+
+// PaneRunParams runs a command in a pane. It is task-bound (SessionID is
+// required) and approval-gated.
+type PaneRunParams struct {
+	PaneID    PaneID    `json:"pane_id"`
+	Command   string    `json:"command"`
+	SessionID SessionID `json:"session_id"`
+}
+
+// PaneRunResult acknowledges that a run was accepted (the command was approved
+// and sent to the pane); output arrives on the pane's event stream.
+type PaneRunResult struct{}
+
+// PaneOutput is a chunk of a pane's output, delivered on the pane stream. Data
+// is JSON bytes (base64), so arbitrary terminal output is safe.
+type PaneOutput struct {
+	PaneID PaneID `json:"pane_id"`
+	Data   []byte `json:"data"`
+}
+
+// PaneExited signals that a pane's process has exited.
+type PaneExited struct {
+	PaneID   PaneID `json:"pane_id"`
+	ExitCode int    `json:"exit_code"`
+}

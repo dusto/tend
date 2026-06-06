@@ -19,7 +19,13 @@ const (
 	MethodList  = "pane.list"
 	MethodRead  = "pane.read"
 	MethodClose = "pane.close"
+	MethodRun   = "pane.run"
 )
+
+// Emitter publishes events. *events.Store satisfies it.
+type Emitter interface {
+	Publish(api.Event) (api.Event, error)
+}
 
 // ErrNoSession reports that an agent-initiated open named an unknown session.
 var ErrNoSession = errors.New("pty: unknown session")
@@ -42,19 +48,21 @@ type Service struct {
 	mgr      *Manager
 	sessions *session.Registry
 	approver approver
+	emit     Emitter
 	shell    string
 }
 
-// NewService returns a Service. shell is the program idle panes run; empty uses
-// $SHELL then /bin/sh.
-func NewService(mgr *Manager, sessions *session.Registry, gate approver, shell string) *Service {
+// NewService returns a Service. emit (which may be nil to skip event streaming)
+// receives a pane's output and exit as events on its pane stream. shell is the
+// program idle panes run; empty uses $SHELL then /bin/sh.
+func NewService(mgr *Manager, sessions *session.Registry, gate approver, emit Emitter, shell string) *Service {
 	if shell == "" {
 		shell = os.Getenv("SHELL")
 	}
 	if shell == "" {
 		shell = "/bin/sh"
 	}
-	return &Service{mgr: mgr, sessions: sessions, approver: gate, shell: shell}
+	return &Service{mgr: mgr, sessions: sessions, approver: gate, emit: emit, shell: shell}
 }
 
 // Register installs the pane methods on m, backed by s.
@@ -64,6 +72,7 @@ func Register(m *dispatch.Mux, s *Service) error {
 		func() error { return dispatch.Handle(m, MethodList, s.list) },
 		func() error { return dispatch.Handle(m, MethodRead, s.read) },
 		func() error { return dispatch.Handle(m, MethodClose, s.close) },
+		func() error { return dispatch.Handle(m, MethodRun, s.run) },
 	} {
 		if err := reg(); err != nil {
 			return err
@@ -117,7 +126,57 @@ func (s *Service) open(ctx context.Context, p api.PaneOpenParams) (api.PaneInfo,
 	if err != nil {
 		return api.PaneInfo{}, &rpc.Error{Code: rpc.CodeInternalError, Message: err.Error()}
 	}
+	if s.emit != nil {
+		go s.streamPane(pane)
+	}
 	return paneInfo(pane), nil
+}
+
+func (s *Service) run(ctx context.Context, p api.PaneRunParams) (api.PaneRunResult, error) {
+	pane, ok := s.mgr.Get(p.PaneID)
+	if !ok {
+		return api.PaneRunResult{}, &rpc.Error{Code: rpc.CodeInvalidParams, Message: ErrNoPane.Error()}
+	}
+	// Running a command is task-bound and approval-gated.
+	if p.SessionID == "" {
+		return api.PaneRunResult{}, &rpc.Error{Code: rpc.CodeInvalidParams, Message: "pty: pane.run requires a session"}
+	}
+	sess, ok := s.sessions.Get(p.SessionID)
+	if !ok {
+		return api.PaneRunResult{}, &rpc.Error{Code: rpc.CodeInvalidParams, Message: ErrNoSession.Error()}
+	}
+	detail, _ := json.Marshal(api.ApprovalDetail{
+		Kind:    api.ApprovalPaneRun,
+		PaneRun: &api.PaneRunApproval{PaneID: p.PaneID, Command: p.Command, Cwd: pane.Cwd},
+	})
+	outcome, err := s.approver.Request(ctx, sess, api.ApprovalPaneRun, detail)
+	if err != nil {
+		return api.PaneRunResult{}, err
+	}
+	if !outcome.Approved {
+		return api.PaneRunResult{}, &rpc.Error{Code: rpc.CodeInvalidRequest, Message: ErrDenied.Error()}
+	}
+	// Feed the command to the pane's shell; its output streams on the pane stream.
+	if _, err := pane.Write([]byte(p.Command + "\n")); err != nil {
+		return api.PaneRunResult{}, &rpc.Error{Code: rpc.CodeInternalError, Message: err.Error()}
+	}
+	return api.PaneRunResult{}, nil
+}
+
+// streamPane forwards a pane's output to its pane stream as pane_output events
+// and emits pane_exited when it ends. Output delivery is best-effort (lossy under
+// load); pane.read remains the authoritative scrollback.
+func (s *Service) streamPane(p *Pane) {
+	stream := api.PaneStream(p.ID)
+	ch, cancel := p.Subscribe()
+	defer cancel()
+	for chunk := range ch {
+		payload, _ := json.Marshal(api.PaneOutput{PaneID: p.ID, Data: chunk})
+		_, _ = s.emit.Publish(api.Event{StreamID: stream, Scope: api.ScopePane, Type: "pane_output", Payload: payload})
+	}
+	code, _ := p.ExitCode()
+	payload, _ := json.Marshal(api.PaneExited{PaneID: p.ID, ExitCode: code})
+	_, _ = s.emit.Publish(api.Event{StreamID: stream, Scope: api.ScopePane, Type: "pane_exited", Payload: payload})
 }
 
 func (s *Service) list(_ context.Context, p api.PaneListParams) (api.PaneListResult, error) {
