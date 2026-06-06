@@ -50,6 +50,8 @@ func promptText(kind string) string {
 	switch kind {
 	case api.ApprovalFileEdit:
 		return "Apply proposed file changes?"
+	case api.ApprovalPaneOpen:
+		return "Open a terminal pane?"
 	case api.ApprovalPaneRun:
 		return "Run command in pane?"
 	case api.ApprovalCodeAction:

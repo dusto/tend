@@ -8,6 +8,7 @@ import (
 // Approval kinds: the operation an approval gates.
 const (
 	ApprovalFileEdit   = "file_edit"
+	ApprovalPaneOpen   = "pane_open"
 	ApprovalPaneRun    = "pane_run"
 	ApprovalCodeAction = "code_action"
 )
@@ -22,8 +23,17 @@ type ApprovalDetail struct {
 	Kind string `json:"kind"`
 
 	FileEdit   *FileEditApproval   `json:"file_edit,omitempty"`
+	PaneOpen   *PaneOpenApproval   `json:"pane_open,omitempty"`
 	PaneRun    *PaneRunApproval    `json:"pane_run,omitempty"`
 	CodeAction *CodeActionApproval `json:"code_action,omitempty"`
+}
+
+// PaneOpenApproval is the decision context for an agent-initiated pane open: it
+// allocates a shell and changes terminal UI even with no command, so the user
+// confirms it. The working directory is the operation's salient detail.
+type PaneOpenApproval struct {
+	WorkspaceID WorkspaceID `json:"workspace_id,omitempty"`
+	Cwd         string      `json:"cwd,omitempty"`
 }
 
 // FileEditApproval is the decision context for a file mutation: the change-set id
