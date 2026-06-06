@@ -3,7 +3,7 @@ package api
 import "testing"
 
 func TestVersionsSatisfies(t *testing.T) {
-	cur := CurrentVersions() // 0.1.0 for every set
+	cur := CurrentVersions() // plugin_to_daemon 0.2.0, others 0.1.0
 	cases := []struct {
 		name string
 		req  Versions
@@ -11,10 +11,10 @@ func TestVersionsSatisfies(t *testing.T) {
 	}{
 		{"equal", cur, true},
 		{"empty requires nothing", Versions{}, true},
-		{"lower minor required", Versions{PluginToDaemon: "0.0.9"}, true},
-		{"equal patch", Versions{PluginToDaemon: "0.1.0"}, true},
-		{"higher minor required", Versions{PluginToDaemon: "0.2.0"}, false},
-		{"higher patch required", Versions{PluginToDaemon: "0.1.1"}, false},
+		{"lower minor required", Versions{PluginToDaemon: "0.1.0"}, true},
+		{"equal current", Versions{PluginToDaemon: "0.2.0"}, true},
+		{"higher minor required", Versions{PluginToDaemon: "0.3.0"}, false},
+		{"higher patch required", Versions{PluginToDaemon: "0.2.1"}, false},
 		{"different major", Versions{PluginToDaemon: "1.0.0"}, false},
 		{"other set incompatible", Versions{DaemonToEditor: "2.0.0"}, false},
 	}

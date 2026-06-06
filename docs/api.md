@@ -38,6 +38,18 @@ Schemas live under `schemas/` (`methods/<name>.params.json` / `.result.json`, `e
   - Params: `ApprovalListParams` · Result: `ApprovalListResult`
 - **`approval.respond`** — Resolve a pending approval (approve/deny); returns an ack. Only prompt-capable clients may call it.
   - Params: `ApprovalRespondParams` · Result: `ApprovalRespondResult`
+- **`task.create`** — Create a task in a workspace's provider.
+  - Params: `TaskCreateParams` · Result: `Task`
+- **`task.show`** — Fetch one task by ref.
+  - Params: `TaskShowParams` · Result: `Task`
+- **`task.list`** — List a workspace's tasks, optionally filtered by status.
+  - Params: `TaskListParams` · Result: `TaskListResult`
+- **`task.claim`** — Assign a task and mark it in progress; returns the updated task.
+  - Params: `TaskClaimParams` · Result: `Task`
+- **`task.comment`** — Append a comment to a task; returns the updated task.
+  - Params: `TaskCommentParams` · Result: `Task`
+- **`task.close`** — Close a task; returns the updated task.
+  - Params: `TaskCloseParams` · Result: `Task`
 
 ### daemon → bound editor
 
@@ -73,6 +85,14 @@ Schemas live under `schemas/` (`methods/<name>.params.json` / `.result.json`, `e
   - Payload: `ProviderNotification`
 - **`provider_stopped`** (`workspace` stream) — A provider process left the pool (exit or crash). Repo-wide: delivered on the workspace stream.
   - Payload: `ProviderStopped`
+- **`task_closed`** (`workspace` stream) — A task was closed. Repo-wide: delivered on the workspace stream.
+  - Payload: `TaskChange`
+- **`task_commented`** (`workspace` stream) — A comment was added to a task. Repo-wide: delivered on the workspace stream.
+  - Payload: `TaskChange`
+- **`task_created`** (`workspace` stream) — A task was created. Repo-wide: delivered on the workspace stream.
+  - Payload: `TaskChange`
+- **`task_updated`** (`workspace` stream) — A task changed (e.g. claimed or linked). Repo-wide: delivered on the workspace stream.
+  - Payload: `TaskChange`
 - **`tool_call`** (`session` stream) — An agent tool call started.
   - Payload: `ToolCall`
 - **`tool_call_update`** (`session` stream) — Progress update for a tool call.
