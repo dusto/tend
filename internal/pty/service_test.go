@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"sync"
 	"testing"
 
 	"github.com/dusto/tend/api"
@@ -26,17 +27,43 @@ func (a *fakeApprover) Request(_ context.Context, _ *session.Session, kind strin
 	return a.outcome, a.err
 }
 
-func newService(t *testing.T, ap approver) (*Service, *session.Registry) {
+// recordingEmitter captures published events for assertions.
+type recordingEmitter struct {
+	mu     sync.Mutex
+	events []api.Event
+}
+
+func (e *recordingEmitter) Publish(ev api.Event) (api.Event, error) {
+	e.mu.Lock()
+	e.events = append(e.events, ev)
+	e.mu.Unlock()
+	return ev, nil
+}
+
+func (e *recordingEmitter) onStream(stream api.StreamID) []api.Event {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	var out []api.Event
+	for _, ev := range e.events {
+		if ev.StreamID == stream {
+			out = append(out, ev)
+		}
+	}
+	return out
+}
+
+func newService(t *testing.T, ap approver) (*Service, *session.Registry, *recordingEmitter) {
 	t.Helper()
 	mgr := NewManager()
 	t.Cleanup(mgr.Shutdown)
 	reg := session.NewRegistry()
-	return NewService(mgr, reg, ap, shell), reg
+	emit := &recordingEmitter{}
+	return NewService(mgr, reg, ap, emit, shell), reg, emit
 }
 
 func TestOpenUngated(t *testing.T) {
 	ap := &fakeApprover{}
-	svc, _ := newService(t, ap)
+	svc, _, _ := newService(t, ap)
 
 	info, err := svc.open(context.Background(), api.PaneOpenParams{WorkspaceID: "ws1"})
 	if err != nil {
@@ -55,7 +82,7 @@ func TestOpenUngated(t *testing.T) {
 
 func TestOpenAgentInitiatedApproved(t *testing.T) {
 	ap := &fakeApprover{outcome: approvals.Outcome{Approved: true}}
-	svc, reg := newService(t, ap)
+	svc, reg, _ := newService(t, ap)
 	cwd := t.TempDir()
 	reg.Create("s1", "codex", api.TaskRef{Provider: "beads", WorkspaceID: "ws1", ID: "t1"}, cwd)
 
@@ -77,7 +104,7 @@ func TestOpenAgentInitiatedApproved(t *testing.T) {
 
 func TestAgentOpenBindsToSessionWorkspaceAndDefaultCwd(t *testing.T) {
 	ap := &fakeApprover{outcome: approvals.Outcome{Approved: true}}
-	svc, reg := newService(t, ap)
+	svc, reg, _ := newService(t, ap)
 	worktree := t.TempDir()
 	reg.Create("s1", "codex", api.TaskRef{Provider: "beads", WorkspaceID: "ws-session", ID: "t1"}, worktree)
 
@@ -104,7 +131,7 @@ func TestAgentOpenBindsToSessionWorkspaceAndDefaultCwd(t *testing.T) {
 
 func TestOpenAgentInitiatedDenied(t *testing.T) {
 	ap := &fakeApprover{outcome: approvals.Outcome{Approved: false}}
-	svc, reg := newService(t, ap)
+	svc, reg, _ := newService(t, ap)
 	reg.Create("s1", "codex", api.TaskRef{Provider: "beads", WorkspaceID: "ws1", ID: "t1"}, "/repo")
 
 	_, err := svc.open(context.Background(), api.PaneOpenParams{WorkspaceID: "ws1", SessionID: "s1"})
@@ -118,14 +145,14 @@ func TestOpenAgentInitiatedDenied(t *testing.T) {
 }
 
 func TestOpenAgentInitiatedUnknownSession(t *testing.T) {
-	svc, _ := newService(t, &fakeApprover{outcome: approvals.Outcome{Approved: true}})
+	svc, _, _ := newService(t, &fakeApprover{outcome: approvals.Outcome{Approved: true}})
 	if _, err := svc.open(context.Background(), api.PaneOpenParams{SessionID: "nope"}); err == nil {
 		t.Error("open with an unknown session should error")
 	}
 }
 
 func TestListFiltersByWorkspace(t *testing.T) {
-	svc, _ := newService(t, &fakeApprover{})
+	svc, _, _ := newService(t, &fakeApprover{})
 	if _, err := svc.open(context.Background(), api.PaneOpenParams{WorkspaceID: "ws1"}); err != nil {
 		t.Fatal(err)
 	}
@@ -143,7 +170,7 @@ func TestListFiltersByWorkspace(t *testing.T) {
 }
 
 func TestReadTail(t *testing.T) {
-	svc, _ := newService(t, &fakeApprover{})
+	svc, _, _ := newService(t, &fakeApprover{})
 	pane, err := svc.mgr.Spawn(SpawnConfig{Command: shell, Args: []string{"-c", "printf abcdefgh; sleep 30"}})
 	if err != nil {
 		t.Fatalf("spawn: %v", err)
@@ -161,7 +188,7 @@ func TestReadTail(t *testing.T) {
 }
 
 func TestReadAndCloseUnknownPane(t *testing.T) {
-	svc, _ := newService(t, &fakeApprover{})
+	svc, _, _ := newService(t, &fakeApprover{})
 	if _, err := svc.read(context.Background(), api.PaneReadParams{PaneID: "nope"}); err == nil {
 		t.Error("read of unknown pane should error")
 	}
@@ -171,7 +198,7 @@ func TestReadAndCloseUnknownPane(t *testing.T) {
 }
 
 func TestClose(t *testing.T) {
-	svc, _ := newService(t, &fakeApprover{})
+	svc, _, _ := newService(t, &fakeApprover{})
 	info, _ := svc.open(context.Background(), api.PaneOpenParams{WorkspaceID: "ws1"})
 	if _, err := svc.close(context.Background(), api.PaneCloseParams{PaneID: info.PaneID}); err != nil {
 		t.Fatalf("close: %v", err)
@@ -179,4 +206,89 @@ func TestClose(t *testing.T) {
 	if _, ok := svc.mgr.Get(info.PaneID); ok {
 		t.Error("pane should be gone after close")
 	}
+}
+
+func TestRunGatedAndStreamed(t *testing.T) {
+	ap := &fakeApprover{outcome: approvals.Outcome{Approved: true}}
+	svc, reg, emit := newService(t, ap)
+	worktree := t.TempDir()
+	reg.Create("s1", "codex", api.TaskRef{Provider: "beads", WorkspaceID: "ws1", ID: "t1"}, worktree)
+
+	opened, err := svc.open(context.Background(), api.PaneOpenParams{WorkspaceID: "ws1", Cwd: worktree})
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	stream := api.PaneStream(opened.PaneID)
+
+	if _, err := svc.run(context.Background(), api.PaneRunParams{
+		PaneID: opened.PaneID, Command: "echo run-marker-42", SessionID: "s1",
+	}); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if ap.kind != api.ApprovalPaneRun {
+		t.Fatalf("approval kind = %q, want pane_run", ap.kind)
+	}
+	var detail api.ApprovalDetail
+	_ = json.Unmarshal(ap.detail, &detail)
+	if detail.PaneRun == nil || detail.PaneRun.Command != "echo run-marker-42" || detail.PaneRun.Cwd != worktree {
+		t.Fatalf("pane_run detail = %+v", detail.PaneRun)
+	}
+
+	// The command's output is streamed as pane_output events on the pane stream.
+	waitFor(t, func() bool {
+		for _, ev := range emit.onStream(stream) {
+			if ev.Type != "pane_output" {
+				continue
+			}
+			var out api.PaneOutput
+			if json.Unmarshal(ev.Payload, &out) == nil && bytes.Contains(out.Data, []byte("run-marker-42")) {
+				return true
+			}
+		}
+		return false
+	})
+}
+
+func TestRunRequiresSession(t *testing.T) {
+	svc, _, _ := newService(t, &fakeApprover{outcome: approvals.Outcome{Approved: true}})
+	info, _ := svc.open(context.Background(), api.PaneOpenParams{WorkspaceID: "ws1"})
+	if _, err := svc.run(context.Background(), api.PaneRunParams{PaneID: info.PaneID, Command: "ls"}); err == nil {
+		t.Error("pane.run without a session should error (task-bound)")
+	}
+}
+
+func TestRunDeniedDoesNotExecute(t *testing.T) {
+	ap := &fakeApprover{outcome: approvals.Outcome{Approved: false}}
+	svc, reg, _ := newService(t, ap)
+	reg.Create("s1", "codex", api.TaskRef{Provider: "beads", WorkspaceID: "ws1", ID: "t1"}, t.TempDir())
+	info, _ := svc.open(context.Background(), api.PaneOpenParams{WorkspaceID: "ws1"})
+
+	_, err := svc.run(context.Background(), api.PaneRunParams{PaneID: info.PaneID, Command: "ls", SessionID: "s1"})
+	var rpcErr *rpc.Error
+	if !errors.As(err, &rpcErr) || rpcErr.Code != rpc.CodeInvalidRequest {
+		t.Errorf("err = %v, want denied rpc error", err)
+	}
+}
+
+func TestPaneExitedEvent(t *testing.T) {
+	svc, _, emit := newService(t, &fakeApprover{})
+	// Spawn a short-lived pane directly and stream it like open would.
+	pane, err := svc.mgr.Spawn(SpawnConfig{Command: shell, Args: []string{"-c", "exit 5"}})
+	if err != nil {
+		t.Fatalf("spawn: %v", err)
+	}
+	ch, cancel := pane.Subscribe()
+	go svc.streamPane(pane, ch, cancel)
+	stream := api.PaneStream(pane.ID)
+
+	waitFor(t, func() bool {
+		for _, ev := range emit.onStream(stream) {
+			if ev.Type == "pane_exited" {
+				var pe api.PaneExited
+				_ = json.Unmarshal(ev.Payload, &pe)
+				return pe.ExitCode == 5
+			}
+		}
+		return false
+	})
 }

@@ -61,8 +61,10 @@ type Pane struct {
 }
 
 // spawn starts cfg's process under a new PTY and begins capturing output. It is
-// used by the Manager.
-func spawn(cfg SpawnConfig) (*Pane, error) {
+// used by the Manager. beforeCapture, if non-nil, runs after the pane is built
+// but before output capture begins, so a caller can attach a subscriber that is
+// guaranteed to see the pane's output from its very first byte.
+func spawn(cfg SpawnConfig, beforeCapture func(*Pane)) (*Pane, error) {
 	if cfg.Command == "" {
 		return nil, errors.New("pty: command is required")
 	}
@@ -92,6 +94,9 @@ func spawn(cfg SpawnConfig) (*Pane, error) {
 		scroll:       newRing(defaultScrollback),
 		subs:         make(map[chan []byte]struct{}),
 		done:         make(chan struct{}),
+	}
+	if beforeCapture != nil {
+		beforeCapture(p)
 	}
 	go p.capture()
 	return p, nil

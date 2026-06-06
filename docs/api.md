@@ -58,6 +58,8 @@ Schemas live under `schemas/` (`methods/<name>.params.json` / `.result.json`, `e
   - Params: `PaneReadParams` · Result: `PaneReadResult`
 - **`pane.close`** — Close a pane: terminate its process group and release the PTY.
   - Params: `PaneCloseParams` · Result: `PaneCloseResult`
+- **`pane.run`** — Run a command in a pane (task-bound, approval-gated); output arrives on the pane stream.
+  - Params: `PaneRunParams` · Result: `PaneRunResult`
 
 ### daemon → bound editor
 
@@ -89,6 +91,10 @@ Schemas live under `schemas/` (`methods/<name>.params.json` / `.result.json`, `e
   - Payload: `ApprovalRequested`
 - **`approval_resolved`** (`session` stream) — A pending approval was resolved.
   - Payload: `ApprovalResolved`
+- **`pane_exited`** (`pane` stream) — A pane's process exited.
+  - Payload: `PaneExited`
+- **`pane_output`** (`pane` stream) — A chunk of a pane's output, on the pane stream. Lossy under load; pane.read is the authoritative scrollback.
+  - Payload: `PaneOutput`
 - **`provider_notification`** (`session` stream) — A provider-private ACP notification preserved verbatim as a metadata event.
   - Payload: `ProviderNotification`
 - **`provider_stopped`** (`workspace` stream) — A provider process left the pool (exit or crash). Repo-wide: delivered on the workspace stream.
