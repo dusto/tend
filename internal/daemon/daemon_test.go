@@ -325,6 +325,34 @@ func TestTaskMethodsWired(t *testing.T) {
 	}
 }
 
+func TestPaneMethodsWired(t *testing.T) {
+	srv, path := newServer(t)
+	go func() { _ = srv.Serve() }()
+	t.Cleanup(srv.Shutdown)
+
+	client := dial(t, path)
+	// User-initiated open (no session) is ungated.
+	var opened api.PaneInfo
+	if err := client.Call(testCtx(t), "pane.open", api.PaneOpenParams{WorkspaceID: "ws1", Cwd: t.TempDir()}, &opened); err != nil {
+		t.Fatalf("pane.open: %v", err)
+	}
+	if opened.PaneID == "" || !opened.Running {
+		t.Fatalf("opened = %+v", opened)
+	}
+
+	var list api.PaneListResult
+	if err := client.Call(testCtx(t), "pane.list", api.PaneListParams{WorkspaceID: "ws1"}, &list); err != nil {
+		t.Fatalf("pane.list: %v", err)
+	}
+	if len(list.Panes) != 1 || list.Panes[0].PaneID != opened.PaneID {
+		t.Fatalf("list = %+v", list.Panes)
+	}
+
+	if err := client.Call(testCtx(t), "pane.close", api.PaneCloseParams{PaneID: opened.PaneID}, &api.PaneCloseResult{}); err != nil {
+		t.Fatalf("pane.close: %v", err)
+	}
+}
+
 func TestShutdownIdempotent(t *testing.T) {
 	srv, _ := newServer(t)
 	go func() { _ = srv.Serve() }()

@@ -50,6 +50,14 @@ Schemas live under `schemas/` (`methods/<name>.params.json` / `.result.json`, `e
   - Params: `TaskCommentParams` · Result: `Task`
 - **`task.close`** — Close a task; returns the updated task.
   - Params: `TaskCloseParams` · Result: `Task`
+- **`pane.open`** — Open an idle shell pane (daemon-owned PTY). Approval-gated when agent-initiated (a session is in context); ungated for a user open.
+  - Params: `PaneOpenParams` · Result: `PaneInfo`
+- **`pane.list`** — List panes with running and view state, optionally filtered by workspace.
+  - Params: `PaneListParams` · Result: `PaneListResult`
+- **`pane.read`** — Read a pane's captured output (optionally the last Tail bytes).
+  - Params: `PaneReadParams` · Result: `PaneReadResult`
+- **`pane.close`** — Close a pane: terminate its process group and release the PTY.
+  - Params: `PaneCloseParams` · Result: `PaneCloseResult`
 
 ### daemon → bound editor
 

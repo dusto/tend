@@ -9,8 +9,8 @@ import (
 // Contract version of each method set, as MAJOR.MINOR.PATCH. The sets version
 // independently: bump a set on a change to that set (major for a breaking change).
 const (
-	// 0.2.0 added the task.* methods.
-	PluginToDaemonVersion = "0.2.0"
+	// 0.2.0 added the task.* methods; 0.3.0 added the pane.* methods.
+	PluginToDaemonVersion = "0.3.0"
 	DaemonToEditorVersion = "0.1.0"
 	DaemonToClientVersion = "0.1.0"
 )

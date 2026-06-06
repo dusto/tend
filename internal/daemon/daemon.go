@@ -22,6 +22,7 @@ import (
 	"github.com/dusto/tend/internal/events"
 	"github.com/dusto/tend/internal/files"
 	"github.com/dusto/tend/internal/handshake"
+	"github.com/dusto/tend/internal/pty"
 	"github.com/dusto/tend/internal/rpc"
 	"github.com/dusto/tend/internal/session"
 	"github.com/dusto/tend/internal/tasks"
@@ -60,6 +61,8 @@ type Server struct {
 	gate   *approvals.Gate
 	files  *files.Service
 	tasks  *tasks.Service
+	panes  *pty.Service
+	ptyMgr *pty.Manager
 
 	mu     sync.Mutex
 	conns  map[*rpc.Conn]struct{}
@@ -95,6 +98,8 @@ func New(ln net.Listener, logPath string) (*Server, error) {
 	// Task provider per workspace. The in-memory fake stands in until the beads
 	// adapter is wired; the task.* contract and event bridge are independent of it.
 	s.tasks = tasks.NewService(func(ws api.WorkspaceID) tasks.Provider { return tasks.NewFake(ws) }, s.store)
+	s.ptyMgr = pty.NewManager()
+	s.panes = pty.NewService(s.ptyMgr, s.sessions, s.gate, "")
 
 	// Assemble the shared agent stack: a normalizer that streams turn output to
 	// the event store, a process pool that spawns providers with that normalizer
@@ -172,6 +177,9 @@ func (s *Server) newMux() (*dispatch.Mux, func(), error) {
 		return nil, nil, err
 	}
 	if err := tasks.Register(mux, s.tasks); err != nil {
+		return nil, nil, err
+	}
+	if err := pty.Register(mux, s.panes); err != nil {
 		return nil, nil, err
 	}
 	// approval.respond is capability-gated on the calling connection's identity.
@@ -256,6 +264,7 @@ func (s *Server) Shutdown() {
 	s.wg.Wait()
 	_ = s.pool.Close()
 	s.tasks.Close()
+	s.ptyMgr.Shutdown()
 	_ = s.log.Close()
 }
 

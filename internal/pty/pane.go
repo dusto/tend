@@ -23,6 +23,12 @@ import (
 // dropped once a pane produces more than this.
 const defaultScrollback = 1 << 20 // 1 MiB
 
+// Default terminal size for a pane whose caller did not specify one.
+const (
+	defaultRows = 24
+	defaultCols = 80
+)
+
 // SpawnConfig describes a pane's process and its terminal size.
 type SpawnConfig struct {
 	Command      string // executable (e.g. a shell)
@@ -64,19 +70,16 @@ func spawn(cfg SpawnConfig) (*Pane, error) {
 	cmd.Env = cfg.Env
 	cmd.Dir = cfg.Dir
 
-	var size *pty.Winsize
-	if cfg.Rows > 0 && cfg.Cols > 0 {
-		size = &pty.Winsize{Rows: cfg.Rows, Cols: cfg.Cols}
+	rows, cols := cfg.Rows, cfg.Cols
+	if rows == 0 {
+		rows = defaultRows
 	}
-	ptmx, err := pty.StartWithSize(cmd, size)
+	if cols == 0 {
+		cols = defaultCols
+	}
+	ptmx, err := pty.StartWithSize(cmd, &pty.Winsize{Rows: rows, Cols: cols})
 	if err != nil {
-		// StartWithSize ignores a nil size, so call the plain start in that case.
-		if size == nil {
-			ptmx, err = pty.Start(cmd)
-		}
-		if err != nil {
-			return nil, err
-		}
+		return nil, err
 	}
 
 	p := &Pane{
