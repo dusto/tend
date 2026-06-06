@@ -43,6 +43,12 @@ var Methods = []Method{
 	{Name: "file.write", Direction: PluginToDaemon, Params: FileWriteParams{}, Result: FileMutationResult{}, Summary: "Replace a repo file's whole content (task-bound, approval-gated, base-checked); single-target change set."},
 	{Name: "approval.list", Direction: PluginToDaemon, Params: ApprovalListParams{}, Result: ApprovalListResult{}, Summary: "List pending approvals (self-contained payloads), optionally filtered by session."},
 	{Name: "approval.respond", Direction: PluginToDaemon, Params: ApprovalRespondParams{}, Result: ApprovalRespondResult{}, Summary: "Resolve a pending approval (approve/deny); returns an ack. Only prompt-capable clients may call it."},
+	{Name: "task.create", Direction: PluginToDaemon, Params: TaskCreateParams{}, Result: Task{}, Summary: "Create a task in a workspace's provider."},
+	{Name: "task.show", Direction: PluginToDaemon, Params: TaskShowParams{}, Result: Task{}, Summary: "Fetch one task by ref."},
+	{Name: "task.list", Direction: PluginToDaemon, Params: TaskListParams{}, Result: TaskListResult{}, Summary: "List a workspace's tasks, optionally filtered by status."},
+	{Name: "task.claim", Direction: PluginToDaemon, Params: TaskClaimParams{}, Result: Task{}, Summary: "Assign a task and mark it in progress; returns the updated task."},
+	{Name: "task.comment", Direction: PluginToDaemon, Params: TaskCommentParams{}, Result: Task{}, Summary: "Append a comment to a task; returns the updated task."},
+	{Name: "task.close", Direction: PluginToDaemon, Params: TaskCloseParams{}, Result: Task{}, Summary: "Close a task; returns the updated task."},
 
 	// daemon -> bound editor
 	{Name: "editor.current_buffer", Direction: DaemonToEditor, Params: EditorCurrentBufferParams{}, Result: EditorCurrentBufferResult{}, Summary: "Return the editor's active buffer (its file URI, or empty when none)."},

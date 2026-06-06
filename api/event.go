@@ -79,6 +79,10 @@ var EventDefs = []EventDef{
 	{Type: "agent_error", Scope: ScopeSession, Payload: AgentError{}, Summary: "A session's turn failed (e.g. its provider process exited mid-turn)."},
 	{Type: "provider_stopped", Scope: ScopeWorkspace, Payload: ProviderStopped{}, Summary: "A provider process left the pool (exit or crash). Repo-wide: delivered on the workspace stream."},
 	{Type: "provider_notification", Scope: ScopeSession, Payload: ProviderNotification{}, Summary: "A provider-private ACP notification preserved verbatim as a metadata event."},
+	{Type: "task_created", Scope: ScopeWorkspace, Payload: TaskChange{}, Summary: "A task was created. Repo-wide: delivered on the workspace stream."},
+	{Type: "task_updated", Scope: ScopeWorkspace, Payload: TaskChange{}, Summary: "A task changed (e.g. claimed or linked). Repo-wide: delivered on the workspace stream."},
+	{Type: "task_commented", Scope: ScopeWorkspace, Payload: TaskChange{}, Summary: "A comment was added to a task. Repo-wide: delivered on the workspace stream."},
+	{Type: "task_closed", Scope: ScopeWorkspace, Payload: TaskChange{}, Summary: "A task was closed. Repo-wide: delivered on the workspace stream."},
 }
 
 // --- Event payloads (initial set) ---

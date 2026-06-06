@@ -301,6 +301,30 @@ func register(t *testing.T, c *rpc.Conn, id string, role api.ClientRole, promptC
 	return res, err
 }
 
+func TestTaskMethodsWired(t *testing.T) {
+	srv, path := newServer(t)
+	go func() { _ = srv.Serve() }()
+	t.Cleanup(srv.Shutdown)
+
+	client := dial(t, path)
+	var created api.Task
+	if err := client.Call(testCtx(t), "task.create",
+		api.TaskCreateParams{WorkspaceID: "ws1", Title: "do it"}, &created); err != nil {
+		t.Fatalf("task.create: %v", err)
+	}
+	if created.Ref.ID == "" || created.Title != "do it" {
+		t.Fatalf("created = %+v", created)
+	}
+
+	var list api.TaskListResult
+	if err := client.Call(testCtx(t), "task.list", api.TaskListParams{WorkspaceID: "ws1"}, &list); err != nil {
+		t.Fatalf("task.list: %v", err)
+	}
+	if len(list.Tasks) != 1 {
+		t.Fatalf("list = %+v", list)
+	}
+}
+
 func TestShutdownIdempotent(t *testing.T) {
 	srv, _ := newServer(t)
 	go func() { _ = srv.Serve() }()
