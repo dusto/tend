@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"sync"
+	"syscall"
 
 	"github.com/creack/pty"
 
@@ -203,11 +204,22 @@ func (p *Pane) ExitCode() (int, bool) {
 	return p.exitCode, p.exited
 }
 
-// Close kills the pane's process and releases the PTY. It is idempotent and
-// blocks until the process is reaped.
+// Close terminates the pane's process and releases the PTY. It is idempotent and
+// blocks until the process is reaped. Because the PTY starts the command as a
+// session/group leader, Close signals the whole process group, so descendant
+// processes (a shell's children, a build's subprocesses) are terminated too
+// rather than orphaned outside daemon ownership.
 func (p *Pane) Close() error {
-	if p.cmd.Process != nil {
-		_ = p.cmd.Process.Kill()
+	p.mu.Lock()
+	exited := p.exited
+	p.mu.Unlock()
+	if proc := p.cmd.Process; proc != nil && !exited {
+		// The process is the leader of its own group (pgid == pid), so the
+		// negative pid targets the whole group. Signalling only while it is still
+		// unreaped avoids racing the pid into a reused, unrelated group.
+		if err := syscall.Kill(-proc.Pid, syscall.SIGKILL); err != nil {
+			_ = proc.Kill() // fall back to the leader if the group signal failed
+		}
 	}
 	_ = p.ptmx.Close()
 	<-p.done

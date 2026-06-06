@@ -2,6 +2,9 @@ package pty
 
 import (
 	"bytes"
+	"regexp"
+	"strconv"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -142,6 +145,40 @@ func TestSubscribeAfterExitIsClosed(t *testing.T) {
 	if _, ok := <-ch; ok {
 		t.Error("subscribing after exit should yield a closed channel")
 	}
+}
+
+// alive reports whether pid names a live process (signal 0 probes existence).
+func alive(pid int) bool {
+	return syscall.Kill(pid, 0) == nil
+}
+
+func TestCloseTerminatesDescendants(t *testing.T) {
+	// A shell that backgrounds a long sleep and prints its pid: closing the pane
+	// must kill the whole group, not just the shell, so the sleep does not survive
+	// as an orphan outside daemon ownership.
+	p, err := spawn(SpawnConfig{Command: shell, Args: []string{"-c", "sleep 30 & echo CHILD=$!; wait"}})
+	if err != nil {
+		t.Fatalf("spawn: %v", err)
+	}
+
+	re := regexp.MustCompile(`CHILD=(\d+)`)
+	var child int
+	waitFor(t, func() bool {
+		m := re.FindSubmatch(p.Scrollback())
+		if m == nil {
+			return false
+		}
+		child, _ = strconv.Atoi(string(m[1]))
+		return child > 0
+	})
+	if !alive(child) {
+		t.Fatalf("child %d should be running before close", child)
+	}
+
+	if err := p.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+	waitFor(t, func() bool { return !alive(child) })
 }
 
 func TestResize(t *testing.T) {
