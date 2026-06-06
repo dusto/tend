@@ -117,17 +117,25 @@ func (s *Service) open(ctx context.Context, p api.PaneOpenParams) (api.PaneInfo,
 		cwd = worktree
 	}
 
-	pane, err := s.mgr.Spawn(SpawnConfig{
+	// Attach the output stream before capture begins, so output from a fast
+	// pane.run that runs immediately after open cannot be missed.
+	var ch <-chan []byte
+	var cancel func()
+	pane, err := s.mgr.spawn(SpawnConfig{
 		Command:      s.shell,
 		Dir:          cwd,
 		Workspace:    ws,
 		WorktreeRoot: worktree,
+	}, func(p *Pane) {
+		if s.emit != nil {
+			ch, cancel = p.Subscribe()
+		}
 	})
 	if err != nil {
 		return api.PaneInfo{}, &rpc.Error{Code: rpc.CodeInternalError, Message: err.Error()}
 	}
-	if s.emit != nil {
-		go s.streamPane(pane)
+	if ch != nil {
+		go s.streamPane(pane, ch, cancel)
 	}
 	return paneInfo(pane), nil
 }
@@ -163,12 +171,12 @@ func (s *Service) run(ctx context.Context, p api.PaneRunParams) (api.PaneRunResu
 	return api.PaneRunResult{}, nil
 }
 
-// streamPane forwards a pane's output to its pane stream as pane_output events
-// and emits pane_exited when it ends. Output delivery is best-effort (lossy under
-// load); pane.read remains the authoritative scrollback.
-func (s *Service) streamPane(p *Pane) {
+// streamPane forwards a pane's output (from a subscription attached before
+// capture began) to its pane stream as pane_output events, and emits pane_exited
+// when it ends. Output delivery is best-effort (lossy under load); pane.read
+// remains the authoritative scrollback.
+func (s *Service) streamPane(p *Pane, ch <-chan []byte, cancel func()) {
 	stream := api.PaneStream(p.ID)
-	ch, cancel := p.Subscribe()
 	defer cancel()
 	for chunk := range ch {
 		payload, _ := json.Marshal(api.PaneOutput{PaneID: p.ID, Data: chunk})

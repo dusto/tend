@@ -277,7 +277,8 @@ func TestPaneExitedEvent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("spawn: %v", err)
 	}
-	go svc.streamPane(pane)
+	ch, cancel := pane.Subscribe()
+	go svc.streamPane(pane, ch, cancel)
 	stream := api.PaneStream(pane.ID)
 
 	waitFor(t, func() bool {

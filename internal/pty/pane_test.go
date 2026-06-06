@@ -33,7 +33,7 @@ func waitFor(t *testing.T, cond func() bool) {
 }
 
 func TestSpawnCapturesScrollbackAndExits(t *testing.T) {
-	p, err := spawn(SpawnConfig{Command: shell, Args: []string{"-c", "printf hello-pane"}})
+	p, err := spawn(SpawnConfig{Command: shell, Args: []string{"-c", "printf hello-pane"}}, nil)
 	if err != nil {
 		t.Fatalf("spawn: %v", err)
 	}
@@ -51,7 +51,7 @@ func TestSpawnCapturesScrollbackAndExits(t *testing.T) {
 }
 
 func TestSpawnNonZeroExit(t *testing.T) {
-	p, err := spawn(SpawnConfig{Command: shell, Args: []string{"-c", "exit 3"}})
+	p, err := spawn(SpawnConfig{Command: shell, Args: []string{"-c", "exit 3"}}, nil)
 	if err != nil {
 		t.Fatalf("spawn: %v", err)
 	}
@@ -62,7 +62,7 @@ func TestSpawnNonZeroExit(t *testing.T) {
 }
 
 func TestWriteIsEchoedAndClose(t *testing.T) {
-	p, err := spawn(SpawnConfig{Command: shell, Args: []string{"-c", "cat"}})
+	p, err := spawn(SpawnConfig{Command: shell, Args: []string{"-c", "cat"}}, nil)
 	if err != nil {
 		t.Fatalf("spawn: %v", err)
 	}
@@ -84,7 +84,7 @@ func TestWriteIsEchoedAndClose(t *testing.T) {
 }
 
 func TestCloseKillsLongRunningProcess(t *testing.T) {
-	p, err := spawn(SpawnConfig{Command: shell, Args: []string{"-c", "sleep 60"}})
+	p, err := spawn(SpawnConfig{Command: shell, Args: []string{"-c", "sleep 60"}}, nil)
 	if err != nil {
 		t.Fatalf("spawn: %v", err)
 	}
@@ -99,7 +99,7 @@ func TestCloseKillsLongRunningProcess(t *testing.T) {
 }
 
 func TestSubscribeStreamsLiveOutputThenCloses(t *testing.T) {
-	p, err := spawn(SpawnConfig{Command: shell, Args: []string{"-c", "cat"}})
+	p, err := spawn(SpawnConfig{Command: shell, Args: []string{"-c", "cat"}}, nil)
 	if err != nil {
 		t.Fatalf("spawn: %v", err)
 	}
@@ -135,7 +135,7 @@ func TestSubscribeStreamsLiveOutputThenCloses(t *testing.T) {
 }
 
 func TestSubscribeAfterExitIsClosed(t *testing.T) {
-	p, err := spawn(SpawnConfig{Command: shell, Args: []string{"-c", "true"}})
+	p, err := spawn(SpawnConfig{Command: shell, Args: []string{"-c", "true"}}, nil)
 	if err != nil {
 		t.Fatalf("spawn: %v", err)
 	}
@@ -156,7 +156,7 @@ func TestCloseTerminatesDescendants(t *testing.T) {
 	// A shell that backgrounds a long sleep and prints its pid: closing the pane
 	// must kill the whole group, not just the shell, so the sleep does not survive
 	// as an orphan outside daemon ownership.
-	p, err := spawn(SpawnConfig{Command: shell, Args: []string{"-c", "sleep 30 & echo CHILD=$!; wait"}})
+	p, err := spawn(SpawnConfig{Command: shell, Args: []string{"-c", "sleep 30 & echo CHILD=$!; wait"}}, nil)
 	if err != nil {
 		t.Fatalf("spawn: %v", err)
 	}
@@ -182,7 +182,7 @@ func TestCloseTerminatesDescendants(t *testing.T) {
 }
 
 func TestResize(t *testing.T) {
-	p, err := spawn(SpawnConfig{Command: shell, Args: []string{"-c", "sleep 60"}})
+	p, err := spawn(SpawnConfig{Command: shell, Args: []string{"-c", "sleep 60"}}, nil)
 	if err != nil {
 		t.Fatalf("spawn: %v", err)
 	}

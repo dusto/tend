@@ -24,7 +24,13 @@ func NewManager() *Manager {
 // pane stays registered (and readable headless) until Close or Shutdown; callers
 // reap it explicitly.
 func (m *Manager) Spawn(cfg SpawnConfig) (*Pane, error) {
-	p, err := spawn(cfg)
+	return m.spawn(cfg, nil)
+}
+
+// spawn is Spawn with a pre-capture hook (see pane spawn), used by the pane
+// service to attach the output stream before any output can be produced.
+func (m *Manager) spawn(cfg SpawnConfig, beforeCapture func(*Pane)) (*Pane, error) {
+	p, err := spawn(cfg, beforeCapture)
 	if err != nil {
 		return nil, err
 	}
