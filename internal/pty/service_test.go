@@ -75,6 +75,33 @@ func TestOpenAgentInitiatedApproved(t *testing.T) {
 	}
 }
 
+func TestAgentOpenBindsToSessionWorkspaceAndDefaultCwd(t *testing.T) {
+	ap := &fakeApprover{outcome: approvals.Outcome{Approved: true}}
+	svc, reg := newService(t, ap)
+	worktree := t.TempDir()
+	reg.Create("s1", "codex", api.TaskRef{Provider: "beads", WorkspaceID: "ws-session", ID: "t1"}, worktree)
+
+	// Caller supplies a different workspace and no cwd: the pane must bind to the
+	// session's workspace/worktree, and cwd defaults to the session worktree.
+	info, err := svc.open(context.Background(), api.PaneOpenParams{
+		WorkspaceID: "ws-attacker", WorktreeRoot: "/elsewhere", SessionID: "s1",
+	})
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	if info.WorkspaceID != "ws-session" {
+		t.Errorf("pane workspace = %q, want ws-session (from session, not caller)", info.WorkspaceID)
+	}
+	if info.WorktreeRoot != worktree {
+		t.Errorf("pane worktree = %q, want %q", info.WorktreeRoot, worktree)
+	}
+	var detail api.ApprovalDetail
+	_ = json.Unmarshal(ap.detail, &detail)
+	if detail.PaneOpen.WorkspaceID != "ws-session" || detail.PaneOpen.Cwd != worktree {
+		t.Errorf("approval detail = %+v, want session workspace + worktree cwd", detail.PaneOpen)
+	}
+}
+
 func TestOpenAgentInitiatedDenied(t *testing.T) {
 	ap := &fakeApprover{outcome: approvals.Outcome{Approved: false}}
 	svc, reg := newService(t, ap)

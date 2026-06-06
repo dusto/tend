@@ -73,22 +73,29 @@ func Register(m *dispatch.Mux, s *Service) error {
 }
 
 func (s *Service) open(ctx context.Context, p api.PaneOpenParams) (api.PaneInfo, error) {
-	cwd := p.Cwd
-	if cwd == "" {
-		cwd = p.WorktreeRoot
-	}
+	// A session in context makes this agent-initiated: the pane is bound to the
+	// session's authoritative workspace and worktree (not caller-supplied values),
+	// and the open is approval-gated, since it allocates a shell and changes
+	// terminal UI even with no command run. A user-initiated open (no session) is
+	// a deliberate user action — opening a shell — so it honors the caller's
+	// workspace/worktree/cwd as given.
+	ws, worktree, cwd := p.WorkspaceID, p.WorktreeRoot, p.Cwd
 
-	// A session in context makes this agent-initiated, which is approval-gated:
-	// opening a pane allocates a shell and changes terminal UI even with no
-	// command run.
 	if p.SessionID != "" {
 		sess, ok := s.sessions.Get(p.SessionID)
 		if !ok {
 			return api.PaneInfo{}, &rpc.Error{Code: rpc.CodeInvalidParams, Message: ErrNoSession.Error()}
 		}
+		ws, worktree = sess.Task.WorkspaceID, sess.WorktreeRoot
+		if cwd == "" {
+			cwd = worktree
+		}
+		// The cwd (default worktree root, or an explicit override that may be
+		// outside the repo) travels in the approval detail, so it is part of the
+		// user's decision rather than silently trusted.
 		detail, _ := json.Marshal(api.ApprovalDetail{
 			Kind:     api.ApprovalPaneOpen,
-			PaneOpen: &api.PaneOpenApproval{WorkspaceID: p.WorkspaceID, Cwd: cwd},
+			PaneOpen: &api.PaneOpenApproval{WorkspaceID: ws, Cwd: cwd},
 		})
 		outcome, err := s.approver.Request(ctx, sess, api.ApprovalPaneOpen, detail)
 		if err != nil {
@@ -97,13 +104,15 @@ func (s *Service) open(ctx context.Context, p api.PaneOpenParams) (api.PaneInfo,
 		if !outcome.Approved {
 			return api.PaneInfo{}, &rpc.Error{Code: rpc.CodeInvalidRequest, Message: ErrDenied.Error()}
 		}
+	} else if cwd == "" {
+		cwd = worktree
 	}
 
 	pane, err := s.mgr.Spawn(SpawnConfig{
 		Command:      s.shell,
 		Dir:          cwd,
-		Workspace:    p.WorkspaceID,
-		WorktreeRoot: p.WorktreeRoot,
+		Workspace:    ws,
+		WorktreeRoot: worktree,
 	})
 	if err != nil {
 		return api.PaneInfo{}, &rpc.Error{Code: rpc.CodeInternalError, Message: err.Error()}
