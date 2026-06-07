@@ -70,11 +70,37 @@ type Server struct {
 	wg     sync.WaitGroup
 }
 
+// Option configures a Server at construction. The zero configuration uses the
+// default ACP providers and the in-memory fake task provider; tests inject a
+// fake ACP config and/or task factory.
+type Option func(*options)
+
+type options struct {
+	acp         *acp.Config
+	taskFactory tasks.Factory
+}
+
+// WithACPConfig sets the ACP provider config the daemon spawns from (default:
+// acp.DefaultConfig).
+func WithACPConfig(c *acp.Config) Option { return func(o *options) { o.acp = c } }
+
+// WithTaskFactory sets the per-workspace task provider factory (default: an
+// in-memory fake provider).
+func WithTaskFactory(f tasks.Factory) Option { return func(o *options) { o.taskFactory = f } }
+
 // New builds a Server over ln with a fresh per-process epoch and the params
 // validator available for the build. It opens the durable event log at logPath
 // and validates handler registration up front so a registration bug fails at
 // startup rather than per connection.
-func New(ln net.Listener, logPath string) (*Server, error) {
+func New(ln net.Listener, logPath string, opts ...Option) (*Server, error) {
+	o := options{
+		acp:         acp.DefaultConfig(),
+		taskFactory: func(ws api.WorkspaceID) tasks.Provider { return tasks.NewFake(ws) },
+	}
+	for _, opt := range opts {
+		opt(&o)
+	}
+
 	log, err := events.OpenLog(logPath)
 	if err != nil {
 		return nil, err
@@ -97,7 +123,7 @@ func New(ln net.Listener, logPath string) (*Server, error) {
 	s.files = files.NewService(s.sessions, editor.NewService(s.binder, s.clients), s.gate, files.Options{})
 	// Task provider per workspace. The in-memory fake stands in until the beads
 	// adapter is wired; the task.* contract and event bridge are independent of it.
-	s.tasks = tasks.NewService(func(ws api.WorkspaceID) tasks.Provider { return tasks.NewFake(ws) }, s.store)
+	s.tasks = tasks.NewService(o.taskFactory, s.store)
 	s.ptyMgr = pty.NewManager()
 	s.panes = pty.NewService(s.ptyMgr, s.sessions, s.gate, s.store, "")
 
@@ -105,8 +131,7 @@ func New(ln net.Listener, logPath string) (*Server, error) {
 	// the event store, a process pool that spawns providers with that normalizer
 	// installed, and the session manager/service over it.
 	norm := acp.NewNormalizer(s.store, nil)
-	cfg := acp.DefaultConfig()
-	s.pool = acp.NewPool(spawnProvider(cfg, norm), s.store, acp.Options{Max: maxProcsPerProvider})
+	s.pool = acp.NewPool(spawnProvider(o.acp, norm), s.store, acp.Options{Max: maxProcsPerProvider})
 	s.agent = agent.NewService(s.sessions, acp.NewManager(s.pool), norm)
 
 	if _, _, err := s.newMux(); err != nil {

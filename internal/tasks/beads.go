@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 	"sync"
@@ -21,8 +22,9 @@ import (
 type Beads struct {
 	name string
 	ws   api.WorkspaceID
-	dir  string // working directory to run bd in (the repo)
-	bin  string // bd executable
+	dir  string   // working directory to run bd in (the repo)
+	bin  string   // bd executable
+	env  []string // extra environment for bd (nil inherits the daemon's)
 	// run executes bd with args and returns stdout; the field is the seam tests
 	// replace with a fake bd.
 	run func(ctx context.Context, args ...string) ([]byte, error)
@@ -41,10 +43,21 @@ func NewBeads(ws api.WorkspaceID, dir string) *Beads {
 // Name returns the provider identifier carried in TaskRef.Provider.
 func (b *Beads) Name() string { return b.name }
 
+// SetExec overrides the bd executable and its environment. It is for tests that
+// run a fake bd (for example a re-exec of the test binary), so the fake-mode env
+// reaches the child without polluting the daemon's own environment.
+func (b *Beads) SetExec(bin string, env []string) {
+	b.bin = bin
+	b.env = env
+}
+
 // exec runs bd in the provider's directory and returns its stdout.
 func (b *Beads) exec(ctx context.Context, args ...string) ([]byte, error) {
 	cmd := exec.CommandContext(ctx, b.bin, args...)
 	cmd.Dir = b.dir
+	if len(b.env) > 0 {
+		cmd.Env = append(os.Environ(), b.env...)
+	}
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
