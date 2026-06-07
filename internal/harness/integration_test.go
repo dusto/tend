@@ -3,6 +3,8 @@ package harness
 import (
 	"context"
 	"errors"
+	"fmt"
+	"sync"
 	"testing"
 	"time"
 
@@ -162,6 +164,57 @@ func TestMultipleSessionsIndependent(t *testing.T) {
 				t.Errorf("replayed %s seq %d should dedup as already-seen", s, ev.Seq)
 			}
 		}
+	}
+}
+
+// TestConcurrentSessionStarts starts many sessions concurrently on one
+// {workspace, provider} — which the pool may serve by spawning several provider
+// processes — and asserts every session gets a distinct id and stream with no
+// errors or collisions.
+func TestConcurrentSessionStarts(t *testing.T) {
+	sock := fakeDaemon(t)
+	c := dial(t, sock)
+	mustCall(t, c, "daemon.hello", api.HelloParams{}, &api.HelloResult{})
+	mustCall(t, c, "client.register", api.ClientRegisterParams{ClientID: "ed", Role: api.RoleEditor, PromptCapable: true}, &api.ClientRegisterResult{})
+
+	const n = 6
+	worktree := t.TempDir()
+	results := make([]api.AgentStartResult, n)
+	errs := make([]error, n)
+	var wg sync.WaitGroup
+	for i := range n {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			errs[i] = c.Call(ctx, "agent.start", api.AgentStartParams{
+				ProviderID:   "codex",
+				Task:         api.TaskRef{Provider: "beads", WorkspaceID: "ws1", ID: fmt.Sprintf("t%d", i)},
+				WorktreeRoot: worktree,
+			}, &results[i])
+		}(i)
+	}
+	wg.Wait()
+
+	sessions := make(map[api.SessionID]bool, n)
+	streams := make(map[api.StreamID]bool, n)
+	for i := range n {
+		if errs[i] != nil {
+			t.Fatalf("concurrent start %d: %v", i, errs[i])
+		}
+		r := results[i]
+		if r.SessionID == "" {
+			t.Fatalf("start %d: empty session id", i)
+		}
+		if sessions[r.SessionID] {
+			t.Errorf("duplicate session id %q across concurrent starts", r.SessionID)
+		}
+		if streams[r.StreamID] {
+			t.Errorf("duplicate stream id %q across concurrent starts", r.StreamID)
+		}
+		sessions[r.SessionID] = true
+		streams[r.StreamID] = true
 	}
 }
 

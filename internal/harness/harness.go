@@ -40,9 +40,11 @@ func RunFakeACP() {
 		case "initialize":
 			return acp.InitializeResult{ProtocolVersion: acp.ProtocolVersion}, nil
 		case acp.MethodNewSession:
-			// Unique per session/new so multiple sessions on one process get
-			// distinct ids (and therefore distinct event streams).
-			return acp.NewSessionResult{SessionID: fmt.Sprintf("sess-%d", nextSession.Add(1))}, nil
+			// Globally unique: pid distinguishes processes (the pool may spawn
+			// several for one {workspace, provider} under concurrent starts) and the
+			// counter distinguishes sessions within a process, so no two sessions
+			// ever share an id (or therefore an event stream).
+			return acp.NewSessionResult{SessionID: fmt.Sprintf("sess-%d-%d", os.Getpid(), nextSession.Add(1))}, nil
 		case acp.MethodPrompt:
 			var p acp.PromptParams
 			_ = json.Unmarshal(req.Params, &p)
