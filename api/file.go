@@ -47,6 +47,53 @@ type FileWriteParams struct {
 	Base      FileBase  `json:"base"`
 }
 
+// FileChange kinds: whether a change-set target applies edits or whole content.
+const (
+	FileChangePatch = "patch"
+	FileChangeWrite = "write"
+)
+
+// FileChange is one target in a change set: a patch (Edits) or a whole-content
+// write (Content), against Base. Kind selects which; an empty Kind is treated as
+// a patch.
+type FileChange struct {
+	URI     string     `json:"uri"`
+	Base    FileBase   `json:"base"`
+	Kind    string     `json:"kind,omitempty"`
+	Edits   []TextEdit `json:"edits,omitempty"`
+	Content string     `json:"content,omitempty"`
+}
+
+// FileApplyChangeSetParams applies a multi-file change set as one approved unit.
+type FileApplyChangeSetParams struct {
+	SessionID SessionID    `json:"session_id"`
+	Changes   []FileChange `json:"changes"`
+}
+
+// FileChangeOutcome reports what happened to one target of a change set.
+type FileChangeOutcome struct {
+	URI     string   `json:"uri"`
+	Applied bool     `json:"applied"`
+	Base    FileBase `json:"base,omitzero"` // new base when applied
+	// RolledBack is true if the target was written then restored after a later
+	// failure in the set.
+	RolledBack bool `json:"rolled_back,omitempty"`
+	// Error explains a non-applied (or un-rolled-back) target: a conflict, an
+	// invalid edit, a write failure, or a failed rollback.
+	Error string `json:"error,omitempty"`
+}
+
+// FileApplyChangeSetResult reports a change set's outcome. Applied is true only
+// when every target applied. The daemon does not claim true atomicity across
+// disk and editor buffers; on a mid-apply failure it reports exactly what
+// applied, what did not, and what could not be rolled back.
+type FileApplyChangeSetResult struct {
+	ChangeSetID ChangeSetID         `json:"change_set_id"`
+	Applied     bool                `json:"applied"`
+	Reason      string              `json:"reason,omitempty"`
+	Files       []FileChangeOutcome `json:"files"`
+}
+
 // FileMutationResult reports the outcome of a file.patch or file.write. Every
 // mutation is a change set with a daemon-assigned id. Applied is false when the
 // approval was denied (Reason explains); a stale base instead returns a conflict

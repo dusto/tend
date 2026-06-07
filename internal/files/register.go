@@ -33,10 +33,21 @@ func Register(m *dispatch.Mux, s *Service) error {
 	}); err != nil {
 		return err
 	}
-	return dispatch.Handle(m, MethodWrite, func(ctx context.Context, p api.FileWriteParams) (api.FileMutationResult, error) {
+	if err := dispatch.Handle(m, MethodWrite, func(ctx context.Context, p api.FileWriteParams) (api.FileMutationResult, error) {
 		res, err := s.Write(ctx, p)
 		if err != nil {
 			return api.FileMutationResult{}, toRPCError(err, p.URI)
+		}
+		return res, nil
+	}); err != nil {
+		return err
+	}
+	return dispatch.Handle(m, MethodApplyChangeSet, func(ctx context.Context, p api.FileApplyChangeSetParams) (api.FileApplyChangeSetResult, error) {
+		res, err := s.ApplyChangeSet(ctx, p)
+		if err != nil {
+			// Only structural errors surface as rpc errors; per-target conflicts and
+			// failures are reported inside the result.
+			return api.FileApplyChangeSetResult{}, toRPCError(err, "")
 		}
 		return res, nil
 	})

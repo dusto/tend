@@ -361,6 +361,22 @@ func TestPaneMethodsWired(t *testing.T) {
 	}
 }
 
+func TestApplyChangeSetWired(t *testing.T) {
+	srv, path := newServer(t)
+	go func() { _ = srv.Serve() }()
+	t.Cleanup(srv.Shutdown)
+
+	client := dial(t, path)
+	// Unknown session: routes to the file service (rejected there) rather than
+	// method-not-found, proving file.apply_change_set is registered.
+	err := client.Call(testCtx(t), "file.apply_change_set",
+		api.FileApplyChangeSetParams{SessionID: "nope"}, nil)
+	var rpcErr *rpc.Error
+	if !errors.As(err, &rpcErr) || rpcErr.Code != rpc.CodeInvalidParams {
+		t.Fatalf("err = %v, want invalid-params rpc error", err)
+	}
+}
+
 func TestShutdownIdempotent(t *testing.T) {
 	srv, _ := newServer(t)
 	go func() { _ = srv.Serve() }()

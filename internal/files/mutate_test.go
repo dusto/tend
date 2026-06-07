@@ -18,15 +18,19 @@ import (
 
 // fakeApprover records the requested approval and returns a canned outcome.
 type fakeApprover struct {
-	outcome approvals.Outcome
-	err     error
-	kind    string
-	detail  json.RawMessage
+	outcome   approvals.Outcome
+	err       error
+	kind      string
+	detail    json.RawMessage
+	onRequest func() // runs during Request, to simulate a concurrent change
 }
 
 func (a *fakeApprover) Request(_ context.Context, _ *session.Session, kind string, detail json.RawMessage) (approvals.Outcome, error) {
 	a.kind = kind
 	a.detail = detail
+	if a.onRequest != nil {
+		a.onRequest()
+	}
 	return a.outcome, a.err
 }
 
