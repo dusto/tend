@@ -107,7 +107,48 @@ func (l *Log) Append(ev api.Event) (api.Event, error) {
 func (l *Log) AppendSummary(streamID api.StreamID, scope api.EventScope, from, to uint64, payload json.RawMessage) error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	return l.appendSummaryLocked(streamID, scope, from, to, payload)
+}
 
+// Compaction errors.
+var (
+	// ErrWithinRetention reports that a range is too recent to compact: at least
+	// the retention window of most-recent raw records is kept for exact replay.
+	ErrWithinRetention = errors.New("events: range is within the retention window")
+	// ErrSummaryOverlap reports that a range overlaps an existing summary.
+	ErrSummaryOverlap = errors.New("events: range overlaps an existing summary")
+)
+
+// Compact summarizes [from, to] only when it lies beyond the retention window —
+// at least retention most-recent raw records remain — and does not overlap an
+// existing summary. seq is never reused or renumbered: the raw records stay in
+// the log and the stream's tail is unchanged, so new events keep counting up.
+func (l *Log) Compact(streamID api.StreamID, scope api.EventScope, from, to, retention uint64, payload json.RawMessage) error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	si := l.index[streamID]
+	if from == 0 || from > to {
+		return fmt.Errorf("events: invalid summary range [%d,%d]", from, to)
+	}
+	if si == nil || to > si.tail {
+		return fmt.Errorf("events: summary range [%d,%d] exceeds stream %q history", from, to, streamID)
+	}
+	// Keep the most-recent retention raw records uncompacted for exact replay.
+	if si.tail < to+retention {
+		return ErrWithinRetention
+	}
+	for f, sum := range si.summary {
+		if from <= sum.Summary.ToSeq && f <= to { // ranges intersect
+			return ErrSummaryOverlap
+		}
+	}
+	return l.appendSummaryLocked(streamID, scope, from, to, payload)
+}
+
+// appendSummaryLocked writes and indexes a summary record. The caller holds the
+// lock; it validates the range against the stream's history.
+func (l *Log) appendSummaryLocked(streamID api.StreamID, scope api.EventScope, from, to uint64, payload json.RawMessage) error {
 	si := l.index[streamID]
 	if from == 0 || from > to {
 		return fmt.Errorf("events: invalid summary range [%d,%d]", from, to)

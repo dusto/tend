@@ -6,6 +6,7 @@
 package events
 
 import (
+	"encoding/json"
 	"sync"
 
 	"github.com/dusto/tend/api"
@@ -17,15 +18,29 @@ import (
 // are a single path and live events are durable and seq-continuous. A Store is
 // safe for concurrent use.
 type Store struct {
-	log *Log
+	log       *Log
+	retention uint64 // most-recent raw records kept uncompacted per stream
 
 	mu   sync.Mutex
 	subs map[api.StreamID]map[*Sub]struct{}
 }
 
-// NewStore returns a Store backed by log.
+// DefaultRetention is how many most-recent raw records a stream keeps
+// uncompacted by default, so recent turns replay exactly.
+const DefaultRetention = 256
+
+// NewStore returns a Store backed by log with the default compaction retention.
 func NewStore(log *Log) *Store {
-	return &Store{log: log, subs: make(map[api.StreamID]map[*Sub]struct{})}
+	return &Store{log: log, retention: DefaultRetention, subs: make(map[api.StreamID]map[*Sub]struct{})}
+}
+
+// Compact summarizes a completed range [from, to] of a stream into a summary
+// record, but only when the range is beyond the retention window. Replay then
+// serves the summary at from in place of the subsumed raw records, then the
+// records after to; a cursor inside the range yields cursor_compacted. seq is
+// never reused.
+func (s *Store) Compact(streamID api.StreamID, scope api.EventScope, from, to uint64, payload json.RawMessage) error {
+	return s.log.Compact(streamID, scope, from, to, s.retention, payload)
 }
 
 // Publish appends ev to the log (stamping its seq, kind, cursor, and ts) and
