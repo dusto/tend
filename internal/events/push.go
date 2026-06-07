@@ -3,7 +3,10 @@ package events
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"sync"
+	"sync/atomic"
+	"time"
 
 	"github.com/dusto/tend/api"
 	"github.com/dusto/tend/internal/dispatch"
@@ -13,9 +16,10 @@ import (
 // Method names for the event subscription wire methods, matching the api
 // contract.
 const (
-	MethodSubscribe   = "events.subscribe"
-	MethodUnsubscribe = "events.unsubscribe"
-	MethodPush        = "event.push"
+	MethodSubscribe          = "events.subscribe"
+	MethodUnsubscribe        = "events.unsubscribe"
+	MethodPush               = "event.push"
+	MethodSubscriptionClosed = "event.subscription_closed"
 )
 
 // batch bounds how many records one tailer read returns, so catch-up over a
@@ -23,21 +27,67 @@ const (
 // backlog at once.
 const batch = 64
 
+// Defaults for the per-connection backpressure tiers.
+const (
+	// defaultBufSize bounds a single stream's in-flight send buffer. When it
+	// fills while the connection is otherwise healthy, just that stream's
+	// subscription is dropped (per-stream overflow).
+	defaultBufSize = 256
+	// defaultWriteTimeout bounds one event.push write. Exceeding it means the
+	// client has stopped draining the socket (socket-level overflow), so the
+	// whole connection is disconnected.
+	defaultWriteTimeout = 5 * time.Second
+)
+
 // Pusher serves the event subscription methods for one connection. On subscribe
-// it starts a single tailer per stream that replays the log forward from the
-// client's cursor and then follows live appends, delivering each record as an
-// event.push notification. It is bound to the connection that served the
-// subscribe request and is safe for concurrent use.
+// it starts, per stream, a tailer that reads the log forward from the client's
+// cursor and follows live appends, and a writer that delivers buffered records
+// as event.push notifications. Backpressure is two-tier: a full per-stream
+// buffer drops just that stream (event.subscription_closed, connection kept); a
+// stalled socket write disconnects the whole client. It is bound to the
+// connection that served the subscribe request and is safe for concurrent use.
 type Pusher struct {
-	store *Store
+	store        *Store
+	bufSize      int
+	writeTimeout time.Duration
+	// deliver sends a daemon->client notification; the field is the seam tests
+	// replace to drive the backpressure tiers deterministically.
+	deliver func(conn *rpc.Conn, method string, params any) error
+	// closeConn disconnects the client (socket-level overflow); a seam for tests.
+	closeConn func(conn *rpc.Conn)
 
 	mu   sync.Mutex
-	subs map[api.StreamID]*Sub
+	subs map[api.StreamID]*tailer
 }
 
-// NewPusher returns a Pusher backed by store.
+// tailer is one stream's subscription: its log reader, its bounded send buffer,
+// and the connection it pushes to.
+type tailer struct {
+	sub      *Sub
+	conn     *rpc.Conn
+	buf      chan api.Event
+	lastSent atomic.Uint64 // highest cursor_seq written; diagnostic only
+}
+
+// NewPusher returns a Pusher backed by store with the default backpressure
+// bounds.
 func NewPusher(store *Store) *Pusher {
-	return &Pusher{store: store, subs: make(map[api.StreamID]*Sub)}
+	p := &Pusher{
+		store:        store,
+		bufSize:      defaultBufSize,
+		writeTimeout: defaultWriteTimeout,
+		subs:         make(map[api.StreamID]*tailer),
+	}
+	p.deliver = p.notify
+	p.closeConn = func(conn *rpc.Conn) { _ = conn.Close() }
+	return p
+}
+
+// notify is the production delivery: a write-deadline-bounded notification.
+func (p *Pusher) notify(conn *rpc.Conn, method string, params any) error {
+	ctx, cancel := context.WithTimeout(context.Background(), p.writeTimeout)
+	defer cancel()
+	return conn.Notify(ctx, method, params)
 }
 
 // RegisterClient installs events.subscribe and events.unsubscribe on m, backed
@@ -54,7 +104,12 @@ func (p *Pusher) subscribe(ctx context.Context, params api.EventsSubscribeParams
 	if conn == nil {
 		return api.EventsSubscribeResult{}, &rpc.Error{Code: rpc.CodeInternalError, Message: "events: no connection in context"}
 	}
+	return p.start(conn, params)
+}
 
+// start registers and launches a subscription's tailer and writer. It is split
+// from subscribe so tests can drive it with a connection directly.
+func (p *Pusher) start(conn *rpc.Conn, params api.EventsSubscribeParams) (api.EventsSubscribeResult, error) {
 	p.mu.Lock()
 	if _, dup := p.subs[params.StreamID]; dup {
 		p.mu.Unlock()
@@ -62,8 +117,8 @@ func (p *Pusher) subscribe(ctx context.Context, params api.EventsSubscribeParams
 	}
 	// Register for live wakeups before reading, so appends during the first read
 	// are not missed: the tailer re-reads to the tail after each wake.
-	sub := p.store.Subscribe(params.StreamID)
-	p.subs[params.StreamID] = sub
+	t := &tailer{sub: p.store.Subscribe(params.StreamID), conn: conn, buf: make(chan api.Event, p.bufSize)}
+	p.subs[params.StreamID] = t
 	p.mu.Unlock()
 
 	// Reject a cursor that falls inside a compacted range before delivering
@@ -77,7 +132,8 @@ func (p *Pusher) subscribe(ctx context.Context, params api.EventsSubscribeParams
 	}
 
 	tail := p.store.HighWater(params.StreamID)
-	go p.tail(conn, sub, params.LastSeq)
+	go p.tail(t, params.LastSeq)
+	go p.write(t)
 	return api.EventsSubscribeResult{Tail: tail}, nil
 }
 
@@ -86,56 +142,90 @@ func (p *Pusher) unsubscribe(_ context.Context, params api.EventsUnsubscribePara
 	return struct{}{}, nil
 }
 
-// drop stops the tailer for streamID (if any) and removes it.
+// drop stops the tailer/writer for streamID (if any) and removes it.
 func (p *Pusher) drop(streamID api.StreamID) {
 	p.mu.Lock()
-	sub := p.subs[streamID]
+	t := p.subs[streamID]
 	delete(p.subs, streamID)
 	p.mu.Unlock()
-	if sub != nil {
-		sub.Close()
+	if t != nil {
+		t.sub.Close()
 	}
 }
 
-// tail is the single per-stream reader: it reads the log forward from cursor in
-// bounded batches until caught up, then waits for a wake and reads again. Replay
-// and live delivery are the same path, so live events are delivered strictly
-// after replayed history with no drops or reordering. It exits when the
-// subscription is closed or the connection ends.
-func (p *Pusher) tail(conn *rpc.Conn, sub *Sub, cursor uint64) {
-	defer sub.Close()
+// tail reads the log forward from cursor in bounded batches and enqueues records
+// into the stream's send buffer, in order. Replay and live are the same path, so
+// there are no drops or reordering within the stream. A full buffer is
+// per-stream overflow.
+func (p *Pusher) tail(t *tailer, cursor uint64) {
 	for {
-		records, _, err := p.store.Read(sub.streamID, cursor, batch)
+		records, _, err := p.store.Read(t.sub.streamID, cursor, batch)
 		if err != nil {
 			return
 		}
 		if len(records) > 0 {
 			for _, ev := range records {
-				// Re-check cancellation before each record so unsubscribe (or a
-				// closed connection) stops delivery within one record, not one
-				// whole batch.
 				select {
-				case <-sub.Stop():
+				case <-t.sub.Stop():
 					return
-				case <-conn.Done():
+				case <-t.conn.Done():
 					return
+				case t.buf <- ev:
+					cursor = ev.CursorSeq
 				default:
-				}
-				if !push(conn, ev) {
+					p.overflow(t)
 					return
 				}
-				cursor = ev.CursorSeq
 			}
 			continue // keep reading until the backlog is drained
 		}
 		// Caught up to the tail: wait for the next append (or stop).
 		select {
-		case <-sub.Stop():
+		case <-t.sub.Stop():
 			return
-		case <-conn.Done():
+		case <-t.conn.Done():
 			return
-		case <-sub.Wake():
+		case <-t.sub.Wake():
 		}
+	}
+}
+
+// write drains the stream's buffer to the connection. A write that exceeds the
+// deadline means the client is not draining the socket (socket-level overflow):
+// the whole connection is disconnected.
+func (p *Pusher) write(t *tailer) {
+	for {
+		select {
+		case <-t.sub.Stop():
+			return
+		case <-t.conn.Done():
+			return
+		case ev := <-t.buf:
+			if err := p.deliver(t.conn, MethodPush, api.EventPushParams{Event: ev}); err != nil {
+				if errors.Is(err, context.DeadlineExceeded) {
+					p.closeConn(t.conn)
+				}
+				return
+			}
+			t.lastSent.Store(ev.CursorSeq)
+		}
+	}
+}
+
+// overflow handles a full per-stream buffer: it drops just that stream (keeping
+// the connection) and tells the client, which resubscribes from its own
+// last_seq. If that notification itself stalls, the socket is not draining at
+// all, so the whole connection is disconnected.
+func (p *Pusher) overflow(t *tailer) {
+	p.drop(t.sub.streamID)
+	last := t.lastSent.Load()
+	params := api.SubscriptionClosedParams{
+		StreamID:    t.sub.streamID,
+		Reason:      "per-stream buffer overflow",
+		LastSentSeq: &last,
+	}
+	if err := p.deliver(t.conn, MethodSubscriptionClosed, params); errors.Is(err, context.DeadlineExceeded) {
+		p.closeConn(t.conn)
 	}
 }
 
@@ -147,9 +237,4 @@ func compactedError(streamID api.StreamID, boundary uint64) *rpc.Error {
 		Message: "events: cursor inside a compacted range; resume from the summary boundary",
 		Data:    data,
 	}
-}
-
-// push sends one event.push notification, reporting whether it was sent.
-func push(conn *rpc.Conn, ev api.Event) bool {
-	return conn.Notify(context.Background(), MethodPush, api.EventPushParams{Event: ev}) == nil
 }
