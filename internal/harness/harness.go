@@ -13,6 +13,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"time"
 
 	"github.com/dusto/tend/api"
@@ -33,12 +34,15 @@ const (
 // re-exec entrypoint a test binary's TestMain dispatches to when EnvFakeACP is
 // set, so the daemon can spawn it as a real provider process.
 func RunFakeACP() {
+	var nextSession atomic.Int64
 	h := rpc.HandlerFunc(func(ctx context.Context, req *rpc.Request) (any, error) {
 		switch req.Method {
 		case "initialize":
 			return acp.InitializeResult{ProtocolVersion: acp.ProtocolVersion}, nil
 		case acp.MethodNewSession:
-			return acp.NewSessionResult{SessionID: "sess-1"}, nil
+			// Unique per session/new so multiple sessions on one process get
+			// distinct ids (and therefore distinct event streams).
+			return acp.NewSessionResult{SessionID: fmt.Sprintf("sess-%d", nextSession.Add(1))}, nil
 		case acp.MethodPrompt:
 			var p acp.PromptParams
 			_ = json.Unmarshal(req.Params, &p)

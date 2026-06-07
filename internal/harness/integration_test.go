@@ -73,6 +73,98 @@ func TestReplayReconnectDedup(t *testing.T) {
 	}
 }
 
+// startSession starts a codex session for a task and returns its start result;
+// the caller has already registered the client.
+func startSession(t *testing.T, c *Client, taskID string) api.AgentStartResult {
+	t.Helper()
+	var started api.AgentStartResult
+	mustCall(t, c, "agent.start", api.AgentStartParams{
+		ProviderID:   "codex",
+		Task:         api.TaskRef{Provider: "beads", WorkspaceID: "ws1", ID: taskID},
+		WorktreeRoot: t.TempDir(),
+	}, &started)
+	return started
+}
+
+// TestMultipleSessionsIndependent runs two sessions through one daemon and
+// connection and asserts they are fully independent: distinct stream ids, each
+// turn delivered only on its own stream (no leakage), and on reconnect both
+// subscriptions are restored from their own cursors with per-stream replay and
+// dedup.
+func TestMultipleSessionsIndependent(t *testing.T) {
+	sock := fakeDaemon(t)
+	c := dial(t, sock)
+	mustCall(t, c, "daemon.hello", api.HelloParams{}, &api.HelloResult{})
+	mustCall(t, c, "client.register", api.ClientRegisterParams{ClientID: "ed", Role: api.RoleEditor, PromptCapable: true}, &api.ClientRegisterResult{})
+
+	a := startSession(t, c, "t1")
+	b := startSession(t, c, "t2")
+	if a.StreamID == b.StreamID || a.SessionID == b.SessionID {
+		t.Fatalf("sessions collided: a=%+v b=%+v", a, b)
+	}
+
+	mustCall(t, c, "events.subscribe", api.EventsSubscribeParams{StreamID: a.StreamID}, &api.EventsSubscribeResult{})
+	mustCall(t, c, "events.subscribe", api.EventsSubscribeParams{StreamID: b.StreamID}, &api.EventsSubscribeResult{})
+
+	// Run a turn on each session.
+	mustCall(t, c, "agent.prompt", api.AgentPromptParams{SessionID: a.SessionID, Text: "hi a"}, &api.AgentPromptResult{})
+	mustCall(t, c, "agent.prompt", api.AgentPromptParams{SessionID: b.SessionID, Text: "hi b"}, &api.AgentPromptResult{})
+
+	if !c.WaitEventCount(a.StreamID, 5, 3*time.Second) || !c.WaitEventCount(b.StreamID, 5, 3*time.Second) {
+		t.Fatalf("turns incomplete: a=%v b=%v", c.EventTypes(a.StreamID), c.EventTypes(b.StreamID))
+	}
+	// No leakage: each stream carries exactly its own turn (5 records), and every
+	// record's stream id matches.
+	for _, s := range []api.StreamID{a.StreamID, b.StreamID} {
+		evs := c.Events(s)
+		if len(evs) != 5 {
+			t.Errorf("stream %s = %d events, want 5 (leakage or loss)", s, len(evs))
+		}
+		for _, ev := range evs {
+			if ev.StreamID != s {
+				t.Errorf("event with stream %s delivered on %s", ev.StreamID, s)
+			}
+		}
+	}
+
+	// Seed a Deduper with the first connection's records for both streams.
+	dd := events.NewDeduper()
+	for _, s := range []api.StreamID{a.StreamID, b.StreamID} {
+		for _, ev := range c.Events(s) {
+			if !dd.Fresh(ev) {
+				t.Errorf("first-delivery %s seq %d should be fresh", s, ev.Seq)
+			}
+		}
+	}
+
+	// Reconnect: one client restores both subscriptions from independent cursors —
+	// stream a behind at 2, stream b fresh at 0.
+	rc := dial(t, sock)
+	mustCall(t, rc, "events.subscribe", api.EventsSubscribeParams{StreamID: a.StreamID, LastSeq: 2}, &api.EventsSubscribeResult{})
+	mustCall(t, rc, "events.subscribe", api.EventsSubscribeParams{StreamID: b.StreamID, LastSeq: 0}, &api.EventsSubscribeResult{})
+	if !rc.WaitEventCount(a.StreamID, 3, 3*time.Second) || !rc.WaitEventCount(b.StreamID, 5, 3*time.Second) {
+		t.Fatalf("reconnect replay incomplete: a=%v b=%v", rc.EventTypes(a.StreamID), rc.EventTypes(b.StreamID))
+	}
+	// Independent cursors: a replays only (2, tail] = 3,4,5; b replays the whole 1..5.
+	for _, ev := range rc.Events(a.StreamID) {
+		if ev.Seq < 3 {
+			t.Errorf("stream a replayed seq %d, want only (2, tail]", ev.Seq)
+		}
+	}
+	if len(rc.Events(b.StreamID)) != 5 {
+		t.Errorf("stream b replay = %d, want 5", len(rc.Events(b.StreamID)))
+	}
+	// Per-stream dedup: every replayed record (same seqs as before, even across
+	// the two streams) is recognized as already-seen.
+	for _, s := range []api.StreamID{a.StreamID, b.StreamID} {
+		for _, ev := range rc.Events(s) {
+			if dd.Fresh(ev) {
+				t.Errorf("replayed %s seq %d should dedup as already-seen", s, ev.Seq)
+			}
+		}
+	}
+}
+
 // TestPerStreamMultiplexing proves logical streams are independent over one
 // connection: the session turn and a workspace task event land on their own
 // streams with no cross-contamination.
