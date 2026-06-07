@@ -31,9 +31,10 @@ import (
 
 // File method names.
 const (
-	MethodRead  = "file.read"
-	MethodPatch = "file.patch"
-	MethodWrite = "file.write"
+	MethodRead           = "file.read"
+	MethodPatch          = "file.patch"
+	MethodWrite          = "file.write"
+	MethodApplyChangeSet = "file.apply_change_set"
 )
 
 // Errors returned by the file service.

@@ -34,6 +34,8 @@ Schemas live under `schemas/` (`methods/<name>.params.json` / `.result.json`, `e
   - Params: `FilePatchParams` · Result: `FileMutationResult`
 - **`file.write`** — Replace a repo file's whole content (task-bound, approval-gated, base-checked); single-target change set.
   - Params: `FileWriteParams` · Result: `FileMutationResult`
+- **`file.apply_change_set`** — Apply a multi-file change set as one approved unit (best-effort atomic: preflight, disk writes, editor buffers last, with partial-failure reporting).
+  - Params: `FileApplyChangeSetParams` · Result: `FileApplyChangeSetResult`
 - **`approval.list`** — List pending approvals (self-contained payloads), optionally filtered by session.
   - Params: `ApprovalListParams` · Result: `ApprovalListResult`
 - **`approval.respond`** — Resolve a pending approval (approve/deny); returns an ack. Only prompt-capable clients may call it.
