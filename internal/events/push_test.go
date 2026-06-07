@@ -29,6 +29,12 @@ func (r *recorder) Handle(_ context.Context, req *rpc.Request) (any, error) {
 }
 
 func newPushPair(t *testing.T) (*Store, *rpc.Conn, *recorder) {
+	// Delivery-correctness tests assert ordering, not backpressure, so they use a
+	// buffer ample enough that the bounded send buffer never overflows.
+	return newPushPairBuf(t, 4096)
+}
+
+func newPushPairBuf(t *testing.T, bufSize int) (*Store, *rpc.Conn, *recorder) {
 	t.Helper()
 	log, err := OpenLog(filepath.Join(t.TempDir(), "events.log"))
 	if err != nil {
@@ -38,7 +44,9 @@ func newPushPair(t *testing.T) (*Store, *rpc.Conn, *recorder) {
 	store := NewStore(log)
 
 	mux := dispatch.NewMux(api.PluginToDaemon)
-	if err := RegisterClient(mux, NewPusher(store)); err != nil {
+	pusher := NewPusher(store)
+	pusher.bufSize = bufSize
+	if err := RegisterClient(mux, pusher); err != nil {
 		t.Fatalf("RegisterClient: %v", err)
 	}
 	p1, p2 := net.Pipe()
