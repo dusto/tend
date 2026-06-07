@@ -206,7 +206,13 @@ func (p *Pusher) write(t *tailer) {
 		case ev := <-t.buf:
 			if err := p.deliver(t.conn, MethodPush, api.EventPushParams{Event: ev}); err != nil {
 				if errors.Is(err, context.DeadlineExceeded) {
+					// Socket-level overflow: the client is not draining; disconnect
+					// the whole client (the tailer then drops on conn close).
 					p.closeConn(t.conn)
+				} else {
+					// Any other delivery failure stops this stream's writer, so drop
+					// the subscription rather than leave the tailer with no writer.
+					p.drop(t.sub.streamID)
 				}
 				return
 			}

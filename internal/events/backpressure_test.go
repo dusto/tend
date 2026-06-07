@@ -2,6 +2,7 @@ package events
 
 import (
 	"context"
+	"errors"
 	"net"
 	"path/filepath"
 	"sync"
@@ -125,6 +126,40 @@ func TestConnCloseUnregistersSubscription(t *testing.T) {
 			t.Fatalf("subscriberCount = %d after disconnect, want 0 (leaked subscription)", store.subscriberCount(stream))
 		}
 		time.Sleep(time.Millisecond)
+	}
+}
+
+// TestNonDeadlineDeliveryErrorDropsStream: a delivery failure that is not a
+// deadline (e.g. a broken write or encode error) stops that stream's writer, so
+// the subscription is dropped rather than leaking a writerless tailer — but the
+// whole client is not disconnected (that is reserved for the socket-stall tier).
+func TestNonDeadlineDeliveryErrorDropsStream(t *testing.T) {
+	stream := api.StreamID("session:a")
+	store := storeWithEvents(t, stream, 3)
+	conn := idleConn(t)
+
+	var connClosed bool
+	p := NewPusher(store)
+	p.closeConn = func(*rpc.Conn) { connClosed = true }
+	p.deliver = func(_ *rpc.Conn, method string, _ any) error {
+		if method == MethodPush {
+			return errors.New("broken write")
+		}
+		return nil
+	}
+
+	if _, err := p.start(conn, api.EventsSubscribeParams{StreamID: stream, LastSeq: 0}); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for store.subscriberCount(stream) != 0 {
+		if time.Now().After(deadline) {
+			t.Fatalf("subscriberCount = %d after a delivery error, want 0 (leaked subscription)", store.subscriberCount(stream))
+		}
+		time.Sleep(time.Millisecond)
+	}
+	if connClosed {
+		t.Error("a non-deadline delivery error should drop the stream, not disconnect the client")
 	}
 }
 
