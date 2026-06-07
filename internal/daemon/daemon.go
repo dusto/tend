@@ -78,6 +78,7 @@ type Option func(*options)
 type options struct {
 	acp         *acp.Config
 	taskFactory tasks.Factory
+	retention   uint64
 }
 
 // WithACPConfig sets the ACP provider config the daemon spawns from (default:
@@ -88,6 +89,10 @@ func WithACPConfig(c *acp.Config) Option { return func(o *options) { o.acp = c }
 // in-memory fake provider).
 func WithTaskFactory(f tasks.Factory) Option { return func(o *options) { o.taskFactory = f } }
 
+// WithEventRetention sets how many most-recent raw event records each stream
+// keeps uncompacted (default: events.DefaultRetention).
+func WithEventRetention(n uint64) Option { return func(o *options) { o.retention = n } }
+
 // New builds a Server over ln with a fresh per-process epoch and the params
 // validator available for the build. It opens the durable event log at logPath
 // and validates handler registration up front so a registration bug fails at
@@ -96,6 +101,7 @@ func New(ln net.Listener, logPath string, opts ...Option) (*Server, error) {
 	o := options{
 		acp:         acp.DefaultConfig(),
 		taskFactory: func(ws api.WorkspaceID) tasks.Provider { return tasks.NewFake(ws) },
+		retention:   events.DefaultRetention,
 	}
 	for _, opt := range opts {
 		opt(&o)
@@ -115,6 +121,7 @@ func New(ln net.Listener, logPath string, opts ...Option) (*Server, error) {
 		clients:   client.NewRegistry(),
 		conns:     make(map[*rpc.Conn]struct{}),
 	}
+	s.store.SetRetention(o.retention)
 	s.binder = editor.NewBinder(s.sessions, s.clients)
 	s.gate = approvals.NewGate(s.store, approvals.Options{
 		TTL:      approvalTTL,
@@ -234,6 +241,10 @@ func (s *Server) newMux() (*dispatch.Mux, func(), error) {
 
 // Epoch returns the daemon's process epoch.
 func (s *Server) Epoch() string { return s.epoch }
+
+// EventStore returns the daemon's event store. It is exposed primarily for tests
+// and administration (for example to drive compaction).
+func (s *Server) EventStore() *events.Store { return s.store }
 
 // Serve accepts connections until the listener is closed (for example by
 // Shutdown), serving each as a JSON-RPC peer. It returns nil on a clean

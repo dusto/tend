@@ -13,6 +13,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"time"
 
 	"github.com/dusto/tend/api"
@@ -33,12 +34,17 @@ const (
 // re-exec entrypoint a test binary's TestMain dispatches to when EnvFakeACP is
 // set, so the daemon can spawn it as a real provider process.
 func RunFakeACP() {
+	var nextSession atomic.Int64
 	h := rpc.HandlerFunc(func(ctx context.Context, req *rpc.Request) (any, error) {
 		switch req.Method {
 		case "initialize":
 			return acp.InitializeResult{ProtocolVersion: acp.ProtocolVersion}, nil
 		case acp.MethodNewSession:
-			return acp.NewSessionResult{SessionID: "sess-1"}, nil
+			// Globally unique: pid distinguishes processes (the pool may spawn
+			// several for one {workspace, provider} under concurrent starts) and the
+			// counter distinguishes sessions within a process, so no two sessions
+			// ever share an id (or therefore an event stream).
+			return acp.NewSessionResult{SessionID: fmt.Sprintf("sess-%d-%d", os.Getpid(), nextSession.Add(1))}, nil
 		case acp.MethodPrompt:
 			var p acp.PromptParams
 			_ = json.Unmarshal(req.Params, &p)
@@ -172,6 +178,19 @@ func (c *Client) unlock() { c.mu <- struct{}{} }
 // Call invokes a daemon method.
 func (c *Client) Call(ctx context.Context, method string, params, result any) error {
 	return c.conn.Call(ctx, method, params, result)
+}
+
+// Events returns the collected events on a stream, in arrival order.
+func (c *Client) Events(stream api.StreamID) []api.Event {
+	c.lock()
+	defer c.unlock()
+	var out []api.Event
+	for _, ev := range c.events {
+		if ev.StreamID == stream {
+			out = append(out, ev)
+		}
+	}
+	return out
 }
 
 // EventTypes returns the types of collected events on a stream, in arrival order.

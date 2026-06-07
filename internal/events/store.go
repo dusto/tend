@@ -34,6 +34,10 @@ func NewStore(log *Log) *Store {
 	return &Store{log: log, retention: DefaultRetention, subs: make(map[api.StreamID]map[*Sub]struct{})}
 }
 
+// SetRetention sets how many most-recent raw records a stream keeps uncompacted.
+// It is meant to be called at construction, before traffic.
+func (s *Store) SetRetention(n uint64) { s.retention = n }
+
 // Compact summarizes a completed range [from, to] of a stream into a summary
 // record, but only when the range is beyond the retention window. Replay then
 // serves the summary at from in place of the subsumed raw records, then the
