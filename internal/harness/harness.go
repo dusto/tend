@@ -174,6 +174,19 @@ func (c *Client) Call(ctx context.Context, method string, params, result any) er
 	return c.conn.Call(ctx, method, params, result)
 }
 
+// Events returns the collected events on a stream, in arrival order.
+func (c *Client) Events(stream api.StreamID) []api.Event {
+	c.lock()
+	defer c.unlock()
+	var out []api.Event
+	for _, ev := range c.events {
+		if ev.StreamID == stream {
+			out = append(out, ev)
+		}
+	}
+	return out
+}
+
 // EventTypes returns the types of collected events on a stream, in arrival order.
 func (c *Client) EventTypes(stream api.StreamID) []string {
 	c.lock()
