@@ -100,6 +100,34 @@ func TestPerStreamOverflowDropsSubscription(t *testing.T) {
 	}
 }
 
+// TestConnCloseUnregistersSubscription: when the connection closes, the tailer
+// exits and unregisters its store subscription, so a disconnect does not leak a
+// dead subscriber that future publishes would keep signaling.
+func TestConnCloseUnregistersSubscription(t *testing.T) {
+	stream := api.StreamID("session:a")
+	store := storeWithEvents(t, stream, 0) // empty: the tailer parks waiting for appends
+	a, b := net.Pipe()
+	conn := rpc.NewConn(a, nil)
+	t.Cleanup(func() { _ = b.Close() })
+
+	p := NewPusher(store)
+	if _, err := p.start(conn, api.EventsSubscribeParams{StreamID: stream, LastSeq: 0}); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	if store.subscriberCount(stream) != 1 {
+		t.Fatalf("subscriberCount = %d after subscribe, want 1", store.subscriberCount(stream))
+	}
+
+	_ = conn.Close()
+	deadline := time.Now().Add(2 * time.Second)
+	for store.subscriberCount(stream) != 0 {
+		if time.Now().After(deadline) {
+			t.Fatalf("subscriberCount = %d after disconnect, want 0 (leaked subscription)", store.subscriberCount(stream))
+		}
+		time.Sleep(time.Millisecond)
+	}
+}
+
 // TestSocketStallDisconnects: a push write that exceeds the deadline means the
 // client is not draining the socket, so the whole connection is disconnected.
 func TestSocketStallDisconnects(t *testing.T) {

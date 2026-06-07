@@ -156,8 +156,11 @@ func (p *Pusher) drop(streamID api.StreamID) {
 // tail reads the log forward from cursor in bounded batches and enqueues records
 // into the stream's send buffer, in order. Replay and live are the same path, so
 // there are no drops or reordering within the stream. A full buffer is
-// per-stream overflow.
+// per-stream overflow. On any exit — overflow, unsubscribe, or the connection
+// closing — it drops the subscription, so the connection's termination
+// unregisters the store subscription rather than leaking a dead subscriber.
 func (p *Pusher) tail(t *tailer, cursor uint64) {
+	defer p.drop(t.sub.streamID)
 	for {
 		records, _, err := p.store.Read(t.sub.streamID, cursor, batch)
 		if err != nil {
