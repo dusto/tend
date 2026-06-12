@@ -1,0 +1,58 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$defs": {
+    "FileDiffEntry": {
+      "properties": {
+        "uri": {
+          "type": "string"
+        },
+        "before": {
+          "type": "string"
+        },
+        "after": {
+          "type": "string"
+        },
+        "diff": {
+          "type": "string"
+        },
+        "applied": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "uri",
+        "before",
+        "after",
+        "diff",
+        "applied"
+      ]
+    }
+  },
+  "properties": {
+    "change_set_id": {
+      "type": "string"
+    },
+    "session_id": {
+      "type": "string"
+    },
+    "applied": {
+      "type": "boolean"
+    },
+    "files": {
+      "items": {
+        "$ref": "#/$defs/FileDiffEntry"
+      },
+      "type": "array"
+    }
+  },
+  "additionalProperties": false,
+  "type": "object",
+  "required": [
+    "change_set_id",
+    "session_id",
+    "applied",
+    "files"
+  ]
+}

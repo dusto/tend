@@ -42,12 +42,25 @@ func Register(m *dispatch.Mux, s *Service) error {
 	}); err != nil {
 		return err
 	}
-	return dispatch.Handle(m, MethodApplyChangeSet, func(ctx context.Context, p api.FileApplyChangeSetParams) (api.FileApplyChangeSetResult, error) {
+	if err := dispatch.Handle(m, MethodApplyChangeSet, func(ctx context.Context, p api.FileApplyChangeSetParams) (api.FileApplyChangeSetResult, error) {
 		res, err := s.ApplyChangeSet(ctx, p)
 		if err != nil {
 			// Only structural errors surface as rpc errors; per-target conflicts and
 			// failures are reported inside the result.
 			return api.FileApplyChangeSetResult{}, toRPCError(err, "")
+		}
+		return res, nil
+	}); err != nil {
+		return err
+	}
+	return dispatch.Handle(m, MethodDiff, func(ctx context.Context, p api.FileDiffParams) (api.FileDiffResult, error) {
+		res, err := s.Diff(ctx, p)
+		if err != nil {
+			if errors.Is(err, ErrUnknownChangeSet) {
+				data, _ := json.Marshal(api.UnknownChangeSetData(p))
+				return api.FileDiffResult{}, &rpc.Error{Code: api.ErrUnknownChangeSet, Message: err.Error(), Data: data}
+			}
+			return api.FileDiffResult{}, toRPCError(err, "")
 		}
 		return res, nil
 	})

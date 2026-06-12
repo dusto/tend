@@ -14,6 +14,8 @@ const (
 	MethodReadBuffer    = "editor.read_buffer"
 	MethodWriteBuffer   = "editor.write_buffer"
 	MethodSelection     = "editor.selection"
+	MethodOpen          = "editor.open"
+	MethodDiff          = "editor.diff"
 )
 
 // Service routes editor-local calls to a session's editor-binding owner. Each
@@ -61,6 +63,30 @@ func (s *Service) WriteBuffer(ctx context.Context, sessionID api.SessionID, p ap
 	}
 	var res api.EditorWriteBufferResult
 	err = caller.Call(ctx, MethodWriteBuffer, p, &res)
+	return res, err
+}
+
+// Open asks the bound editor to open files in buffers for in-place review.
+func (s *Service) Open(ctx context.Context, sessionID api.SessionID, p api.EditorOpenParams) (api.EditorOpenResult, error) {
+	caller, err := s.editorCaller(sessionID)
+	if err != nil {
+		return api.EditorOpenResult{}, err
+	}
+	var res api.EditorOpenResult
+	err = caller.Call(ctx, MethodOpen, p, &res)
+	return res, err
+}
+
+// Diff asks the bound editor to render a change set's captured before/after
+// snapshots in its diff view. The content travels in the request, so the view
+// shows the named proposal or applied set, never an undefined current state.
+func (s *Service) Diff(ctx context.Context, sessionID api.SessionID, p api.EditorDiffParams) (api.EditorDiffResult, error) {
+	caller, err := s.editorCaller(sessionID)
+	if err != nil {
+		return api.EditorDiffResult{}, err
+	}
+	var res api.EditorDiffResult
+	err = caller.Call(ctx, MethodDiff, p, &res)
 	return res, err
 }
 

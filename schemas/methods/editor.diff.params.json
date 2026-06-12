@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$defs": {
+    "EditorDiffFile": {
+      "properties": {
+        "uri": {
+          "type": "string"
+        },
+        "before": {
+          "type": "string"
+        },
+        "after": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "uri",
+        "before",
+        "after"
+      ]
+    }
+  },
+  "properties": {
+    "change_set_id": {
+      "type": "string"
+    },
+    "files": {
+      "items": {
+        "$ref": "#/$defs/EditorDiffFile"
+      },
+      "type": "array"
+    }
+  },
+  "additionalProperties": false,
+  "type": "object",
+  "required": [
+    "change_set_id",
+    "files"
+  ]
+}

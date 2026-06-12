@@ -21,6 +21,10 @@ const (
 	// ErrNotPromptCapable: a client that did not register as prompt-capable tried
 	// to resolve a prompt (approval.respond / session.clarify).
 	ErrNotPromptCapable = 1006
+	// ErrUnknownChangeSet: file.diff named a change set the daemon has no
+	// snapshots for (never recorded, or evicted from the retention window).
+	// Data is UnknownChangeSetData.
+	ErrUnknownChangeSet = 1007
 )
 
 // CursorCompactedData accompanies ErrCursorCompacted: the client should resume
@@ -34,6 +38,11 @@ type CursorCompactedData struct {
 // ConflictData accompanies ErrConflict.
 type ConflictData struct {
 	URI string `json:"uri"`
+}
+
+// UnknownChangeSetData accompanies ErrUnknownChangeSet.
+type UnknownChangeSetData struct {
+	ChangeSetID ChangeSetID `json:"change_set_id"`
 }
 
 // ErrorDef declares a TEND JSON-RPC error for the generated contract. Data
@@ -53,4 +62,5 @@ var ErrorDefs = []ErrorDef{
 	{Code: ErrNoWorkspaceMutation, Name: "no_workspace_mutation", Data: nil, Summary: "A mutating operation was attempted outside git (only an ephemeral read-only workspace is available)."},
 	{Code: ErrNoActiveWorkspace, Name: "no_active_workspace", Data: nil, Summary: "workspace.current was called before any workspace was opened on the connection."},
 	{Code: ErrNotPromptCapable, Name: "not_prompt_capable", Data: nil, Summary: "A client that did not register as prompt-capable tried to resolve a prompt."},
+	{Code: ErrUnknownChangeSet, Name: "unknown_change_set", Data: UnknownChangeSetData{}, Summary: "file.diff named a change set with no retained snapshots (never recorded or evicted)."},
 }

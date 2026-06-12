@@ -18,6 +18,7 @@ type preparedChange struct {
 	base       api.FileBase
 	open       bool
 	tick       *int64
+	before     []byte
 	newContent []byte
 	diff       string
 }
@@ -69,7 +70,7 @@ func (s *Service) ApplyChangeSet(ctx context.Context, p api.FileApplyChangeSetPa
 		}
 		preps = append(preps, preparedChange{
 			idx: i, uri: ch.URI, path: path, base: ch.Base,
-			open: st.open, tick: st.tick, newContent: newContent,
+			open: st.open, tick: st.tick, before: st.content, newContent: newContent,
 			diff: diff.Unified(string(st.content), string(newContent)),
 		})
 	}
@@ -77,6 +78,16 @@ func (s *Service) ApplyChangeSet(ctx context.Context, p api.FileApplyChangeSetPa
 		res.Reason = "preflight failed; nothing applied"
 		return res, nil
 	}
+
+	// Snapshots are captured at proposal time, so the set is reviewable via
+	// file.diff even while pending or after a denial.
+	snaps := make([]changeSetFile, len(preps))
+	for k, pr := range preps {
+		snaps[k] = changeSetFile{
+			uri: pr.uri, before: string(pr.before), after: string(pr.newContent), diff: pr.diff,
+		}
+	}
+	s.snapshots.record(csid, p.SessionID, snaps)
 
 	// One approval for the whole set.
 	targets := make([]api.FileEditTarget, len(preps))
@@ -99,7 +110,13 @@ func (s *Service) ApplyChangeSet(ctx context.Context, p api.FileApplyChangeSetPa
 		return res, nil
 	}
 
-	return s.applyPrepared(ctx, p.SessionID, res, preps), nil
+	res = s.applyPrepared(ctx, p.SessionID, res, preps)
+	appliedByURI := make(map[string]bool, len(res.Files))
+	for _, f := range res.Files {
+		appliedByURI[f.URI] = f.Applied
+	}
+	s.snapshots.setApplied(csid, res.Applied, appliedByURI)
+	return res, nil
 }
 
 // applyPrepared performs the apply phase: disk writes first (with backups for
