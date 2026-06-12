@@ -36,6 +36,8 @@ Schemas live under `schemas/` (`methods/<name>.params.json` / `.result.json`, `e
   - Params: `FileWriteParams` · Result: `FileMutationResult`
 - **`file.apply_change_set`** — Apply a multi-file change set as one approved unit (best-effort atomic: preflight, disk writes, editor buffers last, with partial-failure reporting).
   - Params: `FileApplyChangeSetParams` · Result: `FileApplyChangeSetResult`
+- **`file.diff`** — Fetch a change set's captured before/after snapshots for review (read-only, not task-gated).
+  - Params: `FileDiffParams` · Result: `FileDiffResult`
 - **`approval.list`** — List pending approvals (self-contained payloads), optionally filtered by session.
   - Params: `ApprovalListParams` · Result: `ApprovalListResult`
 - **`approval.respond`** — Resolve a pending approval (approve/deny); returns an ack. Only prompt-capable clients may call it.
@@ -73,6 +75,10 @@ Schemas live under `schemas/` (`methods/<name>.params.json` / `.result.json`, `e
   - Params: `EditorWriteBufferParams` · Result: `EditorWriteBufferResult`
 - **`editor.selection`** — Return the editor's current selection range, or empty when there is only a cursor.
   - Params: `EditorSelectionParams` · Result: `EditorSelectionResult`
+- **`editor.open`** — Open files in editor buffers for in-place review (read-only affordance).
+  - Params: `EditorOpenParams` · Result: `EditorOpenResult`
+- **`editor.diff`** — Render a change set's captured before/after snapshots in the editor's diff view.
+  - Params: `EditorDiffParams` · Result: `EditorDiffResult`
 
 ### daemon → attached client
 
@@ -132,3 +138,5 @@ TEND-specific JSON-RPC error codes (carried as the error `code`, with typed `dat
   - Data: _(none)_
 - **`1006` `not_prompt_capable`** — A client that did not register as prompt-capable tried to resolve a prompt.
   - Data: _(none)_
+- **`1007` `unknown_change_set`** — file.diff named a change set with no retained snapshots (never recorded or evicted).
+  - Data: `UnknownChangeSetData`

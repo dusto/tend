@@ -71,3 +71,32 @@ type FileBase struct {
 	ContentHash string `json:"content_hash,omitempty"`
 	ChangedTick *int64 `json:"changedtick,omitempty"`
 }
+
+// EditorOpenParams asks the bound editor to open files in buffers so changes
+// can be inspected in place. A read-only review affordance: it mutates nothing
+// and is not task-gated.
+type EditorOpenParams struct {
+	URIs []string `json:"uris"`
+}
+
+// EditorOpenResult acknowledges an editor.open request.
+type EditorOpenResult struct{}
+
+// EditorDiffParams asks the bound editor to render a change set's captured
+// before/after snapshots in its diff/review UI. The content is carried in the
+// request, so the view diffs the named proposal or applied set, never an
+// undefined "current state".
+type EditorDiffParams struct {
+	ChangeSetID ChangeSetID      `json:"change_set_id"`
+	Files       []EditorDiffFile `json:"files"`
+}
+
+// EditorDiffFile is one file's captured before/after pair for the diff view.
+type EditorDiffFile struct {
+	URI    string `json:"uri"`
+	Before string `json:"before"`
+	After  string `json:"after"`
+}
+
+// EditorDiffResult acknowledges an editor.diff request.
+type EditorDiffResult struct{}

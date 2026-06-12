@@ -35,6 +35,7 @@ const (
 	MethodPatch          = "file.patch"
 	MethodWrite          = "file.write"
 	MethodApplyChangeSet = "file.apply_change_set"
+	MethodDiff           = "file.diff"
 )
 
 // Errors returned by the file service.
@@ -64,15 +65,23 @@ type approver interface {
 type Options struct {
 	// NewChangeSetID assigns a change-set id; nil uses a random hex generator.
 	NewChangeSetID func() api.ChangeSetID
+	// RetainChangeSets caps how many recent change sets keep their
+	// before/after snapshots per session for file.diff; 0 uses a default.
+	RetainChangeSets int
 }
+
+// defaultRetainChangeSets is the per-session snapshot retention when Options
+// does not set one.
+const defaultRetainChangeSets = 16
 
 // Service implements the file tools over the session registry, the editor
 // reverse-RPC, and the approval gate. It is safe for concurrent use.
 type Service struct {
-	sessions *session.Registry
-	editors  editorClient
-	approver approver
-	newID    func() api.ChangeSetID
+	sessions  *session.Registry
+	editors   editorClient
+	approver  approver
+	newID     func() api.ChangeSetID
+	snapshots *snapshotStore
 }
 
 // NewService returns a Service. approver may be nil only if the mutating methods
@@ -82,7 +91,17 @@ func NewService(sessions *session.Registry, editors editorClient, gate approver,
 	if newID == nil {
 		newID = func() api.ChangeSetID { return api.ChangeSetID(randomID()) }
 	}
-	return &Service{sessions: sessions, editors: editors, approver: gate, newID: newID}
+	retain := opts.RetainChangeSets
+	if retain <= 0 {
+		retain = defaultRetainChangeSets
+	}
+	return &Service{
+		sessions:  sessions,
+		editors:   editors,
+		approver:  gate,
+		newID:     newID,
+		snapshots: newSnapshotStore(retain),
+	}
 }
 
 // fileState is a file's current content and source: an open editor buffer (with
@@ -154,6 +173,12 @@ func (s *Service) mutate(ctx context.Context, sessionID api.SessionID, uri strin
 	}
 
 	csid := s.newID()
+	unified := diff.Unified(string(st.content), string(newContent))
+	// Snapshots are captured at proposal time, so the set is reviewable via
+	// file.diff even while pending or after a denial.
+	s.snapshots.record(csid, sessionID, []changeSetFile{{
+		uri: uri, before: string(st.content), after: string(newContent), diff: unified,
+	}})
 	detail, _ := json.Marshal(api.ApprovalDetail{
 		Kind: api.ApprovalFileEdit,
 		FileEdit: &api.FileEditApproval{
@@ -161,7 +186,7 @@ func (s *Service) mutate(ctx context.Context, sessionID api.SessionID, uri strin
 			Targets: []api.FileEditTarget{{
 				URI:  uri,
 				Base: base,
-				Diff: diff.Unified(string(st.content), string(newContent)),
+				Diff: unified,
 			}},
 		},
 	})
@@ -190,7 +215,19 @@ func (s *Service) mutate(ctx context.Context, sessionID api.SessionID, uri strin
 	if err != nil {
 		return api.FileMutationResult{}, err
 	}
+	s.snapshots.setApplied(csid, true, map[string]bool{uri: true})
 	return api.FileMutationResult{ChangeSetID: csid, Applied: true, Base: newBase}, nil
+}
+
+// Diff returns a change set's captured before/after snapshots. Read-only and
+// not task-gated: a review affordance that only surfaces what the named
+// proposal or applied set changed.
+func (s *Service) Diff(_ context.Context, p api.FileDiffParams) (api.FileDiffResult, error) {
+	res, ok := s.snapshots.get(p.ChangeSetID)
+	if !ok {
+		return api.FileDiffResult{}, ErrUnknownChangeSet
+	}
+	return res, nil
 }
 
 // readCurrent returns the file's current state, preferring the editor's live

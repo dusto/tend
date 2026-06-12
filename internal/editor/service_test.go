@@ -17,7 +17,9 @@ import (
 // fakeEditor answers the daemon->editor reverse calls over a pipe, recording the
 // methods it was asked for.
 type fakeEditor struct {
-	calls []string
+	calls  []string
+	opened []string
+	diffed *api.EditorDiffParams
 }
 
 func (e *fakeEditor) handle(_ context.Context, req *rpc.Request) (any, error) {
@@ -38,6 +40,16 @@ func (e *fakeEditor) handle(_ context.Context, req *rpc.Request) (any, error) {
 			URI:   "file:///repo/a.go",
 			Range: api.Range{Start: api.Position{Line: 1, ByteCol: 0}, End: api.Position{Line: 1, ByteCol: 4}},
 		}, nil
+	case MethodOpen:
+		var p api.EditorOpenParams
+		_ = json.Unmarshal(req.Params, &p)
+		e.opened = p.URIs
+		return api.EditorOpenResult{}, nil
+	case MethodDiff:
+		var p api.EditorDiffParams
+		_ = json.Unmarshal(req.Params, &p)
+		e.diffed = &p
+		return api.EditorDiffResult{}, nil
 	}
 	return nil, &rpc.Error{Code: rpc.CodeMethodNotFound, Message: req.Method}
 }
@@ -97,6 +109,56 @@ func TestServiceRoutesToBoundEditor(t *testing.T) {
 	want := []string{MethodCurrentBuffer, MethodReadBuffer, MethodWriteBuffer, MethodSelection}
 	if len(editor.calls) != len(want) {
 		t.Fatalf("editor calls = %v, want %v", editor.calls, want)
+	}
+}
+
+func TestServiceOpenAndDiffRouteToBoundEditor(t *testing.T) {
+	svc, editor := boundFixture(t)
+
+	if _, err := svc.Open(ctx(t), "s1", api.EditorOpenParams{
+		URIs: []string{"file:///repo/a.go", "file:///repo/b.go"},
+	}); err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	if len(editor.opened) != 2 || editor.opened[1] != "file:///repo/b.go" {
+		t.Fatalf("opened = %v", editor.opened)
+	}
+
+	if _, err := svc.Diff(ctx(t), "s1", api.EditorDiffParams{
+		ChangeSetID: "cs1",
+		Files: []api.EditorDiffFile{
+			{URI: "file:///repo/a.go", Before: "old\n", After: "new\n"},
+		},
+	}); err != nil {
+		t.Fatalf("Diff: %v", err)
+	}
+	d := editor.diffed
+	if d == nil || d.ChangeSetID != "cs1" || len(d.Files) != 1 {
+		t.Fatalf("diffed = %+v", d)
+	}
+	// The snapshots travel in the request: the editor diffs the named set,
+	// never an undefined current state.
+	if d.Files[0].Before != "old\n" || d.Files[0].After != "new\n" {
+		t.Errorf("diff files = %+v", d.Files)
+	}
+
+	want := []string{MethodOpen, MethodDiff}
+	if len(editor.calls) != len(want) || editor.calls[0] != want[0] || editor.calls[1] != want[1] {
+		t.Errorf("editor calls = %v, want %v", editor.calls, want)
+	}
+}
+
+func TestServiceOpenHeadlessUnavailable(t *testing.T) {
+	sessions := session.NewRegistry()
+	sessions.Create("s1", "codex", api.TaskRef{Provider: "beads", WorkspaceID: "ws1", ID: "t1"}, "/repo")
+	clients := client.NewRegistry()
+	svc := NewService(NewBinder(sessions, clients), clients)
+
+	if _, err := svc.Open(ctx(t), "s1", api.EditorOpenParams{URIs: []string{"file:///x"}}); !errors.Is(err, ErrEditorUnavailable) {
+		t.Errorf("headless Open err = %v, want ErrEditorUnavailable", err)
+	}
+	if _, err := svc.Diff(ctx(t), "s1", api.EditorDiffParams{}); !errors.Is(err, ErrEditorUnavailable) {
+		t.Errorf("headless Diff err = %v, want ErrEditorUnavailable", err)
 	}
 }
 

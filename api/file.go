@@ -104,3 +104,33 @@ type FileMutationResult struct {
 	Reason      string      `json:"reason,omitempty"`
 	Base        FileBase    `json:"base,omitzero"`
 }
+
+// FileDiffParams fetches a change set's captured before/after snapshots.
+// Read-only and not task-gated: it surfaces what a named proposal or applied
+// set changed, never an undefined "current state".
+type FileDiffParams struct {
+	ChangeSetID ChangeSetID `json:"change_set_id"`
+}
+
+// FileDiffResult is the captured review view of one change set. The snapshots
+// are taken at proposal time, so a denied or still-pending set is reviewable
+// exactly as proposed.
+type FileDiffResult struct {
+	ChangeSetID ChangeSetID `json:"change_set_id"`
+	SessionID   SessionID   `json:"session_id"`
+	// Applied reports whether the set as a whole was applied; per-file
+	// outcomes (relevant for partial failures) are on the entries.
+	Applied bool            `json:"applied"`
+	Files   []FileDiffEntry `json:"files"`
+}
+
+// FileDiffEntry is one file's captured snapshots within a change set: the full
+// content the set was proposed against (Before), the content it proposed to
+// produce (After), and their unified diff.
+type FileDiffEntry struct {
+	URI     string `json:"uri"`
+	Before  string `json:"before"`
+	After   string `json:"after"`
+	Diff    string `json:"diff"`
+	Applied bool   `json:"applied"`
+}
