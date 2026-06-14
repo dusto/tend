@@ -10,10 +10,11 @@ import (
 // independently: bump a set on a change to that set (major for a breaking change).
 const (
 	// 0.2.0 added task.*; 0.3.0 added pane.open/list/read/close; 0.4.0 added
-	// pane.run; 0.5.0 added file.apply_change_set; 0.6.0 added file.diff.
-	PluginToDaemonVersion = "0.6.0"
-	// 0.2.0 added editor.open + editor.diff.
-	DaemonToEditorVersion = "0.2.0"
+	// pane.run; 0.5.0 added file.apply_change_set; 0.6.0 added file.diff;
+	// 0.7.0 added lsp.diagnostics.
+	PluginToDaemonVersion = "0.7.0"
+	// 0.2.0 added editor.open + editor.diff; 0.3.0 added editor.diagnostics.
+	DaemonToEditorVersion = "0.3.0"
 	DaemonToClientVersion = "0.1.0"
 )
 

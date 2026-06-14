@@ -17,9 +17,10 @@ import (
 // fakeEditor answers the daemon->editor reverse calls over a pipe, recording the
 // methods it was asked for.
 type fakeEditor struct {
-	calls  []string
-	opened []string
-	diffed *api.EditorDiffParams
+	calls   []string
+	opened  []string
+	diffed  *api.EditorDiffParams
+	diagURI string
 }
 
 func (e *fakeEditor) handle(_ context.Context, req *rpc.Request) (any, error) {
@@ -50,6 +51,15 @@ func (e *fakeEditor) handle(_ context.Context, req *rpc.Request) (any, error) {
 		_ = json.Unmarshal(req.Params, &p)
 		e.diffed = &p
 		return api.EditorDiffResult{}, nil
+	case MethodDiagnostics:
+		var p api.EditorDiagnosticsParams
+		_ = json.Unmarshal(req.Params, &p)
+		e.diagURI = p.URI
+		return api.EditorDiagnosticsResult{
+			URI:         p.URI,
+			Open:        true,
+			Diagnostics: []api.Diagnostic{{Severity: api.SeverityError, Message: "boom"}},
+		}, nil
 	}
 	return nil, &rpc.Error{Code: rpc.CodeMethodNotFound, Message: req.Method}
 }
@@ -145,6 +155,35 @@ func TestServiceOpenAndDiffRouteToBoundEditor(t *testing.T) {
 	want := []string{MethodOpen, MethodDiff}
 	if len(editor.calls) != len(want) || editor.calls[0] != want[0] || editor.calls[1] != want[1] {
 		t.Errorf("editor calls = %v, want %v", editor.calls, want)
+	}
+}
+
+func TestServiceDiagnosticsRoutesToBoundEditor(t *testing.T) {
+	svc, editor := boundFixture(t)
+
+	res, err := svc.Diagnostics(ctx(t), "s1", api.EditorDiagnosticsParams{URI: "file:///repo/a.go"})
+	if err != nil {
+		t.Fatalf("Diagnostics: %v", err)
+	}
+	if res.URI != "file:///repo/a.go" || !res.Open || len(res.Diagnostics) != 1 {
+		t.Fatalf("result = %+v", res)
+	}
+	if editor.diagURI != "file:///repo/a.go" {
+		t.Errorf("editor queried uri = %q", editor.diagURI)
+	}
+	if len(editor.calls) != 1 || editor.calls[0] != MethodDiagnostics {
+		t.Errorf("editor calls = %v", editor.calls)
+	}
+}
+
+func TestServiceDiagnosticsHeadlessUnavailable(t *testing.T) {
+	sessions := session.NewRegistry()
+	sessions.Create("s1", "codex", api.TaskRef{Provider: "beads", WorkspaceID: "ws1", ID: "t1"}, "/repo")
+	clients := client.NewRegistry()
+	svc := NewService(NewBinder(sessions, clients), clients)
+
+	if _, err := svc.Diagnostics(ctx(t), "s1", api.EditorDiagnosticsParams{URI: "file:///x"}); !errors.Is(err, ErrEditorUnavailable) {
+		t.Errorf("headless Diagnostics err = %v, want ErrEditorUnavailable", err)
 	}
 }
 

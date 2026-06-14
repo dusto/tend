@@ -16,6 +16,7 @@ const (
 	MethodSelection     = "editor.selection"
 	MethodOpen          = "editor.open"
 	MethodDiff          = "editor.diff"
+	MethodDiagnostics   = "editor.diagnostics"
 )
 
 // Service routes editor-local calls to a session's editor-binding owner. Each
@@ -87,6 +88,19 @@ func (s *Service) Diff(ctx context.Context, sessionID api.SessionID, p api.Edito
 	}
 	var res api.EditorDiffResult
 	err = caller.Call(ctx, MethodDiff, p, &res)
+	return res, err
+}
+
+// Diagnostics returns editor-fresh LSP diagnostics for a file from the bound
+// editor. The editor reports whether the file is an open buffer; the daemon
+// applies any severity filter.
+func (s *Service) Diagnostics(ctx context.Context, sessionID api.SessionID, p api.EditorDiagnosticsParams) (api.EditorDiagnosticsResult, error) {
+	caller, err := s.editorCaller(sessionID)
+	if err != nil {
+		return api.EditorDiagnosticsResult{}, err
+	}
+	var res api.EditorDiagnosticsResult
+	err = caller.Call(ctx, MethodDiagnostics, p, &res)
 	return res, err
 }
 

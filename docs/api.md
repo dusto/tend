@@ -38,6 +38,8 @@ Schemas live under `schemas/` (`methods/<name>.params.json` / `.result.json`, `e
   - Params: `FileApplyChangeSetParams` · Result: `FileApplyChangeSetResult`
 - **`file.diff`** — Fetch a change set's captured before/after snapshots for review (read-only, not task-gated).
   - Params: `FileDiffParams` · Result: `FileDiffResult`
+- **`lsp.diagnostics`** — Editor-fresh LSP diagnostics for a file via the session's bound editor (session-scoped, not approval-gated); empty uri means the editor's current buffer.
+  - Params: `LSPDiagnosticsParams` · Result: `LSPDiagnosticsResult`
 - **`approval.list`** — List pending approvals (self-contained payloads), optionally filtered by session.
   - Params: `ApprovalListParams` · Result: `ApprovalListResult`
 - **`approval.respond`** — Resolve a pending approval (approve/deny); returns an ack. Only prompt-capable clients may call it.
@@ -79,6 +81,8 @@ Schemas live under `schemas/` (`methods/<name>.params.json` / `.result.json`, `e
   - Params: `EditorOpenParams` · Result: `EditorOpenResult`
 - **`editor.diff`** — Render a change set's captured before/after snapshots in the editor's diff view.
   - Params: `EditorDiffParams` · Result: `EditorDiffResult`
+- **`editor.diagnostics`** — Return editor-fresh LSP diagnostics for a file (open buffers); the daemon filters by severity.
+  - Params: `EditorDiagnosticsParams` · Result: `EditorDiagnosticsResult`
 
 ### daemon → attached client
 
