@@ -43,6 +43,7 @@ var Methods = []Method{
 	{Name: "file.write", Direction: PluginToDaemon, Params: FileWriteParams{}, Result: FileMutationResult{}, Summary: "Replace a repo file's whole content (task-bound, approval-gated, base-checked); single-target change set."},
 	{Name: "file.apply_change_set", Direction: PluginToDaemon, Params: FileApplyChangeSetParams{}, Result: FileApplyChangeSetResult{}, Summary: "Apply a multi-file change set as one approved unit (best-effort atomic: preflight, disk writes, editor buffers last, with partial-failure reporting)."},
 	{Name: "file.diff", Direction: PluginToDaemon, Params: FileDiffParams{}, Result: FileDiffResult{}, Summary: "Fetch a change set's captured before/after snapshots for review (read-only, not task-gated)."},
+	{Name: "lsp.diagnostics", Direction: PluginToDaemon, Params: LSPDiagnosticsParams{}, Result: LSPDiagnosticsResult{}, Summary: "Editor-fresh LSP diagnostics for a file via the session's bound editor (session-scoped, not approval-gated); empty uri means the editor's current buffer."},
 	{Name: "approval.list", Direction: PluginToDaemon, Params: ApprovalListParams{}, Result: ApprovalListResult{}, Summary: "List pending approvals (self-contained payloads), optionally filtered by session."},
 	{Name: "approval.respond", Direction: PluginToDaemon, Params: ApprovalRespondParams{}, Result: ApprovalRespondResult{}, Summary: "Resolve a pending approval (approve/deny); returns an ack. Only prompt-capable clients may call it."},
 	{Name: "task.create", Direction: PluginToDaemon, Params: TaskCreateParams{}, Result: Task{}, Summary: "Create a task in a workspace's provider."},
@@ -64,6 +65,7 @@ var Methods = []Method{
 	{Name: "editor.selection", Direction: DaemonToEditor, Params: EditorSelectionParams{}, Result: EditorSelectionResult{}, Summary: "Return the editor's current selection range, or empty when there is only a cursor."},
 	{Name: "editor.open", Direction: DaemonToEditor, Params: EditorOpenParams{}, Result: EditorOpenResult{}, Summary: "Open files in editor buffers for in-place review (read-only affordance)."},
 	{Name: "editor.diff", Direction: DaemonToEditor, Params: EditorDiffParams{}, Result: EditorDiffResult{}, Summary: "Render a change set's captured before/after snapshots in the editor's diff view."},
+	{Name: "editor.diagnostics", Direction: DaemonToEditor, Params: EditorDiagnosticsParams{}, Result: EditorDiagnosticsResult{}, Summary: "Return editor-fresh LSP diagnostics for a file (open buffers); the daemon filters by severity."},
 
 	// daemon -> attached client
 	{Name: "event.push", Direction: DaemonToClient, Params: EventPushParams{}, Result: nil, Summary: "Deliver an event on a subscribed stream (at-least-once; clients dedup by (stream_id, seq, kind))."},

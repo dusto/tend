@@ -22,6 +22,7 @@ import (
 	"github.com/dusto/tend/internal/events"
 	"github.com/dusto/tend/internal/files"
 	"github.com/dusto/tend/internal/handshake"
+	"github.com/dusto/tend/internal/lsp"
 	"github.com/dusto/tend/internal/pty"
 	"github.com/dusto/tend/internal/rpc"
 	"github.com/dusto/tend/internal/session"
@@ -60,6 +61,7 @@ type Server struct {
 	binder *editor.Binder
 	gate   *approvals.Gate
 	files  *files.Service
+	lsp    *lsp.Service
 	tasks  *tasks.Service
 	panes  *pty.Service
 	ptyMgr *pty.Manager
@@ -127,7 +129,9 @@ func New(ln net.Listener, logPath string, opts ...Option) (*Server, error) {
 		TTL:      approvalTTL,
 		Prompter: &promptBroadcaster{clients: s.clients},
 	})
-	s.files = files.NewService(s.sessions, editor.NewService(s.binder, s.clients), s.gate, files.Options{})
+	editors := editor.NewService(s.binder, s.clients)
+	s.files = files.NewService(s.sessions, editors, s.gate, files.Options{})
+	s.lsp = lsp.NewService(s.sessions, editors)
 	// Task provider per workspace. The in-memory fake stands in until the beads
 	// adapter is wired; the task.* contract and event bridge are independent of it.
 	s.tasks = tasks.NewService(o.taskFactory, s.store)
@@ -206,6 +210,9 @@ func (s *Server) newMux() (*dispatch.Mux, func(), error) {
 		return nil, nil, err
 	}
 	if err := files.Register(mux, s.files); err != nil {
+		return nil, nil, err
+	}
+	if err := lsp.Register(mux, s.lsp); err != nil {
 		return nil, nil, err
 	}
 	if err := tasks.Register(mux, s.tasks); err != nil {

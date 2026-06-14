@@ -100,3 +100,19 @@ type EditorDiffFile struct {
 
 // EditorDiffResult acknowledges an editor.diff request.
 type EditorDiffResult struct{}
+
+// EditorDiagnosticsParams requests editor-fresh LSP diagnostics for a file from
+// the bound editor.
+type EditorDiagnosticsParams struct {
+	URI string `json:"uri"`
+}
+
+// EditorDiagnosticsResult returns the editor's diagnostics for the file. Open
+// is true when the file is an open buffer with attached LSP; when false the
+// editor has nothing live for it and Diagnostics is empty. Severity filtering
+// is applied by the daemon, so the editor returns every diagnostic it has.
+type EditorDiagnosticsResult struct {
+	URI         string       `json:"uri"`
+	Open        bool         `json:"open"`
+	Diagnostics []Diagnostic `json:"diagnostics"`
+}
