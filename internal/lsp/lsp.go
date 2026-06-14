@@ -7,14 +7,20 @@ package lsp
 
 import (
 	"context"
+	"errors"
 
 	"github.com/dusto/tend/api"
+	"github.com/dusto/tend/internal/session"
+	"github.com/dusto/tend/internal/worktree"
 )
 
 // Method names.
 const (
 	MethodDiagnostics = "lsp.diagnostics"
 )
+
+// ErrNoSession reports that no session has the given id.
+var ErrNoSession = errors.New("lsp: unknown session")
 
 // editorClient is the slice of editor.Service the LSP tools drive: resolving
 // the current buffer and querying editor-fresh diagnostics. It is an interface
@@ -27,12 +33,14 @@ type editorClient interface {
 // Service implements the LSP tools over the editor reverse-RPC. It is safe for
 // concurrent use (it holds no mutable state of its own).
 type Service struct {
-	editors editorClient
+	sessions *session.Registry
+	editors  editorClient
 }
 
-// NewService returns a Service routing through the editor reverse-RPC.
-func NewService(editors editorClient) *Service {
-	return &Service{editors: editors}
+// NewService returns a Service routing through the editor reverse-RPC, with the
+// session registry for worktree-boundary checks.
+func NewService(sessions *session.Registry, editors editorClient) *Service {
+	return &Service{sessions: sessions, editors: editors}
 }
 
 // Diagnostics returns editor-fresh diagnostics for a file. With an empty URI it
@@ -41,18 +49,32 @@ func NewService(editors editorClient) *Service {
 // severe. A headless session surfaces as editor_unavailable from the editor
 // service.
 func (s *Service) Diagnostics(ctx context.Context, p api.LSPDiagnosticsParams) (api.LSPDiagnosticsResult, error) {
+	sess, ok := s.sessions.Get(p.SessionID)
+	if !ok {
+		return api.LSPDiagnosticsResult{}, ErrNoSession
+	}
+	empty := api.LSPDiagnosticsResult{Diagnostics: []api.Diagnostic{}}
+
 	uri := p.URI
 	if uri == "" {
 		cur, err := s.editors.CurrentBuffer(ctx, p.SessionID)
 		if err != nil {
 			return api.LSPDiagnosticsResult{}, err
 		}
-		if cur.URI == "" {
-			// No file-backed buffer is active; nothing to diagnose.
-			return api.LSPDiagnosticsResult{Diagnostics: []api.Diagnostic{}}, nil
+		// The current buffer may be any file the user has focused. Only diagnose
+		// it when it is inside this session's worktree; otherwise there is simply
+		// nothing in scope to report (an out-of-worktree buffer is not the agent's
+		// to read, and naming nothing must not leak where the user is).
+		if cur.URI == "" || !worktree.Contains(cur.URI, sess.WorktreeRoot) {
+			return empty, nil
 		}
 		uri = cur.URI
+	} else if _, err := worktree.ResolvePath(uri, sess.WorktreeRoot); err != nil {
+		// An explicitly named path outside the worktree is a boundary violation,
+		// reported like the file tools rather than silently emptied.
+		return api.LSPDiagnosticsResult{}, err
 	}
+
 	res, err := s.editors.Diagnostics(ctx, p.SessionID, api.EditorDiagnosticsParams{URI: uri})
 	if err != nil {
 		return api.LSPDiagnosticsResult{}, err

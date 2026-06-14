@@ -131,7 +131,7 @@ func New(ln net.Listener, logPath string, opts ...Option) (*Server, error) {
 	})
 	editors := editor.NewService(s.binder, s.clients)
 	s.files = files.NewService(s.sessions, editors, s.gate, files.Options{})
-	s.lsp = lsp.NewService(editors)
+	s.lsp = lsp.NewService(s.sessions, editors)
 	// Task provider per workspace. The in-memory fake stands in until the beads
 	// adapter is wired; the task.* contract and event bridge are independent of it.
 	s.tasks = tasks.NewService(o.taskFactory, s.store)

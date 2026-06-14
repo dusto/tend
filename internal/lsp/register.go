@@ -8,6 +8,7 @@ import (
 	"github.com/dusto/tend/internal/dispatch"
 	"github.com/dusto/tend/internal/editor"
 	"github.com/dusto/tend/internal/rpc"
+	"github.com/dusto/tend/internal/worktree"
 )
 
 // Register installs the LSP methods on m, backed by s.
@@ -22,13 +23,15 @@ func Register(m *dispatch.Mux, s *Service) error {
 }
 
 // toRPCError maps an LSP-service error to the JSON-RPC error sent to the
-// client. A headless session becomes editor_unavailable; an unknown session is
-// invalid params. Both originate in the editor service the tools route through.
+// client. A headless session becomes editor_unavailable; an unknown session or
+// an out-of-worktree uri is invalid params (the latter a refused boundary
+// crossing, mapped like the file tools).
 func toRPCError(err error) error {
 	switch {
 	case errors.Is(err, editor.ErrEditorUnavailable):
 		return &rpc.Error{Code: api.ErrEditorUnavailable, Message: err.Error()}
-	case errors.Is(err, editor.ErrNoSession):
+	case errors.Is(err, ErrNoSession), errors.Is(err, editor.ErrNoSession),
+		errors.Is(err, worktree.ErrBadURI), errors.Is(err, worktree.ErrOutsideWorkspace):
 		return &rpc.Error{Code: rpc.CodeInvalidParams, Message: err.Error()}
 	default:
 		return &rpc.Error{Code: rpc.CodeInternalError, Message: err.Error()}
