@@ -58,12 +58,49 @@ func RunFakeACP() {
 			send(map[string]any{"sessionUpdate": "agent_message_chunk", "content": map[string]any{"text": "world"}})
 			send(map[string]any{"sessionUpdate": "tool_call", "toolCallId": "t1", "title": "read_file"})
 			send(map[string]any{"sessionUpdate": "tool_call_update", "toolCallId": "t1", "status": "completed"})
+			// A prompt of "hold:<path>" keeps the turn open (session stays
+			// running) until <path> appears, so a test can drive a mid-turn,
+			// approval-gated edit before the turn ends. Deterministic: the wait is
+			// on a file the test creates, not a sleep.
+			if release, ok := holdPath(p.Prompt); ok {
+				waitForFile(release, 10*time.Second)
+			}
 			return acp.PromptResult{StopReason: "end_turn"}, nil
 		}
 		return nil, &rpc.Error{Code: rpc.CodeMethodNotFound, Message: "fake acp: " + req.Method}
 	})
 	conn := rpc.NewConn(stdio{}, h)
 	<-conn.Done()
+}
+
+// holdPath returns the release-file path encoded in a "hold:<path>" prompt, so
+// the fake agent knows to keep the turn open until that file appears.
+func holdPath(prompt []json.RawMessage) (string, bool) {
+	if len(prompt) == 0 {
+		return "", false
+	}
+	var block struct {
+		Text string `json:"text"`
+	}
+	if json.Unmarshal(prompt[0], &block) != nil {
+		return "", false
+	}
+	const marker = "hold:"
+	if len(block.Text) > len(marker) && block.Text[:len(marker)] == marker {
+		return block.Text[len(marker):], true
+	}
+	return "", false
+}
+
+// waitForFile polls until path exists or the deadline passes.
+func waitForFile(path string, d time.Duration) {
+	deadline := time.Now().Add(d)
+	for time.Now().Before(deadline) {
+		if _, err := os.Stat(path); err == nil {
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
 }
 
 // stdio is the fake agent's transport: read stdin, write stdout.
@@ -301,4 +338,19 @@ func (c *Client) WaitEventCount(stream api.StreamID, n int, d time.Duration) boo
 		time.Sleep(time.Millisecond)
 	}
 	return false
+}
+
+// WaitPrompt waits until at least one prompt has been raised and returns the
+// first. A mutating call (e.g. file.patch) blocks on the approval gate, so a
+// test issues it on another goroutine, waits here for the prompt, then resolves
+// it with approval.respond.
+func (c *Client) WaitPrompt(d time.Duration) (api.PromptRaiseParams, bool) {
+	deadline := time.Now().Add(d)
+	for time.Now().Before(deadline) {
+		if p := c.Prompts(); len(p) > 0 {
+			return p[0], true
+		}
+		time.Sleep(time.Millisecond)
+	}
+	return api.PromptRaiseParams{}, false
 }
