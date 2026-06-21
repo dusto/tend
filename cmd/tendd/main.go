@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"syscall"
 
+	"github.com/dusto/tend/internal/acp"
 	"github.com/dusto/tend/internal/daemon"
 	"github.com/dusto/tend/internal/rpc"
 )
@@ -34,7 +35,19 @@ func run() error {
 		return err
 	}
 
-	srv, err := daemon.New(ln, filepath.Join(filepath.Dir(path), "events.log"))
+	cfgPath := acp.ConfigPath()
+	cfg, loaded, err := acp.Load(cfgPath)
+	if err != nil {
+		_ = ln.Close()
+		return err
+	}
+	if loaded {
+		slog.Info("tendd: loaded config", "path", cfgPath)
+	} else {
+		slog.Info("tendd: no config file; using built-in defaults", "path", cfgPath)
+	}
+
+	srv, err := daemon.New(ln, filepath.Join(filepath.Dir(path), "events.log"), daemon.WithACPConfig(cfg))
 	if err != nil {
 		_ = ln.Close()
 		return err
