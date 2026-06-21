@@ -128,13 +128,28 @@ func StartServer(dir string, opts ...daemon.Option) (*daemon.Server, string, err
 }
 
 // Client is a connected test client. It dispatches daemon->client notifications
-// (event.push, prompt.raise) into collectors so tests can assert on them.
+// (event.push, prompt.raise) into collectors so tests can assert on them, and —
+// when it acts as a bound editor — answers the daemon->editor reverse requests
+// (editor.*) from a settable buffer/diagnostics state.
 type Client struct {
 	conn *rpc.Conn
 
 	mu      chan struct{} // 1-slot mutex
 	events  []api.Event
 	prompts []api.PromptRaiseParams
+
+	// Editor state served on daemon->editor reverse calls. buffers holds the
+	// files this editor reports as open (content + changedtick); diagnostics
+	// holds per-file LSP diagnostics; current is the active buffer's uri.
+	buffers     map[string]editorBuffer
+	diagnostics map[string][]api.Diagnostic
+	current     string
+	wroteBuffer map[string]string // uri -> last content written via editor.write_buffer
+}
+
+type editorBuffer struct {
+	content string
+	tick    int64
 }
 
 // Dial connects to the daemon at sock.
@@ -143,10 +158,42 @@ func Dial(sock string) (*Client, error) {
 	if err != nil {
 		return nil, err
 	}
-	c := &Client{mu: make(chan struct{}, 1)}
+	c := &Client{
+		mu:          make(chan struct{}, 1),
+		buffers:     make(map[string]editorBuffer),
+		diagnostics: make(map[string][]api.Diagnostic),
+		wroteBuffer: make(map[string]string),
+	}
 	c.mu <- struct{}{}
 	c.conn = rpc.NewConn(nc, rpc.HandlerFunc(c.handle))
 	return c, nil
+}
+
+// SetOpenBuffer makes this editor report uri as an open buffer with the given
+// content (and a fixed changedtick), and marks it the current buffer. It is how
+// a test arms the editor before a reverse call reads it.
+func (c *Client) SetOpenBuffer(uri, content string) {
+	c.lock()
+	defer c.unlock()
+	c.buffers[uri] = editorBuffer{content: content, tick: 1}
+	c.current = uri
+}
+
+// SetDiagnostics sets the diagnostics this editor reports for uri.
+func (c *Client) SetDiagnostics(uri string, diags []api.Diagnostic) {
+	c.lock()
+	defer c.unlock()
+	c.diagnostics[uri] = diags
+}
+
+// WroteBuffer returns the content last written to uri via editor.write_buffer,
+// so a test can confirm an approved open-buffer edit was applied through the
+// reverse call rather than to disk.
+func (c *Client) WroteBuffer(uri string) (string, bool) {
+	c.lock()
+	defer c.unlock()
+	v, ok := c.wroteBuffer[uri]
+	return v, ok
 }
 
 // Close closes the connection.
@@ -168,6 +215,37 @@ func (c *Client) handle(_ context.Context, req *rpc.Request) (any, error) {
 			c.prompts = append(c.prompts, p)
 			c.unlock()
 		}
+	case "editor.current_buffer":
+		c.lock()
+		defer c.unlock()
+		return api.EditorCurrentBufferResult{URI: c.current}, nil
+	case "editor.read_buffer":
+		var p api.EditorReadBufferParams
+		_ = json.Unmarshal(req.Params, &p)
+		c.lock()
+		defer c.unlock()
+		if b, ok := c.buffers[p.URI]; ok {
+			tick := b.tick
+			return api.EditorReadBufferResult{Content: b.content, Base: api.FileBase{ChangedTick: &tick}, Open: true}, nil
+		}
+		// Not open here: the daemon falls back to disk.
+		return api.EditorReadBufferResult{Open: false}, nil
+	case "editor.write_buffer":
+		var p api.EditorWriteBufferParams
+		_ = json.Unmarshal(req.Params, &p)
+		c.lock()
+		defer c.unlock()
+		c.wroteBuffer[p.URI] = p.Content
+		next := c.buffers[p.URI].tick + 1
+		c.buffers[p.URI] = editorBuffer{content: p.Content, tick: next}
+		return api.EditorWriteBufferResult{Base: api.FileBase{ChangedTick: &next}}, nil
+	case "editor.diagnostics":
+		var p api.EditorDiagnosticsParams
+		_ = json.Unmarshal(req.Params, &p)
+		c.lock()
+		defer c.unlock()
+		_, open := c.buffers[p.URI]
+		return api.EditorDiagnosticsResult{URI: p.URI, Open: open, Diagnostics: c.diagnostics[p.URI]}, nil
 	}
 	return nil, nil
 }
