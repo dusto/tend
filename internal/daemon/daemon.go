@@ -202,11 +202,20 @@ func (s *Server) newMux() (*dispatch.Mux, func(), error) {
 	if err := events.RegisterClient(mux, events.NewPusher(s.store)); err != nil {
 		return nil, nil, err
 	}
-	if err := agent.Register(mux, s.agent); err != nil {
-		return nil, nil, err
-	}
+	// The per-connection client identity; agent.start and approval.respond both
+	// resolve the calling client through cc.Self().
 	cc := client.NewConn(s.clients)
 	if err := cc.Register(mux); err != nil {
+		return nil, nil, err
+	}
+	// agent.start binds the new session to its creating editor client, so
+	// editor-local reverse calls (editor.*) route to it. A non-editor caller
+	// fails Claim and the session stays headless.
+	if err := agent.Register(mux, s.agent, func(sid api.SessionID) {
+		if self, ok := cc.Self(); ok {
+			_ = s.binder.Claim(sid, self.ID)
+		}
+	}); err != nil {
 		return nil, nil, err
 	}
 	if err := files.Register(mux, s.files); err != nil {

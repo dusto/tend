@@ -59,8 +59,22 @@ func NewService(sessions *session.Registry, manager Manager, norm *acp.Normalize
 }
 
 // Register installs the agent lifecycle methods on m, backed by s.
-func Register(m *dispatch.Mux, s *Service) error {
-	if err := dispatch.Handle(m, MethodStart, s.Start); err != nil {
+// Register installs the agent methods on m. onStarted, when non-nil, is called
+// with a new session's id after agent.start succeeds — the per-connection hook
+// the daemon uses to bind the session to its creating editor client. It runs
+// only on success and does not affect the start result.
+func Register(m *dispatch.Mux, s *Service, onStarted func(api.SessionID)) error {
+	start := s.Start
+	if onStarted != nil {
+		start = func(ctx context.Context, p api.AgentStartParams) (api.AgentStartResult, error) {
+			res, err := s.Start(ctx, p)
+			if err == nil {
+				onStarted(res.SessionID)
+			}
+			return res, err
+		}
+	}
+	if err := dispatch.Handle(m, MethodStart, start); err != nil {
 		return err
 	}
 	if err := dispatch.Handle(m, MethodPrompt, s.Prompt); err != nil {
