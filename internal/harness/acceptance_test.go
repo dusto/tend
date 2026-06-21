@@ -132,23 +132,6 @@ func TestM0AcceptanceScenario(t *testing.T) {
 		t.Fatalf("editor.write_buffer got %q (ok=%v), want the edited buffer", got, ok)
 	}
 
-	// Release the held turn; it ends cleanly. The session stream now carries the
-	// four turn updates, the approval_requested/approval_resolved pair the gate
-	// emitted for the edit, and a final turn_end — seven records.
-	if err := os.WriteFile(release, nil, 0o644); err != nil {
-		t.Fatalf("release: %v", err)
-	}
-	if err := <-turnDone; err != nil {
-		t.Fatalf("agent.prompt: %v", err)
-	}
-	if !c.WaitEventCount(started.StreamID, 7, 3*time.Second) {
-		t.Fatalf("turn did not complete; got %v", c.EventTypes(started.StreamID))
-	}
-	types := c.EventTypes(started.StreamID)
-	if last := types[len(types)-1]; last != "turn_end" {
-		t.Fatalf("last event = %q, want turn_end; got %v", last, types)
-	}
-
 	// Comment progress back to the task; the comment is persisted on the task.
 	var commented api.Task
 	mustCall(t, c, "task.comment", api.TaskCommentParams{Ref: task.Ref, Text: "applied the fix", Author: "agent"}, &commented)
@@ -158,25 +141,69 @@ func TestM0AcceptanceScenario(t *testing.T) {
 		t.Fatalf("task comments = %+v, want the progress comment", shown.Comments)
 	}
 
-	// Reconnect mid-stream: resume the session stream from a cursor behind the
-	// tail and replay (cursor, tail] with no loss; a Deduper seeded with the
-	// first delivery drops every redelivered record.
+	// Reconnect mid-turn — the turn is still held (running), so the session
+	// stream carries seqs 1..6 (four turn updates + the approval pair) but not
+	// yet turn_end. A fresh connection resumes from a cursor behind the tail and
+	// replays (2, tail] = seqs 3..6; a Deduper seeded with the first delivery
+	// drops every redelivered record.
+	//
+	// Wait for the held-turn tail (1..6) to be fully delivered to the original
+	// connection first, so the Deduper seed and the replay extent are
+	// deterministic (the approval-pair delivery is async after file.patch).
+	if !c.WaitEventCount(started.StreamID, 6, 3*time.Second) {
+		t.Fatalf("held-turn events not fully delivered; got %v", c.EventTypes(started.StreamID))
+	}
 	dd := events.NewDeduper()
 	for _, ev := range c.Events(started.StreamID) {
 		dd.Fresh(ev)
 	}
 	rc := dial(t, sock)
 	mustCall(t, rc, "events.subscribe", api.EventsSubscribeParams{StreamID: started.StreamID, LastSeq: 2}, &api.EventsSubscribeResult{})
-	// From a cursor at 2, the daemon replays (2, tail] = seqs 3..7 (five records).
-	if !rc.WaitEventCount(started.StreamID, 5, 3*time.Second) {
-		t.Fatalf("reconnect replay incomplete; got %v", rc.EventTypes(started.StreamID))
+	if !rc.WaitEventCount(started.StreamID, 4, 3*time.Second) {
+		t.Fatalf("mid-turn replay incomplete; got %v", rc.EventTypes(started.StreamID))
 	}
 	for _, ev := range rc.Events(started.StreamID) {
-		if ev.Seq < 3 {
-			t.Errorf("replay redelivered seq %d, want only (2, tail]", ev.Seq)
+		if ev.Seq < 3 || ev.Seq > 6 {
+			t.Errorf("replay redelivered seq %d, want only (2, tail] = 3..6", ev.Seq)
 		}
 		if dd.Fresh(ev) {
 			t.Errorf("redelivered seq %d should dedup as already-seen", ev.Seq)
 		}
+	}
+
+	// Now release the held turn: turn_end (seq 7) is published while the
+	// reconnected client is live-subscribed, so it must arrive on rc exactly
+	// once as a fresh record — the "no missing or duplicated events across a
+	// mid-turn reconnect" guarantee.
+	if err := os.WriteFile(release, nil, 0o644); err != nil {
+		t.Fatalf("release: %v", err)
+	}
+	if err := <-turnDone; err != nil {
+		t.Fatalf("agent.prompt: %v", err)
+	}
+	if !rc.WaitEventCount(started.StreamID, 5, 3*time.Second) {
+		t.Fatalf("reconnected client did not receive the live turn_end; got %v", rc.EventTypes(started.StreamID))
+	}
+	var turnEnds int
+	for _, ev := range rc.Events(started.StreamID) {
+		if ev.Type == "turn_end" {
+			turnEnds++
+			if ev.Seq != 7 {
+				t.Errorf("turn_end seq = %d, want 7", ev.Seq)
+			}
+			if !dd.Fresh(ev) {
+				t.Errorf("live turn_end should be fresh on the reconnected client, not a duplicate")
+			}
+		}
+	}
+	if turnEnds != 1 {
+		t.Errorf("reconnected client received turn_end %d times, want exactly once", turnEnds)
+	}
+	// The original connection sees the completed turn too, ending in turn_end.
+	if !c.WaitEventCount(started.StreamID, 7, 3*time.Second) {
+		t.Fatalf("original client turn did not complete; got %v", c.EventTypes(started.StreamID))
+	}
+	if types := c.EventTypes(started.StreamID); types[len(types)-1] != "turn_end" {
+		t.Errorf("original stream did not end in turn_end; got %v", types)
 	}
 }
