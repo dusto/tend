@@ -1,8 +1,11 @@
 package acp
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
+	"path/filepath"
 
 	"github.com/BurntSushi/toml"
 )
@@ -62,6 +65,42 @@ func ParseFile(path string) (*Config, error) {
 		return nil, fmt.Errorf("config: %w", err)
 	}
 	return Parse(data)
+}
+
+// ConfigPath resolves the TEND config file location: $TEND_CONFIG if set,
+// otherwise config.toml under the TEND config dir ($XDG_CONFIG_HOME/tend, or
+// ~/.config/tend when XDG_CONFIG_HOME is unset). The path need not exist.
+func ConfigPath() string {
+	if p := os.Getenv("TEND_CONFIG"); p != "" {
+		return p
+	}
+	dir := os.Getenv("XDG_CONFIG_HOME")
+	if dir == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "config.toml"
+		}
+		dir = filepath.Join(home, ".config")
+	}
+	return filepath.Join(dir, "tend", "config.toml")
+}
+
+// Load returns the configuration at path, or DefaultConfig() when no file is
+// there. It reports whether a file was loaded. A file that exists but is
+// malformed or invalid is an error — a typo in the config must fail loudly
+// rather than silently fall back to defaults.
+func Load(path string) (*Config, bool, error) {
+	if _, err := os.Stat(path); err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return DefaultConfig(), false, nil
+		}
+		return nil, false, fmt.Errorf("config: %w", err)
+	}
+	cfg, err := ParseFile(path)
+	if err != nil {
+		return nil, false, err
+	}
+	return cfg, true, nil
 }
 
 // validate normalizes defaults and checks the provider definitions.

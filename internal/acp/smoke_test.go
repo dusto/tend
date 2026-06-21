@@ -18,8 +18,10 @@ func TestDefaultProvidersHasCodex(t *testing.T) {
 	if !ok {
 		t.Fatal("codex provider not present in defaults")
 	}
-	if codex.Command != "codex" || len(codex.Args) != 1 || codex.Args[0] != "acp" {
-		t.Errorf("codex def = %+v, want command codex args [acp]", codex)
+	// The codex ACP adapter is the standalone codex-acp binary (the codex CLI
+	// has no acp subcommand).
+	if codex.Command != "codex-acp" || len(codex.Args) != 0 {
+		t.Errorf("codex def = %+v, want command codex-acp with no args", codex)
 	}
 	if !codex.Enabled || codex.CwdMode != CwdWorkspace {
 		t.Errorf("codex enabled/cwd = %v/%q", codex.Enabled, codex.CwdMode)

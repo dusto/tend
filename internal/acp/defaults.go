@@ -6,7 +6,7 @@ package acp
 // these.
 func DefaultProviders() []Provider {
 	return []Provider{
-		{ID: "codex", Command: "codex", Args: []string{"acp"}, CwdMode: CwdWorkspace, Enabled: true},
+		{ID: "codex", Command: "codex-acp", CwdMode: CwdWorkspace, Enabled: true},
 		{ID: "claude", Command: "claude-agent-acp", CwdMode: CwdWorkspace, Enabled: true},
 		{ID: "kiro", Command: "kiro-cli", Args: []string{"acp", "-a"}, CwdMode: CwdWorkspace, Enabled: true},
 	}
