@@ -1,0 +1,30 @@
+# Example tendd configuration.
+#
+# Copy to one of (first match wins):
+#   $TEND_CONFIG
+#   $XDG_CONFIG_HOME/tend/config.toml
+#   ~/.config/tend/config.toml
+#
+# With no config file, tendd uses built-in defaults (codex, claude, kiro).
+# A file REPLACES the defaults — list every provider you want available.
+# A malformed or invalid file makes tendd exit with an error rather than
+# silently falling back.
+
+# Each [[acp.providers]] entry describes one ACP server. Any ACP-compatible
+# agent is configured by these fields alone — no per-provider code.
+
+[[acp.providers]]
+id = "claude"                  # provider id (referenced by the plugin + :TendProvider)
+command = "claude-agent-acp"   # the ACP server binary; must be on the daemon's PATH
+# args = []                    # extra args passed to the command
+# env = ["KEY=value"]          # appended to the daemon's environment (adds, not replaces)
+cwd_mode = "workspace"         # "workspace" (run in the worktree root) | "inherit"
+enabled = true                 # only enabled providers are selectable
+
+# The codex ACP adapter is the standalone codex-acp binary (the codex CLI's
+# own subcommand is app-server, not acp).
+[[acp.providers]]
+id = "codex"
+command = "codex-acp"
+cwd_mode = "workspace"
+enabled = false
