@@ -8,6 +8,7 @@ package daemon
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"net"
 	"sync"
 	"time"
@@ -285,11 +286,13 @@ func (s *Server) Serve() error {
 			_ = c.Close()
 			return nil
 		}
+		slog.Debug("connection accepted")
 		go func() {
 			defer s.wg.Done()
 			<-c.Done()
 			cleanup()
 			s.remove(c)
+			slog.Debug("connection closed")
 		}()
 	}
 }

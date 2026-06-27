@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log/slog"
 	"strconv"
 	"sync"
 	"time"
@@ -83,7 +84,23 @@ func NewConn(rwc io.ReadWriteCloser, h Handler) *Conn {
 // Call sends a request and blocks until the response arrives, ctx is done, or
 // the connection closes. params and result may be nil. A JSON-RPC error from
 // the peer is returned as *Error.
+//
+// On the daemon these are the reverse (daemon->editor) calls, so each is traced
+// at Debug with its method, duration, and error — a stuck or failing
+// editor.read_buffer/write_buffer/diagnostics round-trip is then visible.
 func (c *Conn) Call(ctx context.Context, method string, params, result any) error {
+	start := time.Now()
+	err := c.call(ctx, method, params, result)
+	dur := time.Since(start)
+	if err != nil {
+		slog.DebugContext(ctx, "rpc call error", "method", method, "dur_ms", dur.Milliseconds(), "err", err)
+	} else {
+		slog.DebugContext(ctx, "rpc call", "method", method, "dur_ms", dur.Milliseconds())
+	}
+	return err
+}
+
+func (c *Conn) call(ctx context.Context, method string, params, result any) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
