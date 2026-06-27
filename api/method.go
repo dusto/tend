@@ -37,6 +37,8 @@ var Methods = []Method{
 	{Name: "agent.prompt", Direction: PluginToDaemon, Params: AgentPromptParams{}, Result: AgentPromptResult{}, Summary: "Run one prompt turn on a session (blocks until the turn ends); output streams as events on the session stream."},
 	{Name: "agent.cancel", Direction: PluginToDaemon, Params: AgentCancelParams{}, Result: nil, Summary: "Cancel the in-flight turn on a session, returning it to idle."},
 	{Name: "agent.stop", Direction: PluginToDaemon, Params: AgentStopParams{}, Result: nil, Summary: "End a session and release its hold on the provider process."},
+	{Name: "session.list", Direction: PluginToDaemon, Params: SessionListParams{}, Result: SessionListResult{}, Summary: "List the daemon's sessions with status, task, stream, and editor-binding, optionally filtered by workspace."},
+	{Name: "session.claim", Direction: PluginToDaemon, Params: SessionClaimParams{}, Result: SessionClaimResult{}, Summary: "Move a session's editor binding to the calling editor client, so editor-local calls for that session route to it."},
 	{Name: "client.register", Direction: PluginToDaemon, Params: ClientRegisterParams{}, Result: ClientRegisterResult{}, Summary: "Register the connection's stable client id, role (editor/observer), and prompt capability."},
 	{Name: "file.read", Direction: PluginToDaemon, Params: FileReadParams{}, Result: FileReadResult{}, Summary: "Read a repo file editor-aware (non-mutating): live buffer content + changedtick when open, else disk content + content hash."},
 	{Name: "file.patch", Direction: PluginToDaemon, Params: FilePatchParams{}, Result: FileMutationResult{}, Summary: "Apply non-overlapping text edits to a repo file (task-bound, approval-gated, base-checked); single-target change set."},
