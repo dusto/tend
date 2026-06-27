@@ -72,6 +72,27 @@ func TestNormalizeAgentMessageChunk(t *testing.T) {
 	}
 }
 
+func TestNormalizeAgentThoughtChunk(t *testing.T) {
+	c := &capture{}
+	n := NewNormalizer(c, nil)
+	notify(n, SessionUpdateMethod, update("s1", map[string]any{
+		"sessionUpdate": "agent_thought_chunk",
+		"content":       map[string]any{"type": "text", "text": "let me think"},
+	}))
+
+	ev := c.last(t)
+	if ev.Type != "agent_thought_chunk" || ev.StreamID != "session:s1" || ev.Scope != api.ScopeSession {
+		t.Fatalf("event = %+v", ev)
+	}
+	var p api.AgentThoughtChunk
+	if err := json.Unmarshal(ev.Payload, &p); err != nil {
+		t.Fatal(err)
+	}
+	if p.SessionID != "s1" || p.Text != "let me think" {
+		t.Errorf("payload = %+v", p)
+	}
+}
+
 func TestNormalizeToolCalls(t *testing.T) {
 	c := &capture{}
 	n := NewNormalizer(c, nil)
@@ -114,8 +135,10 @@ func TestUnknownUpdatePreservedAsMetadata(t *testing.T) {
 	c := &capture{}
 	n := NewNormalizer(c, nil)
 	notify(n, SessionUpdateMethod, update("s1", map[string]any{
-		"sessionUpdate": "agent_thought_chunk",
-		"content":       map[string]any{"type": "text", "text": "thinking"},
+		"sessionUpdate": "available_commands_update",
+		"availableCommands": []map[string]any{
+			{"name": "review"},
+		},
 	}))
 
 	ev := c.last(t)
@@ -124,7 +147,7 @@ func TestUnknownUpdatePreservedAsMetadata(t *testing.T) {
 	}
 	var p api.ProviderNotification
 	_ = json.Unmarshal(ev.Payload, &p)
-	if p.Method != "session/update:agent_thought_chunk" {
+	if p.Method != "session/update:available_commands_update" {
 		t.Errorf("method = %q", p.Method)
 	}
 }
@@ -148,7 +171,7 @@ func TestProviderPrivateNotificationPreserved(t *testing.T) {
 func TestMetadataParserHook(t *testing.T) {
 	c := &capture{}
 	parse := func(sessionID, method string, _ json.RawMessage) (api.Event, bool) {
-		if method == "session/update:agent_thought_chunk" {
+		if method == "session/update:usage_update" {
 			return sessionEvent(sessionID, "agent_message_chunk", api.AgentMessageChunk{
 				SessionID: api.SessionID(sessionID), Text: "parsed",
 			}), true
@@ -157,8 +180,8 @@ func TestMetadataParserHook(t *testing.T) {
 	}
 	n := NewNormalizer(c, parse)
 	notify(n, SessionUpdateMethod, update("s1", map[string]any{
-		"sessionUpdate": "agent_thought_chunk",
-		"content":       map[string]any{"text": "thinking"},
+		"sessionUpdate": "usage_update",
+		"usage":         map[string]any{"used": 42},
 	}))
 
 	ev := c.last(t)
