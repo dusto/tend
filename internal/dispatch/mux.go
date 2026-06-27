@@ -10,7 +10,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"sync"
+	"time"
 
 	"github.com/dusto/tend/api"
 	"github.com/dusto/tend/internal/rpc"
@@ -65,6 +67,23 @@ func (m *Mux) Register(method string, fn Func) error {
 
 // Handle implements rpc.Handler, dispatching req to the registered handler.
 func (m *Mux) Handle(ctx context.Context, req *rpc.Request) (any, error) {
+	// Receipt is logged before dispatch so a request blocked on the approval
+	// gate (e.g. file.patch) is visible while it waits, not only on completion.
+	// Only the method name is logged, never params.
+	slog.DebugContext(ctx, "rpc recv", "dir", string(m.serves), "method", req.Method)
+	start := time.Now()
+	res, err := m.dispatch(ctx, req)
+	dur := time.Since(start)
+	if err != nil {
+		slog.DebugContext(ctx, "rpc error", "method", req.Method, "dur_ms", dur.Milliseconds(), "err", err)
+	} else {
+		slog.DebugContext(ctx, "rpc done", "method", req.Method, "dur_ms", dur.Milliseconds())
+	}
+	return res, err
+}
+
+// dispatch resolves and invokes the handler for req, validating params first.
+func (m *Mux) dispatch(ctx context.Context, req *rpc.Request) (any, error) {
 	m.mu.RLock()
 	fn, ok := m.handlers[req.Method]
 	m.mu.RUnlock()

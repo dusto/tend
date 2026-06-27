@@ -14,6 +14,7 @@ import (
 
 	"github.com/dusto/tend/internal/acp"
 	"github.com/dusto/tend/internal/daemon"
+	"github.com/dusto/tend/internal/obs"
 	"github.com/dusto/tend/internal/rpc"
 )
 
@@ -25,6 +26,12 @@ func main() {
 }
 
 func run() error {
+	level := obs.ParseLevel(os.Getenv(obs.EnvLogLevel))
+	slog.SetDefault(obs.NewLogger(os.Stderr, level))
+	if level > slog.LevelDebug {
+		slog.Info("tendd: request tracing off; set TEND_LOG=debug to trace interactions")
+	}
+
 	path := rpc.SocketPath()
 	ln, err := rpc.Listen(path)
 	if errors.Is(err, rpc.ErrDaemonRunning) {
