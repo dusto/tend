@@ -28,7 +28,7 @@ func newGate(t *testing.T) (*Gate, *events.Store) {
 // runningSession returns a fresh session with a turn in flight, ready to gate.
 func runningSession(t *testing.T) *session.Session {
 	t.Helper()
-	s := session.NewRegistry().Create("s1", "codex", api.TaskRef{Provider: "beads", WorkspaceID: "ws1", ID: "t1"}, "/repo")
+	s := session.NewRegistry().Create("s1", "codex", "ws1", api.TaskRef{Provider: "beads", WorkspaceID: "ws1", ID: "t1"}, "/repo")
 	if err := s.SetStatus(api.StatusRunning, nil); err != nil {
 		t.Fatalf("SetStatus running: %v", err)
 	}
@@ -177,7 +177,7 @@ func TestResolveUnknown(t *testing.T) {
 func TestRequestRequiresRunning(t *testing.T) {
 	g, _ := newGate(t)
 	// An idle session has no in-flight turn: idle -> waiting_approval is illegal.
-	sess := session.NewRegistry().Create("s1", "codex", api.TaskRef{Provider: "beads", WorkspaceID: "ws1", ID: "t1"}, "/repo")
+	sess := session.NewRegistry().Create("s1", "codex", "ws1", api.TaskRef{Provider: "beads", WorkspaceID: "ws1", ID: "t1"}, "/repo")
 	if _, err := g.Request(context.Background(), sess, "file_edit", nil); err == nil {
 		t.Error("Request on an idle session should fail")
 	}

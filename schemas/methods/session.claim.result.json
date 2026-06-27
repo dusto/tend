@@ -9,6 +9,9 @@
         "provider_id": {
           "type": "string"
         },
+        "workspace_id": {
+          "type": "string"
+        },
         "task": {
           "$ref": "#/$defs/TaskRef"
         },
@@ -33,7 +36,7 @@
       "required": [
         "session_id",
         "provider_id",
-        "task",
+        "workspace_id",
         "worktree_root",
         "stream_id",
         "status",

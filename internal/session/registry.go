@@ -20,7 +20,7 @@ func NewRegistry() *Registry {
 
 // Create registers a new idle session for id and returns it. It panics if a
 // session with that id already exists (ids are daemon-assigned and unique).
-func (r *Registry) Create(id api.SessionID, providerID api.ProviderID, task api.TaskRef, worktreeRoot string) *Session {
+func (r *Registry) Create(id api.SessionID, providerID api.ProviderID, workspaceID api.WorkspaceID, task api.TaskRef, worktreeRoot string) *Session {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if _, dup := r.sessions[id]; dup {
@@ -29,6 +29,7 @@ func (r *Registry) Create(id api.SessionID, providerID api.ProviderID, task api.
 	s := &Session{
 		ID:           id,
 		ProviderID:   providerID,
+		WorkspaceID:  workspaceID,
 		Task:         task,
 		WorktreeRoot: worktreeRoot,
 		Stream:       api.SessionStream(id),

@@ -20,8 +20,15 @@ type Pending struct {
 
 // Session is the daemon's authoritative state for one agent session.
 type Session struct {
-	ID           api.SessionID
-	ProviderID   api.ProviderID
+	ID         api.SessionID
+	ProviderID api.ProviderID
+	// WorkspaceID is the session's workspace (the ACP pool key + list filter),
+	// set independently of Task so a task-less session still belongs to a
+	// workspace.
+	WorkspaceID api.WorkspaceID
+	// Task is the work the session is bound to, or the zero TaskRef when the
+	// session is task-less (created for conversation; a task is assigned later
+	// by delegation). HasTask reports which.
 	Task         api.TaskRef
 	WorktreeRoot string
 	// Stream is the session's event stream id, stable across process restarts.
@@ -64,6 +71,14 @@ func (s *Session) Status() api.SessionStatus {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.status
+}
+
+// HasTask reports whether a task is bound to the session. Work (file/pane
+// mutation) requires one; a task-less session can converse and read but not
+// mutate until a task is assigned. Task is immutable after Create, so this
+// needs no lock.
+func (s *Session) HasTask() bool {
+	return s.Task.ID != ""
 }
 
 // Pending returns the interaction the session is blocked on, if any.

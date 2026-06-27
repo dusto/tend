@@ -95,7 +95,7 @@ func (s *Service) open(ctx context.Context, p api.PaneOpenParams) (api.PaneInfo,
 		if !ok {
 			return api.PaneInfo{}, &rpc.Error{Code: rpc.CodeInvalidParams, Message: ErrNoSession.Error()}
 		}
-		ws, worktree = sess.Task.WorkspaceID, sess.WorktreeRoot
+		ws, worktree = sess.WorkspaceID, sess.WorktreeRoot
 		if cwd == "" {
 			cwd = worktree
 		}
@@ -152,6 +152,10 @@ func (s *Service) run(ctx context.Context, p api.PaneRunParams) (api.PaneRunResu
 	sess, ok := s.sessions.Get(p.SessionID)
 	if !ok {
 		return api.PaneRunResult{}, &rpc.Error{Code: rpc.CodeInvalidParams, Message: ErrNoSession.Error()}
+	}
+	// Work is task-gated: a task-less session may not run commands.
+	if !sess.HasTask() {
+		return api.PaneRunResult{}, &rpc.Error{Code: rpc.CodeInvalidParams, Message: "pty: a task is required to run commands"}
 	}
 	detail, _ := json.Marshal(api.ApprovalDetail{
 		Kind:    api.ApprovalPaneRun,

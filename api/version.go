@@ -11,8 +11,9 @@ import (
 const (
 	// 0.2.0 added task.*; 0.3.0 added pane.open/list/read/close; 0.4.0 added
 	// pane.run; 0.5.0 added file.apply_change_set; 0.6.0 added file.diff;
-	// 0.7.0 added lsp.diagnostics; 0.8.0 added session.list/claim.
-	PluginToDaemonVersion = "0.8.0"
+	// 0.7.0 added lsp.diagnostics; 0.8.0 added session.list/claim; 0.9.0 made
+	// agent.start's task optional (task-less sessions) + workspace_id.
+	PluginToDaemonVersion = "0.9.0"
 	// 0.2.0 added editor.open + editor.diff; 0.3.0 added editor.diagnostics.
 	DaemonToEditorVersion = "0.3.0"
 	DaemonToClientVersion = "0.1.0"

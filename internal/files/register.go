@@ -74,7 +74,7 @@ func toRPCError(err error, uri string) error {
 	case errors.Is(err, patch.ErrConflict):
 		data, _ := json.Marshal(api.ConflictData{URI: uri})
 		return &rpc.Error{Code: api.ErrConflict, Message: err.Error(), Data: data}
-	case errors.Is(err, ErrNoSession), errors.Is(err, ErrBadURI), errors.Is(err, ErrOutsideWorkspace),
+	case errors.Is(err, ErrNoSession), errors.Is(err, ErrNoTask), errors.Is(err, ErrBadURI), errors.Is(err, ErrOutsideWorkspace),
 		errors.Is(err, patch.ErrInvalidPosition), errors.Is(err, patch.ErrInvalidRange), errors.Is(err, patch.ErrOverlap):
 		return &rpc.Error{Code: rpc.CodeInvalidParams, Message: err.Error()}
 	default:

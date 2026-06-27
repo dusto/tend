@@ -39,7 +39,7 @@ func newChangeSet(t *testing.T, ed editorClient, ap approver) (*Service, string)
 	t.Helper()
 	root := t.TempDir()
 	r := session.NewRegistry()
-	r.Create("s1", "codex", api.TaskRef{Provider: "beads", WorkspaceID: "ws1", ID: "t1"}, root)
+	r.Create("s1", "codex", "ws1", api.TaskRef{Provider: "beads", WorkspaceID: "ws1", ID: "t1"}, root)
 	svc := NewService(r, ed, ap, Options{NewChangeSetID: func() api.ChangeSetID { return "cs1" }})
 	return svc, root
 }

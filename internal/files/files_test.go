@@ -49,7 +49,7 @@ func newService(t *testing.T, ed editorClient) (*Service, string) {
 	t.Helper()
 	root := t.TempDir()
 	r := session.NewRegistry()
-	r.Create("s1", "codex", api.TaskRef{Provider: "beads", WorkspaceID: "ws1", ID: "t1"}, root)
+	r.Create("s1", "codex", "ws1", api.TaskRef{Provider: "beads", WorkspaceID: "ws1", ID: "t1"}, root)
 	return NewService(r, ed, nil, Options{}), root
 }
 

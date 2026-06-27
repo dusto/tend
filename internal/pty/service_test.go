@@ -84,7 +84,7 @@ func TestOpenAgentInitiatedApproved(t *testing.T) {
 	ap := &fakeApprover{outcome: approvals.Outcome{Approved: true}}
 	svc, reg, _ := newService(t, ap)
 	cwd := t.TempDir()
-	reg.Create("s1", "codex", api.TaskRef{Provider: "beads", WorkspaceID: "ws1", ID: "t1"}, cwd)
+	reg.Create("s1", "codex", "ws1", api.TaskRef{Provider: "beads", WorkspaceID: "ws1", ID: "t1"}, cwd)
 
 	info, err := svc.open(context.Background(), api.PaneOpenParams{WorkspaceID: "ws1", Cwd: cwd, SessionID: "s1"})
 	if err != nil {
@@ -106,7 +106,7 @@ func TestAgentOpenBindsToSessionWorkspaceAndDefaultCwd(t *testing.T) {
 	ap := &fakeApprover{outcome: approvals.Outcome{Approved: true}}
 	svc, reg, _ := newService(t, ap)
 	worktree := t.TempDir()
-	reg.Create("s1", "codex", api.TaskRef{Provider: "beads", WorkspaceID: "ws-session", ID: "t1"}, worktree)
+	reg.Create("s1", "codex", "ws-session", api.TaskRef{Provider: "beads", WorkspaceID: "ws-session", ID: "t1"}, worktree)
 
 	// Caller supplies a different workspace and no cwd: the pane must bind to the
 	// session's workspace/worktree, and cwd defaults to the session worktree.
@@ -129,10 +129,33 @@ func TestAgentOpenBindsToSessionWorkspaceAndDefaultCwd(t *testing.T) {
 	}
 }
 
+func TestAgentOpenTasklessSessionUsesSessionWorkspace(t *testing.T) {
+	ap := &fakeApprover{outcome: approvals.Outcome{Approved: true}}
+	svc, reg, _ := newService(t, ap)
+	worktree := t.TempDir()
+	// A task-less session: workspace is set on the session, not on a task.
+	reg.Create("s1", "codex", "ws-session", api.TaskRef{}, worktree)
+
+	info, err := svc.open(context.Background(), api.PaneOpenParams{SessionID: "s1"})
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	// The pane (and approval detail) must carry the session's workspace, not the
+	// empty task workspace.
+	if info.WorkspaceID != "ws-session" {
+		t.Errorf("pane workspace = %q, want ws-session (from session, not task)", info.WorkspaceID)
+	}
+	var detail api.ApprovalDetail
+	_ = json.Unmarshal(ap.detail, &detail)
+	if detail.PaneOpen == nil || detail.PaneOpen.WorkspaceID != "ws-session" {
+		t.Errorf("approval detail workspace = %+v, want ws-session", detail.PaneOpen)
+	}
+}
+
 func TestOpenAgentInitiatedDenied(t *testing.T) {
 	ap := &fakeApprover{outcome: approvals.Outcome{Approved: false}}
 	svc, reg, _ := newService(t, ap)
-	reg.Create("s1", "codex", api.TaskRef{Provider: "beads", WorkspaceID: "ws1", ID: "t1"}, "/repo")
+	reg.Create("s1", "codex", "ws1", api.TaskRef{Provider: "beads", WorkspaceID: "ws1", ID: "t1"}, "/repo")
 
 	_, err := svc.open(context.Background(), api.PaneOpenParams{WorkspaceID: "ws1", SessionID: "s1"})
 	var rpcErr *rpc.Error
@@ -212,7 +235,7 @@ func TestRunGatedAndStreamed(t *testing.T) {
 	ap := &fakeApprover{outcome: approvals.Outcome{Approved: true}}
 	svc, reg, emit := newService(t, ap)
 	worktree := t.TempDir()
-	reg.Create("s1", "codex", api.TaskRef{Provider: "beads", WorkspaceID: "ws1", ID: "t1"}, worktree)
+	reg.Create("s1", "codex", "ws1", api.TaskRef{Provider: "beads", WorkspaceID: "ws1", ID: "t1"}, worktree)
 
 	opened, err := svc.open(context.Background(), api.PaneOpenParams{WorkspaceID: "ws1", Cwd: worktree})
 	if err != nil {
@@ -260,7 +283,7 @@ func TestRunRequiresSession(t *testing.T) {
 func TestRunDeniedDoesNotExecute(t *testing.T) {
 	ap := &fakeApprover{outcome: approvals.Outcome{Approved: false}}
 	svc, reg, _ := newService(t, ap)
-	reg.Create("s1", "codex", api.TaskRef{Provider: "beads", WorkspaceID: "ws1", ID: "t1"}, t.TempDir())
+	reg.Create("s1", "codex", "ws1", api.TaskRef{Provider: "beads", WorkspaceID: "ws1", ID: "t1"}, t.TempDir())
 	info, _ := svc.open(context.Background(), api.PaneOpenParams{WorkspaceID: "ws1"})
 
 	_, err := svc.run(context.Background(), api.PaneRunParams{PaneID: info.PaneID, Command: "ls", SessionID: "s1"})

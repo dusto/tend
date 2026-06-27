@@ -18,7 +18,7 @@ type fixture struct {
 func newFixture(t *testing.T) fixture {
 	t.Helper()
 	sessions := session.NewRegistry()
-	sessions.Create("s1", "codex", api.TaskRef{Provider: "beads", WorkspaceID: "ws1", ID: "t1"}, "/repo")
+	sessions.Create("s1", "codex", "ws1", api.TaskRef{Provider: "beads", WorkspaceID: "ws1", ID: "t1"}, "/repo")
 	clients := client.NewRegistry()
 	clients.Register("ed1", client.Capabilities{Role: api.RoleEditor, PromptCapable: true}, nil)
 	clients.Register("ed2", client.Capabilities{Role: api.RoleEditor}, nil)
@@ -115,7 +115,7 @@ func TestAttachRequiresEditorCapableClient(t *testing.T) {
 
 func TestReleaseClientOnlyAffectsItsBindings(t *testing.T) {
 	f := newFixture(t)
-	f.sessions.Create("s2", "codex", api.TaskRef{Provider: "beads", WorkspaceID: "ws1", ID: "t2"}, "/repo")
+	f.sessions.Create("s2", "codex", "ws1", api.TaskRef{Provider: "beads", WorkspaceID: "ws1", ID: "t2"}, "/repo")
 	if err := f.binder.Claim("s1", "ed1"); err != nil {
 		t.Fatalf("Claim s1: %v", err)
 	}
