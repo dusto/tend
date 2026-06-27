@@ -26,6 +26,10 @@ Schemas live under `schemas/` (`methods/<name>.params.json` / `.result.json`, `e
   - Params: `AgentCancelParams` · Result: _(notification)_
 - **`agent.stop`** — End a session and release its hold on the provider process.
   - Params: `AgentStopParams` · Result: _(notification)_
+- **`session.list`** — List the daemon's sessions with status, task, stream, and editor-binding, optionally filtered by workspace.
+  - Params: `SessionListParams` · Result: `SessionListResult`
+- **`session.claim`** — Move a session's editor binding to the calling editor client, so editor-local calls for that session route to it.
+  - Params: `SessionClaimParams` · Result: `SessionClaimResult`
 - **`client.register`** — Register the connection's stable client id, role (editor/observer), and prompt capability.
   - Params: `ClientRegisterParams` · Result: `ClientRegisterResult`
 - **`file.read`** — Read a repo file editor-aware (non-mutating): live buffer content + changedtick when open, else disk content + content hash.

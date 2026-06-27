@@ -27,6 +27,7 @@ import (
 	"github.com/dusto/tend/internal/pty"
 	"github.com/dusto/tend/internal/rpc"
 	"github.com/dusto/tend/internal/session"
+	"github.com/dusto/tend/internal/sessions"
 	"github.com/dusto/tend/internal/tasks"
 	"github.com/dusto/tend/internal/workspace"
 )
@@ -59,13 +60,14 @@ type Server struct {
 	// binder owns editor-binding decisions across sessions; gate is the shared
 	// approval gate; files serves repo-file tools (editor-aware reads and gated
 	// mutations) over the editor reverse-RPC and the gate.
-	binder *editor.Binder
-	gate   *approvals.Gate
-	files  *files.Service
-	lsp    *lsp.Service
-	tasks  *tasks.Service
-	panes  *pty.Service
-	ptyMgr *pty.Manager
+	binder  *editor.Binder
+	gate    *approvals.Gate
+	files   *files.Service
+	lsp     *lsp.Service
+	sessSvc *sessions.Service
+	tasks   *tasks.Service
+	panes   *pty.Service
+	ptyMgr  *pty.Manager
 
 	mu     sync.Mutex
 	conns  map[*rpc.Conn]struct{}
@@ -133,6 +135,7 @@ func New(ln net.Listener, logPath string, opts ...Option) (*Server, error) {
 	editors := editor.NewService(s.binder, s.clients)
 	s.files = files.NewService(s.sessions, editors, s.gate, files.Options{})
 	s.lsp = lsp.NewService(s.sessions, editors)
+	s.sessSvc = sessions.NewService(s.sessions, s.binder)
 	// Task provider per workspace. The in-memory fake stands in until the beads
 	// adapter is wired; the task.* contract and event bridge are independent of it.
 	s.tasks = tasks.NewService(o.taskFactory, s.store)
@@ -223,6 +226,17 @@ func (s *Server) newMux() (*dispatch.Mux, func(), error) {
 		return nil, nil, err
 	}
 	if err := lsp.Register(mux, s.lsp); err != nil {
+		return nil, nil, err
+	}
+	// session.list/claim resolve the calling client through this connection's
+	// cc.Self() (empty when unregistered), so the listing reports editor binding
+	// relative to the caller and claim binds it.
+	if err := sessions.Register(mux, s.sessSvc, func() api.ClientID {
+		if self, ok := cc.Self(); ok {
+			return self.ID
+		}
+		return ""
+	}); err != nil {
 		return nil, nil, err
 	}
 	if err := tasks.Register(mux, s.tasks); err != nil {

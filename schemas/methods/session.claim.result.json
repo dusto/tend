@@ -1,0 +1,90 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$defs": {
+    "SessionInfo": {
+      "properties": {
+        "session_id": {
+          "type": "string"
+        },
+        "provider_id": {
+          "type": "string"
+        },
+        "task": {
+          "$ref": "#/$defs/TaskRef"
+        },
+        "worktree_root": {
+          "type": "string"
+        },
+        "stream_id": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        },
+        "pending": {
+          "$ref": "#/$defs/SessionPending"
+        },
+        "editor_bound": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "session_id",
+        "provider_id",
+        "task",
+        "worktree_root",
+        "stream_id",
+        "status",
+        "editor_bound"
+      ]
+    },
+    "SessionPending": {
+      "properties": {
+        "kind": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "kind",
+        "id"
+      ]
+    },
+    "TaskRef": {
+      "properties": {
+        "provider": {
+          "type": "string"
+        },
+        "workspace_id": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "provider",
+        "workspace_id",
+        "id"
+      ]
+    }
+  },
+  "properties": {
+    "session": {
+      "$ref": "#/$defs/SessionInfo"
+    }
+  },
+  "additionalProperties": false,
+  "type": "object",
+  "required": [
+    "session"
+  ]
+}
