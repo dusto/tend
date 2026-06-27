@@ -19,10 +19,14 @@ const (
 // ErrNoSession is returned when a prompt names an unknown session.
 var ErrNoSession = errors.New("acp: unknown session")
 
-// NewSessionParams is the session/new request.
+// NewSessionParams is the session/new request. mcpServers is a required field
+// of the ACP contract (an empty list is valid, but the key must be present);
+// strict agents such as claude-agent-acp reject the request when it is absent.
+// So it is not omitempty, and a nil slice is normalized to [] before sending
+// (see Manager.Open) rather than marshaling as null.
 type NewSessionParams struct {
 	Cwd        string            `json:"cwd"`
-	MCPServers []json.RawMessage `json:"mcpServers,omitempty"`
+	MCPServers []json.RawMessage `json:"mcpServers"`
 }
 
 // NewSessionResult is the agent's session/new reply.
@@ -84,6 +88,11 @@ func (m *Manager) Open(ctx context.Context, key Key, params NewSessionParams) (*
 		return nil, errors.New("acp: pooled process is not an *acp.Client")
 	}
 
+	// mcpServers is required and must be an array, not null: send [] when none
+	// are configured.
+	if params.MCPServers == nil {
+		params.MCPServers = []json.RawMessage{}
+	}
 	var res NewSessionResult
 	if err := client.Call(ctx, MethodNewSession, params, &res); err != nil {
 		lease.Release()
