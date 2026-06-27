@@ -41,11 +41,14 @@ func info(s *session.Session, caller api.ClientID) api.SessionInfo {
 	out := api.SessionInfo{
 		SessionID:    s.ID,
 		ProviderID:   s.ProviderID,
-		Task:         s.Task,
 		WorktreeRoot: s.WorktreeRoot,
 		StreamID:     s.Stream,
 		Status:       s.Status(),
 		EditorBound:  bound && owner == caller,
+	}
+	if s.HasTask() {
+		task := s.Task
+		out.Task = &task
 	}
 	if p, ok := s.Pending(); ok {
 		out.Pending = &api.SessionPending{Kind: p.Kind, ID: p.ID}
@@ -60,7 +63,7 @@ func (svc *Service) List(caller api.ClientID, p api.SessionListParams) api.Sessi
 	all := svc.sessions.List()
 	out := make([]api.SessionInfo, 0, len(all))
 	for _, s := range all {
-		if p.WorkspaceID != "" && s.Task.WorkspaceID != p.WorkspaceID {
+		if p.WorkspaceID != "" && s.WorkspaceID != p.WorkspaceID {
 			continue
 		}
 		out = append(out, info(s, caller))

@@ -75,7 +75,7 @@ func boundFixture(t *testing.T) (*Service, *fakeEditor) {
 	t.Cleanup(func() { _ = editorConn.Close(); _ = daemonSide.Close() })
 
 	sessions := session.NewRegistry()
-	sessions.Create("s1", "codex", api.TaskRef{Provider: "beads", WorkspaceID: "ws1", ID: "t1"}, "/repo")
+	sessions.Create("s1", "codex", "ws1", api.TaskRef{Provider: "beads", WorkspaceID: "ws1", ID: "t1"}, "/repo")
 	clients := client.NewRegistry()
 	clients.Register("ed1", client.Capabilities{Role: api.RoleEditor}, daemonSide)
 
@@ -178,7 +178,7 @@ func TestServiceDiagnosticsRoutesToBoundEditor(t *testing.T) {
 
 func TestServiceDiagnosticsHeadlessUnavailable(t *testing.T) {
 	sessions := session.NewRegistry()
-	sessions.Create("s1", "codex", api.TaskRef{Provider: "beads", WorkspaceID: "ws1", ID: "t1"}, "/repo")
+	sessions.Create("s1", "codex", "ws1", api.TaskRef{Provider: "beads", WorkspaceID: "ws1", ID: "t1"}, "/repo")
 	clients := client.NewRegistry()
 	svc := NewService(NewBinder(sessions, clients), clients)
 
@@ -189,7 +189,7 @@ func TestServiceDiagnosticsHeadlessUnavailable(t *testing.T) {
 
 func TestServiceOpenHeadlessUnavailable(t *testing.T) {
 	sessions := session.NewRegistry()
-	sessions.Create("s1", "codex", api.TaskRef{Provider: "beads", WorkspaceID: "ws1", ID: "t1"}, "/repo")
+	sessions.Create("s1", "codex", "ws1", api.TaskRef{Provider: "beads", WorkspaceID: "ws1", ID: "t1"}, "/repo")
 	clients := client.NewRegistry()
 	svc := NewService(NewBinder(sessions, clients), clients)
 
@@ -203,7 +203,7 @@ func TestServiceOpenHeadlessUnavailable(t *testing.T) {
 
 func TestServiceHeadlessSessionUnavailable(t *testing.T) {
 	sessions := session.NewRegistry()
-	sessions.Create("s1", "codex", api.TaskRef{Provider: "beads", WorkspaceID: "ws1", ID: "t1"}, "/repo")
+	sessions.Create("s1", "codex", "ws1", api.TaskRef{Provider: "beads", WorkspaceID: "ws1", ID: "t1"}, "/repo")
 	clients := client.NewRegistry()
 	svc := NewService(NewBinder(sessions, clients), clients)
 
@@ -232,7 +232,7 @@ func TestServiceOwnerReRegisteredAsObserverUnavailable(t *testing.T) {
 
 func TestServiceOwnerWithoutCallerUnavailable(t *testing.T) {
 	sessions := session.NewRegistry()
-	sessions.Create("s1", "codex", api.TaskRef{Provider: "beads", WorkspaceID: "ws1", ID: "t1"}, "/repo")
+	sessions.Create("s1", "codex", "ws1", api.TaskRef{Provider: "beads", WorkspaceID: "ws1", ID: "t1"}, "/repo")
 	clients := client.NewRegistry()
 	clients.Register("ed1", client.Capabilities{Role: api.RoleEditor}, nil) // no reverse caller
 	binder := NewBinder(sessions, clients)

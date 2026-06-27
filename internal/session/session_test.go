@@ -9,7 +9,7 @@ import (
 func newSession(t *testing.T) *Session {
 	t.Helper()
 	r := NewRegistry()
-	return r.Create("s1", "codex", api.TaskRef{Provider: "beads", ID: "t1"}, "/repo")
+	return r.Create("s1", "codex", "ws1", api.TaskRef{Provider: "beads", ID: "t1"}, "/repo")
 }
 
 func TestCreateInitialState(t *testing.T) {

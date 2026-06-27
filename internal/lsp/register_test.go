@@ -18,7 +18,7 @@ import (
 func dispatchDiag(t *testing.T, ed editorClient, root, paramsJSON string) error {
 	t.Helper()
 	r := session.NewRegistry()
-	r.Create("s1", "codex", api.TaskRef{Provider: "beads", WorkspaceID: "ws1", ID: "t1"}, root)
+	r.Create("s1", "codex", "ws1", api.TaskRef{Provider: "beads", WorkspaceID: "ws1", ID: "t1"}, root)
 	mux := dispatch.NewMux(api.PluginToDaemon)
 	if err := Register(mux, NewService(r, ed)); err != nil {
 		t.Fatalf("Register: %v", err)

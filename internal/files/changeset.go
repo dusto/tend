@@ -34,6 +34,9 @@ func (s *Service) ApplyChangeSet(ctx context.Context, p api.FileApplyChangeSetPa
 	if !ok {
 		return api.FileApplyChangeSetResult{}, ErrNoSession
 	}
+	if !sess.HasTask() {
+		return api.FileApplyChangeSetResult{}, ErrNoTask
+	}
 	csid := s.newID()
 	res := api.FileApplyChangeSetResult{ChangeSetID: csid, Files: make([]api.FileChangeOutcome, len(p.Changes))}
 	for i, ch := range p.Changes {

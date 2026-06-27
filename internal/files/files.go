@@ -47,6 +47,10 @@ var (
 	// ErrOutsideWorkspace reports that a uri resolves outside the session's
 	// worktree, so it is refused.
 	ErrOutsideWorkspace = worktree.ErrOutsideWorkspace
+	// ErrNoTask reports a mutation attempted by a task-less session. Work is
+	// task-gated: a session can converse and read without a task, but must have
+	// one assigned (by delegation) before it mutates.
+	ErrNoTask = errors.New("files: a task is required to modify files")
 )
 
 // editorClient is the slice of editor.Service the file service drives. It is an
@@ -152,6 +156,9 @@ func (s *Service) mutate(ctx context.Context, sessionID api.SessionID, uri strin
 	sess, ok := s.sessions.Get(sessionID)
 	if !ok {
 		return api.FileMutationResult{}, ErrNoSession
+	}
+	if !sess.HasTask() {
+		return api.FileMutationResult{}, ErrNoTask
 	}
 	path, err := resolvePath(uri, sess.WorktreeRoot)
 	if err != nil {

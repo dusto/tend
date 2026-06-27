@@ -27,8 +27,8 @@ func ref(ws, id string) api.TaskRef {
 
 func TestListReportsRichFieldsOrderedByID(t *testing.T) {
 	svc, sess, _, _ := fixture(t)
-	sess.Create("s2", "codex", ref("ws1", "t2"), "/repo/b")
-	a := sess.Create("s1", "codex", ref("ws1", "t1"), "/repo/a")
+	sess.Create("s2", "codex", "ws1", ref("ws1", "t2"), "/repo/b")
+	a := sess.Create("s1", "codex", "ws1", ref("ws1", "t1"), "/repo/a")
 	// s1 is waiting on an approval.
 	if err := a.SetStatus(api.StatusRunning, nil); err != nil {
 		t.Fatalf("running: %v", err)
@@ -58,10 +58,28 @@ func TestListReportsRichFieldsOrderedByID(t *testing.T) {
 	}
 }
 
+func TestListTasklessSession(t *testing.T) {
+	svc, sess, _, _ := fixture(t)
+	// A task-less session: created with a workspace but no task.
+	sess.Create("s1", "codex", "ws1", api.TaskRef{}, "/a")
+
+	res := svc.List("ed", api.SessionListParams{})
+	if len(res.Sessions) != 1 {
+		t.Fatalf("sessions = %d, want 1", len(res.Sessions))
+	}
+	if res.Sessions[0].Task != nil {
+		t.Errorf("task = %+v, want nil for a task-less session", res.Sessions[0].Task)
+	}
+	// Still filterable by its workspace (independent of task).
+	if got := svc.List("ed", api.SessionListParams{WorkspaceID: "ws1"}); len(got.Sessions) != 1 {
+		t.Errorf("workspace filter dropped a task-less session: %+v", got.Sessions)
+	}
+}
+
 func TestListFiltersByWorkspace(t *testing.T) {
 	svc, sess, _, _ := fixture(t)
-	sess.Create("s1", "codex", ref("ws1", "t1"), "/a")
-	sess.Create("s2", "codex", ref("ws2", "t2"), "/b")
+	sess.Create("s1", "codex", "ws1", ref("ws1", "t1"), "/a")
+	sess.Create("s2", "codex", "ws2", ref("ws2", "t2"), "/b")
 
 	res := svc.List("ed", api.SessionListParams{WorkspaceID: "ws2"})
 	if len(res.Sessions) != 1 || res.Sessions[0].SessionID != "s2" {
@@ -71,7 +89,7 @@ func TestListFiltersByWorkspace(t *testing.T) {
 
 func TestListReportsEditorBindingRelativeToCaller(t *testing.T) {
 	svc, sess, _, binder := fixture(t)
-	sess.Create("s1", "codex", ref("ws1", "t1"), "/a")
+	sess.Create("s1", "codex", "ws1", ref("ws1", "t1"), "/a")
 	if err := binder.Claim("s1", "ed"); err != nil {
 		t.Fatalf("claim: %v", err)
 	}
@@ -87,7 +105,7 @@ func TestListReportsEditorBindingRelativeToCaller(t *testing.T) {
 
 func TestClaimMovesBindingAndReturnsView(t *testing.T) {
 	svc, sess, _, binder := fixture(t)
-	sess.Create("s1", "codex", ref("ws1", "t1"), "/a")
+	sess.Create("s1", "codex", "ws1", ref("ws1", "t1"), "/a")
 
 	res, err := svc.Claim("ed", api.SessionClaimParams{SessionID: "s1"})
 	if err != nil {
@@ -107,7 +125,7 @@ func TestClaimMovesBindingAndReturnsView(t *testing.T) {
 func TestClaimByObserverRejected(t *testing.T) {
 	svc, sess, clients, _ := fixture(t)
 	clients.Register("obs", client.Capabilities{Role: api.RoleObserver}, nil)
-	sess.Create("s1", "codex", ref("ws1", "t1"), "/a")
+	sess.Create("s1", "codex", "ws1", ref("ws1", "t1"), "/a")
 
 	if _, err := svc.Claim("obs", api.SessionClaimParams{SessionID: "s1"}); !errors.Is(err, editor.ErrNotEditor) {
 		t.Errorf("observer claim err = %v, want ErrNotEditor", err)

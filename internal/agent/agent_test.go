@@ -122,6 +122,43 @@ func TestStartRegistersSession(t *testing.T) {
 	}
 }
 
+func TestStartTaskless(t *testing.T) {
+	mgr := &fakeManager{openID: "sess-1"}
+	svc, _ := newService(t, mgr)
+
+	// No task, explicit workspace: a conversation session.
+	res, err := svc.Start(context.Background(), api.AgentStartParams{
+		ProviderID:   "codex",
+		WorkspaceID:  "ws1",
+		WorktreeRoot: "/repo/wt",
+	})
+	if err != nil {
+		t.Fatalf("task-less Start: %v", err)
+	}
+	s, ok := svc.sessions.Get(res.SessionID)
+	if !ok {
+		t.Fatalf("session not registered")
+	}
+	if s.HasTask() {
+		t.Errorf("session should be task-less, got task %+v", s.Task)
+	}
+	if s.WorkspaceID != "ws1" {
+		t.Errorf("workspace = %q, want ws1", s.WorkspaceID)
+	}
+}
+
+func TestStartRequiresWorkspaceOrTask(t *testing.T) {
+	svc, _ := newService(t, &fakeManager{openID: "x"})
+	// Provider + worktree but no workspace and no task: unresolvable workspace.
+	_, err := svc.Start(context.Background(), api.AgentStartParams{
+		ProviderID:   "codex",
+		WorktreeRoot: "/r",
+	})
+	if err == nil {
+		t.Error("expected an error when neither workspace_id nor task supplies the workspace")
+	}
+}
+
 func TestStartValidatesParams(t *testing.T) {
 	svc, _ := newService(t, &fakeManager{openID: "x"})
 	full := api.TaskRef{Provider: "beads", WorkspaceID: "ws1", ID: "t1"}

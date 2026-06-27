@@ -8,7 +8,7 @@ import (
 
 func TestRegistryCreateGetRemove(t *testing.T) {
 	r := NewRegistry()
-	s := r.Create("s1", "codex", api.TaskRef{}, "/repo")
+	s := r.Create("s1", "codex", "ws1", api.TaskRef{}, "/repo")
 
 	got, ok := r.Get("s1")
 	if !ok || got != s {
@@ -26,8 +26,8 @@ func TestRegistryCreateGetRemove(t *testing.T) {
 
 func TestRegistryList(t *testing.T) {
 	r := NewRegistry()
-	r.Create("s1", "codex", api.TaskRef{}, "/a")
-	r.Create("s2", "claude", api.TaskRef{}, "/b")
+	r.Create("s1", "codex", "ws1", api.TaskRef{}, "/a")
+	r.Create("s2", "claude", "ws1", api.TaskRef{}, "/b")
 	if n := len(r.List()); n != 2 {
 		t.Errorf("List len = %d, want 2", n)
 	}
@@ -35,11 +35,11 @@ func TestRegistryList(t *testing.T) {
 
 func TestRegistryDuplicatePanics(t *testing.T) {
 	r := NewRegistry()
-	r.Create("s1", "codex", api.TaskRef{}, "/a")
+	r.Create("s1", "codex", "ws1", api.TaskRef{}, "/a")
 	defer func() {
 		if recover() == nil {
 			t.Error("duplicate Create should panic")
 		}
 	}()
-	r.Create("s1", "codex", api.TaskRef{}, "/a")
+	r.Create("s1", "codex", "ws1", api.TaskRef{}, "/a")
 }

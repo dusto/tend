@@ -90,20 +90,36 @@ func Register(m *dispatch.Mux, s *Service, onStarted func(api.SessionID)) error 
 // workspace, registers its authoritative state, and returns the session id and
 // the stream its events arrive on.
 func (s *Service) Start(ctx context.Context, p api.AgentStartParams) (api.AgentStartResult, error) {
-	switch {
-	case p.ProviderID == "":
+	if p.ProviderID == "" {
 		return api.AgentStartResult{}, invalidParams("provider_id is required")
-	case p.WorktreeRoot == "":
+	}
+	if p.WorktreeRoot == "" {
 		return api.AgentStartResult{}, invalidParams("worktree_root is required")
-	case p.Task.Provider == "":
-		return api.AgentStartResult{}, invalidParams("task.provider is required")
-	case p.Task.WorkspaceID == "":
-		return api.AgentStartResult{}, invalidParams("task.workspace_id is required")
-	case p.Task.ID == "":
-		return api.AgentStartResult{}, invalidParams("task.id is required")
+	}
+	// Task is optional. When present (any field set) it must be complete, since a
+	// partial task ref is meaningless. When absent the session is task-less.
+	hasTask := p.Task.ID != "" || p.Task.Provider != "" || p.Task.WorkspaceID != ""
+	if hasTask {
+		switch {
+		case p.Task.Provider == "":
+			return api.AgentStartResult{}, invalidParams("task.provider is required")
+		case p.Task.WorkspaceID == "":
+			return api.AgentStartResult{}, invalidParams("task.workspace_id is required")
+		case p.Task.ID == "":
+			return api.AgentStartResult{}, invalidParams("task.id is required")
+		}
+	}
+	// The workspace comes from the explicit field, falling back to the task's
+	// for a task-bound start; one of them must supply it.
+	workspace := p.WorkspaceID
+	if workspace == "" {
+		workspace = p.Task.WorkspaceID
+	}
+	if workspace == "" {
+		return api.AgentStartResult{}, invalidParams("workspace_id is required (set workspace_id or task)")
 	}
 
-	key := acp.Key{Workspace: p.Task.WorkspaceID, Provider: p.ProviderID}
+	key := acp.Key{Workspace: workspace, Provider: p.ProviderID}
 	// Carry the worktree root so a provider process spawned for this session
 	// starts in it; the session's own cwd is set on session/new below.
 	ctx = acp.WithWorktreeRoot(ctx, p.WorktreeRoot)
@@ -118,7 +134,7 @@ func (s *Service) Start(ctx context.Context, p api.AgentStartParams) (api.AgentS
 		s.manager.Close(as.ID)
 		return api.AgentStartResult{}, &rpc.Error{Code: rpc.CodeInternalError, Message: "agent: duplicate session id " + string(as.ID)}
 	}
-	sess := s.sessions.Create(as.ID, p.ProviderID, p.Task, p.WorktreeRoot)
+	sess := s.sessions.Create(as.ID, p.ProviderID, workspace, p.Task, p.WorktreeRoot)
 	return api.AgentStartResult{SessionID: sess.ID, StreamID: sess.Stream, Status: sess.Status()}, nil
 }
 

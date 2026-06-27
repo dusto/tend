@@ -42,9 +42,10 @@ type SessionPending struct {
 // to it (id + stream), without a follow-up call. Pending is set only when the
 // session is waiting on an approval or clarification.
 type SessionInfo struct {
-	SessionID    SessionID       `json:"session_id"`
-	ProviderID   ProviderID      `json:"provider_id"`
-	Task         TaskRef         `json:"task"`
+	SessionID  SessionID  `json:"session_id"`
+	ProviderID ProviderID `json:"provider_id"`
+	// Task is the bound task, or nil for a task-less (conversation) session.
+	Task         *TaskRef        `json:"task,omitempty"`
 	WorktreeRoot string          `json:"worktree_root"`
 	StreamID     StreamID        `json:"stream_id"`
 	Status       SessionStatus   `json:"status"`

@@ -82,7 +82,7 @@ func TestSnapshotRetentionEvictsOldest(t *testing.T) {
 	ap := &fakeApprover{outcome: approvals.Outcome{Approved: true}}
 	root := t.TempDir()
 	r := session.NewRegistry()
-	r.Create("s1", "codex", api.TaskRef{Provider: "beads", WorkspaceID: "ws1", ID: "t1"}, root)
+	r.Create("s1", "codex", "ws1", api.TaskRef{Provider: "beads", WorkspaceID: "ws1", ID: "t1"}, root)
 	n := 0
 	svc := NewService(r, ed, ap, Options{
 		NewChangeSetID:   func() api.ChangeSetID { n++; return api.ChangeSetID(fmt.Sprintf("cs%d", n)) },

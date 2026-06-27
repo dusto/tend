@@ -153,6 +153,10 @@ func (s *Service) run(ctx context.Context, p api.PaneRunParams) (api.PaneRunResu
 	if !ok {
 		return api.PaneRunResult{}, &rpc.Error{Code: rpc.CodeInvalidParams, Message: ErrNoSession.Error()}
 	}
+	// Work is task-gated: a task-less session may not run commands.
+	if !sess.HasTask() {
+		return api.PaneRunResult{}, &rpc.Error{Code: rpc.CodeInvalidParams, Message: "pty: a task is required to run commands"}
+	}
 	detail, _ := json.Marshal(api.ApprovalDetail{
 		Kind:    api.ApprovalPaneRun,
 		PaneRun: &api.PaneRunApproval{PaneID: p.PaneID, Command: p.Command, Cwd: pane.Cwd},

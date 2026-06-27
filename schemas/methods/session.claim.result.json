@@ -33,7 +33,6 @@
       "required": [
         "session_id",
         "provider_id",
-        "task",
         "worktree_root",
         "stream_id",
         "status",

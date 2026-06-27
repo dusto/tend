@@ -41,7 +41,7 @@ func newMutator(t *testing.T, ed editorClient, ap approver, seed string) (*Servi
 	t.Helper()
 	root := t.TempDir()
 	r := session.NewRegistry()
-	r.Create("s1", "codex", api.TaskRef{Provider: "beads", WorkspaceID: "ws1", ID: "t1"}, root)
+	r.Create("s1", "codex", "ws1", api.TaskRef{Provider: "beads", WorkspaceID: "ws1", ID: "t1"}, root)
 	svc := NewService(r, ed, ap, Options{NewChangeSetID: func() api.ChangeSetID { return "cs1" }})
 	path := filepath.Join(root, "a.go")
 	if err := os.WriteFile(path, []byte(seed), 0o644); err != nil {
@@ -243,5 +243,29 @@ func TestMutateUnknownSession(t *testing.T) {
 	svc, _, path := newMutator(t, ed, &fakeApprover{outcome: approvals.Outcome{Approved: true}}, "x\n")
 	if _, err := svc.Write(context.Background(), api.FileWriteParams{SessionID: "nope", URI: fileURI(path), Base: diskBase("x\n")}); !errors.Is(err, ErrNoSession) {
 		t.Errorf("err = %v, want ErrNoSession", err)
+	}
+}
+
+func TestMutateTasklessSessionRefused(t *testing.T) {
+	// Work is task-gated: a task-less session cannot mutate, even with a valid
+	// base and an approving gate.
+	ed := &fakeEditor{err: editor.ErrEditorUnavailable}
+	root := t.TempDir()
+	r := session.NewRegistry()
+	r.Create("s1", "codex", "ws1", api.TaskRef{}, root) // no task
+	svc := NewService(r, ed, &fakeApprover{outcome: approvals.Outcome{Approved: true}}, Options{NewChangeSetID: func() api.ChangeSetID { return "cs1" }})
+	path := filepath.Join(root, "a.go")
+	if err := os.WriteFile(path, []byte("x\n"), 0o644); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	_, err := svc.Write(context.Background(), api.FileWriteParams{
+		SessionID: "s1", URI: fileURI(path), Content: "y\n", Base: diskBase("x\n"),
+	})
+	if !errors.Is(err, ErrNoTask) {
+		t.Errorf("err = %v, want ErrNoTask", err)
+	}
+	if got, _ := os.ReadFile(path); string(got) != "x\n" {
+		t.Errorf("file mutated by a task-less session: %q", got)
 	}
 }

@@ -26,6 +26,9 @@
     "provider_id": {
       "type": "string"
     },
+    "workspace_id": {
+      "type": "string"
+    },
     "task": {
       "$ref": "#/$defs/TaskRef"
     },
@@ -37,7 +40,6 @@
   "type": "object",
   "required": [
     "provider_id",
-    "task",
     "worktree_root"
   ]
 }

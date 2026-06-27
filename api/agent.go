@@ -5,12 +5,17 @@ package api
 // specific worktree. Turn progress arrives as events on the session's stream, not
 // in these results.
 
-// AgentStartParams opens a task-scoped agent session. The task carries the
-// workspace; WorktreeRoot is the directory the session operates in.
+// AgentStartParams opens an agent session. WorktreeRoot is the directory the
+// session operates in. Task is OPTIONAL: a task-less session is for
+// conversation (a task is assigned later by delegation); work — file/pane
+// mutation — still requires a task. WorkspaceID is the session's workspace; it
+// may be empty when Task is set (it then defaults to the task's workspace), but
+// is required for a task-less session.
 type AgentStartParams struct {
-	ProviderID   ProviderID `json:"provider_id"`
-	Task         TaskRef    `json:"task"`
-	WorktreeRoot string     `json:"worktree_root"`
+	ProviderID   ProviderID  `json:"provider_id"`
+	WorkspaceID  WorkspaceID `json:"workspace_id,omitempty"`
+	Task         TaskRef     `json:"task,omitzero"`
+	WorktreeRoot string      `json:"worktree_root"`
 }
 
 // AgentStartResult reports the new session, the stream its events arrive on, and
