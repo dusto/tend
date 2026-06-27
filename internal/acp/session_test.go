@@ -20,7 +20,8 @@ import (
 type fakeAgent struct {
 	mu       sync.Mutex
 	nextSess int
-	prompts  []string // session ids of prompts the agent handled
+	prompts  []string        // session ids of prompts the agent handled
+	lastNew  json.RawMessage // raw params of the most recent session/new
 
 	started chan string   // if set, receives a session id when a prompt handler starts
 	gate    chan struct{} // if set, prompt handlers block on it
@@ -30,6 +31,7 @@ func (a *fakeAgent) handle(_ context.Context, req *rpc.Request) (any, error) {
 	switch req.Method {
 	case MethodNewSession:
 		a.mu.Lock()
+		a.lastNew = append(json.RawMessage(nil), req.Params...)
 		a.nextSess++
 		id := fmt.Sprintf("sess-%d", a.nextSess)
 		a.mu.Unlock()
@@ -102,6 +104,32 @@ func TestOpenCreatesSession(t *testing.T) {
 	s := openSession(t, m, testKey)
 	if s.ID != "sess-1" {
 		t.Errorf("session ID = %q, want sess-1", s.ID)
+	}
+}
+
+// TestNewSessionAlwaysSendsMCPServers pins the wire shape: mcpServers is a
+// required ACP field, so even with none configured the request must carry it as
+// an empty array (not null, not absent). A real agent (claude-agent-acp) rejects
+// the missing key with Invalid params.
+func TestNewSessionAlwaysSendsMCPServers(t *testing.T) {
+	agent := &fakeAgent{}
+	m := newManager(t, agent, Options{Max: 1})
+	openSession(t, m, testKey) // openSession passes no MCPServers
+
+	agent.mu.Lock()
+	raw := agent.lastNew
+	agent.mu.Unlock()
+
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &fields); err != nil {
+		t.Fatalf("session/new params: %v", err)
+	}
+	v, ok := fields["mcpServers"]
+	if !ok {
+		t.Fatalf("session/new is missing the required mcpServers key: %s", raw)
+	}
+	if string(v) != "[]" {
+		t.Errorf("mcpServers = %s, want [] (not null/absent)", v)
 	}
 }
 

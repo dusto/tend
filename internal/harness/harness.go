@@ -40,6 +40,15 @@ func RunFakeACP() {
 		case "initialize":
 			return acp.InitializeResult{ProtocolVersion: acp.ProtocolVersion}, nil
 		case acp.MethodNewSession:
+			// Enforce the ACP contract a real agent enforces: mcpServers is a
+			// required key (empty array allowed). Rejecting its absence keeps the
+			// fake faithful, so a regression that drops the field is caught here
+			// rather than only against a live agent.
+			var raw map[string]json.RawMessage
+			_ = json.Unmarshal(req.Params, &raw)
+			if _, ok := raw["mcpServers"]; !ok {
+				return nil, &rpc.Error{Code: -32602, Message: "fake acp: session/new missing required mcpServers"}
+			}
 			// Globally unique: pid distinguishes processes (the pool may spawn
 			// several for one {workspace, provider} under concurrent starts) and the
 			// counter distinguishes sessions within a process, so no two sessions
