@@ -110,10 +110,15 @@ func (s *Service) Start(ctx context.Context, p api.AgentStartParams) (api.AgentS
 		}
 	}
 	// The workspace comes from the explicit field, falling back to the task's
-	// for a task-bound start; one of them must supply it.
+	// for a task-bound start; one of them must supply it. When both are set they
+	// must agree — a session bound to one workspace cannot authorize work in
+	// another, so a mismatch is a caller error rather than a silent precedence.
 	workspace := p.WorkspaceID
-	if workspace == "" {
+	switch {
+	case workspace == "":
 		workspace = p.Task.WorkspaceID
+	case hasTask && p.Task.WorkspaceID != workspace:
+		return api.AgentStartResult{}, invalidParams("workspace_id and task.workspace_id must match")
 	}
 	if workspace == "" {
 		return api.AgentStartResult{}, invalidParams("workspace_id is required (set workspace_id or task)")

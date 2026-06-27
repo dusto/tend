@@ -70,6 +70,10 @@ func TestListTasklessSession(t *testing.T) {
 	if res.Sessions[0].Task != nil {
 		t.Errorf("task = %+v, want nil for a task-less session", res.Sessions[0].Task)
 	}
+	// A task-less session still carries its workspace identity for clients.
+	if res.Sessions[0].WorkspaceID != "ws1" {
+		t.Errorf("workspace = %q, want ws1 even with no task", res.Sessions[0].WorkspaceID)
+	}
 	// Still filterable by its workspace (independent of task).
 	if got := svc.List("ed", api.SessionListParams{WorkspaceID: "ws1"}); len(got.Sessions) != 1 {
 		t.Errorf("workspace filter dropped a task-less session: %+v", got.Sessions)

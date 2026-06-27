@@ -129,6 +129,29 @@ func TestAgentOpenBindsToSessionWorkspaceAndDefaultCwd(t *testing.T) {
 	}
 }
 
+func TestAgentOpenTasklessSessionUsesSessionWorkspace(t *testing.T) {
+	ap := &fakeApprover{outcome: approvals.Outcome{Approved: true}}
+	svc, reg, _ := newService(t, ap)
+	worktree := t.TempDir()
+	// A task-less session: workspace is set on the session, not on a task.
+	reg.Create("s1", "codex", "ws-session", api.TaskRef{}, worktree)
+
+	info, err := svc.open(context.Background(), api.PaneOpenParams{SessionID: "s1"})
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	// The pane (and approval detail) must carry the session's workspace, not the
+	// empty task workspace.
+	if info.WorkspaceID != "ws-session" {
+		t.Errorf("pane workspace = %q, want ws-session (from session, not task)", info.WorkspaceID)
+	}
+	var detail api.ApprovalDetail
+	_ = json.Unmarshal(ap.detail, &detail)
+	if detail.PaneOpen == nil || detail.PaneOpen.WorkspaceID != "ws-session" {
+		t.Errorf("approval detail workspace = %+v, want ws-session", detail.PaneOpen)
+	}
+}
+
 func TestOpenAgentInitiatedDenied(t *testing.T) {
 	ap := &fakeApprover{outcome: approvals.Outcome{Approved: false}}
 	svc, reg, _ := newService(t, ap)

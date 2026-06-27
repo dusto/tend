@@ -44,6 +44,10 @@ type SessionPending struct {
 type SessionInfo struct {
 	SessionID  SessionID  `json:"session_id"`
 	ProviderID ProviderID `json:"provider_id"`
+	// WorkspaceID is the workspace the session is bound to. It is always set,
+	// independent of Task, so a task-less (conversation) session still carries a
+	// workspace identity for clients to render and route by.
+	WorkspaceID WorkspaceID `json:"workspace_id"`
 	// Task is the bound task, or nil for a task-less (conversation) session.
 	Task         *TaskRef        `json:"task,omitempty"`
 	WorktreeRoot string          `json:"worktree_root"`

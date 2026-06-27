@@ -95,7 +95,7 @@ func (s *Service) open(ctx context.Context, p api.PaneOpenParams) (api.PaneInfo,
 		if !ok {
 			return api.PaneInfo{}, &rpc.Error{Code: rpc.CodeInvalidParams, Message: ErrNoSession.Error()}
 		}
-		ws, worktree = sess.Task.WorkspaceID, sess.WorktreeRoot
+		ws, worktree = sess.WorkspaceID, sess.WorktreeRoot
 		if cwd == "" {
 			cwd = worktree
 		}

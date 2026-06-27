@@ -159,6 +159,21 @@ func TestStartRequiresWorkspaceOrTask(t *testing.T) {
 	}
 }
 
+func TestStartRejectsConflictingWorkspace(t *testing.T) {
+	svc, _ := newService(t, &fakeManager{openID: "x"})
+	// Both an explicit workspace and a task workspace, but they disagree: the
+	// session would be bound to one workspace while the task authorizes another.
+	_, err := svc.Start(context.Background(), api.AgentStartParams{
+		ProviderID:   "codex",
+		WorktreeRoot: "/r",
+		WorkspaceID:  "ws-a",
+		Task:         api.TaskRef{Provider: "beads", WorkspaceID: "ws-b", ID: "t1"},
+	})
+	if err == nil {
+		t.Error("expected an error when workspace_id and task.workspace_id disagree")
+	}
+}
+
 func TestStartValidatesParams(t *testing.T) {
 	svc, _ := newService(t, &fakeManager{openID: "x"})
 	full := api.TaskRef{Provider: "beads", WorkspaceID: "ws1", ID: "t1"}

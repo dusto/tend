@@ -41,6 +41,7 @@ func info(s *session.Session, caller api.ClientID) api.SessionInfo {
 	out := api.SessionInfo{
 		SessionID:    s.ID,
 		ProviderID:   s.ProviderID,
+		WorkspaceID:  s.WorkspaceID,
 		WorktreeRoot: s.WorktreeRoot,
 		StreamID:     s.Stream,
 		Status:       s.Status(),
