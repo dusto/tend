@@ -103,6 +103,8 @@ Schemas live under `schemas/` (`methods/<name>.params.json` / `.result.json`, `e
   - Payload: `AgentError`
 - **`agent_message_chunk`** (`session` stream) — A streamed chunk of an agent message.
   - Payload: `AgentMessageChunk`
+- **`agent_thought_chunk`** (`session` stream) — A streamed chunk of the agent's reasoning (thinking), distinct from its message.
+  - Payload: `AgentThoughtChunk`
 - **`approval_requested`** (`session` stream) — A mutating action is awaiting approval.
   - Payload: `ApprovalRequested`
 - **`approval_resolved`** (`session` stream) — A pending approval was resolved.

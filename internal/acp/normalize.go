@@ -99,6 +99,17 @@ func mapUpdate(sessionID, kind string, update json.RawMessage) (api.Event, bool)
 			SessionID: api.SessionID(sessionID),
 			Text:      u.Content.Text,
 		}), true
+	case "agent_thought_chunk":
+		var u struct {
+			Content struct {
+				Text string `json:"text"`
+			} `json:"content"`
+		}
+		_ = json.Unmarshal(update, &u)
+		return sessionEvent(sessionID, "agent_thought_chunk", api.AgentThoughtChunk{
+			SessionID: api.SessionID(sessionID),
+			Text:      u.Content.Text,
+		}), true
 	case "tool_call":
 		var u struct {
 			ToolCallID string          `json:"toolCallId"`

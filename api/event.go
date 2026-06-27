@@ -71,6 +71,7 @@ type EventDef struct {
 // Further event payloads are added as their features land.
 var EventDefs = []EventDef{
 	{Type: "agent_message_chunk", Scope: ScopeSession, Payload: AgentMessageChunk{}, Summary: "A streamed chunk of an agent message."},
+	{Type: "agent_thought_chunk", Scope: ScopeSession, Payload: AgentThoughtChunk{}, Summary: "A streamed chunk of the agent's reasoning (thinking), distinct from its message."},
 	{Type: "tool_call", Scope: ScopeSession, Payload: ToolCall{}, Summary: "An agent tool call started."},
 	{Type: "tool_call_update", Scope: ScopeSession, Payload: ToolCallUpdate{}, Summary: "Progress update for a tool call."},
 	{Type: "turn_end", Scope: ScopeSession, Payload: TurnEnd{}, Summary: "The agent's turn ended."},
@@ -91,6 +92,14 @@ var EventDefs = []EventDef{
 
 // AgentMessageChunk is a streamed chunk of an agent message.
 type AgentMessageChunk struct {
+	SessionID SessionID `json:"session_id"`
+	Text      string    `json:"text"`
+}
+
+// AgentThoughtChunk is a streamed chunk of the agent's reasoning (its thinking
+// output), distinct from the agent's message so a client can render it as a
+// separate thinking block.
+type AgentThoughtChunk struct {
 	SessionID SessionID `json:"session_id"`
 	Text      string    `json:"text"`
 }

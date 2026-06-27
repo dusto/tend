@@ -16,7 +16,8 @@ const (
 	PluginToDaemonVersion = "0.9.0"
 	// 0.2.0 added editor.open + editor.diff; 0.3.0 added editor.diagnostics.
 	DaemonToEditorVersion = "0.3.0"
-	DaemonToClientVersion = "0.1.0"
+	// 0.2.0 added the agent_thought_chunk session event.
+	DaemonToClientVersion = "0.2.0"
 )
 
 // Versions reports the contract version of each method set.
