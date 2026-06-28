@@ -10,6 +10,7 @@ package slash
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 
 	"github.com/dusto/tend/api"
@@ -23,6 +24,7 @@ import (
 const (
 	MethodList     = "slash.list"
 	MethodComplete = "slash.complete"
+	MethodInvoke   = "slash.invoke"
 )
 
 // maxCandidates caps a completion response so a large task list cannot produce
@@ -34,11 +36,23 @@ type Publisher interface {
 	Publish(api.Event) (api.Event, error)
 }
 
-// Tasks lists a workspace's tasks for argument completion. *tasks.Service
-// satisfies it; the narrow interface keeps the slash service testable without a
-// task provider.
+// Tasks is the task-provider slice the slash service drives: listing for
+// argument completion, and the actions the daemon task commands invoke. It deals
+// in workspace + bare id (the provider name stays inside the task service).
+// *tasks.Service satisfies it; the narrow interface keeps the slash service
+// testable without a task provider.
 type Tasks interface {
 	List(ctx context.Context, ws api.WorkspaceID, status string) ([]api.Task, error)
+	Show(ctx context.Context, ws api.WorkspaceID, id string) (api.Task, error)
+	Claim(ctx context.Context, ws api.WorkspaceID, id, assignee string) (api.Task, error)
+	Comment(ctx context.Context, ws api.WorkspaceID, id, author, text string) (api.Task, error)
+	CloseTask(ctx context.Context, ws api.WorkspaceID, id string) (api.Task, error)
+}
+
+// Prompter runs a prompt turn on a session, used to forward a non-daemon command
+// to the agent as prompt text. *agent.Service satisfies it.
+type Prompter interface {
+	Prompt(ctx context.Context, p api.AgentPromptParams) (api.AgentPromptResult, error)
 }
 
 // argKind classifies what a daemon command's argument completes against.
@@ -67,14 +81,16 @@ var daemonArgKinds = map[string]argKind{
 type Service struct {
 	sessions *session.Registry
 	tasks    Tasks
+	prompter Prompter
 	pub      Publisher
 	daemon   []api.SlashCommand
 }
 
-// NewService returns a Service that reads sessions, completes task arguments
-// through tasks, emits through pub, and offers the built-in daemon commands.
-func NewService(sessions *session.Registry, tasks Tasks, pub Publisher) *Service {
-	return &Service{sessions: sessions, tasks: tasks, pub: pub, daemon: daemonCommands()}
+// NewService returns a Service that reads sessions, runs daemon task commands
+// through tasks, forwards other commands through prompter, emits through pub, and
+// offers the built-in daemon commands.
+func NewService(sessions *session.Registry, tasks Tasks, prompter Prompter, pub Publisher) *Service {
+	return &Service{sessions: sessions, tasks: tasks, prompter: prompter, pub: pub, daemon: daemonCommands()}
 }
 
 // Register installs the slash.* methods on m, backed by s.
@@ -82,7 +98,10 @@ func Register(m *dispatch.Mux, s *Service) error {
 	if err := dispatch.Handle(m, MethodList, s.List); err != nil {
 		return err
 	}
-	return dispatch.Handle(m, MethodComplete, s.Complete)
+	if err := dispatch.Handle(m, MethodComplete, s.Complete); err != nil {
+		return err
+	}
+	return dispatch.Handle(m, MethodInvoke, s.Invoke)
 }
 
 // SetSessionCommands records the agent's advertised commands for a session and
@@ -133,6 +152,130 @@ func (s *Service) Complete(ctx context.Context, p api.SlashCompleteParams) (api.
 	default:
 		return noCandidates(), nil
 	}
+}
+
+// Invoke runs a slash command. A command the daemon owns runs its task action
+// (resolving the workspace from the session); any other command — a provider
+// command or one the daemon does not recognize — is forwarded to the agent as a
+// prompt turn ("/command args"), per the dispatch rule that the daemon handles
+// what it knows and sends the rest on.
+func (s *Service) Invoke(ctx context.Context, p api.SlashInvokeParams) (api.SlashInvokeResult, error) {
+	if p.Command == "" {
+		return api.SlashInvokeResult{}, invalidParams("command is required")
+	}
+	sess, ok := s.sessions.Get(p.SessionID)
+	if !ok {
+		return api.SlashInvokeResult{}, unknownSession(p.SessionID)
+	}
+	if s.ownsCommand(p.Command) {
+		return s.invokeDaemon(ctx, sess.WorkspaceID, p.Command, strings.TrimSpace(p.Args))
+	}
+	return s.forward(ctx, p)
+}
+
+// invokeDaemon runs a daemon task command against the workspace and returns its
+// result. The argument shape follows each command's hint.
+func (s *Service) invokeDaemon(ctx context.Context, ws api.WorkspaceID, command, args string) (api.SlashInvokeResult, error) {
+	if s.tasks == nil {
+		return api.SlashInvokeResult{}, internalErr("slash: no task provider")
+	}
+	switch command {
+	case "tasks":
+		ts, err := s.tasks.List(ctx, ws, args) // args is an optional status filter
+		if err != nil {
+			return api.SlashInvokeResult{}, err
+		}
+		return api.SlashInvokeResult{Origin: api.SlashOriginDaemon, Tasks: ts, Message: fmt.Sprintf("%d task(s)", len(ts))}, nil
+	case "task":
+		if args == "" {
+			return api.SlashInvokeResult{}, invalidParams("task: a task id is required")
+		}
+		t, err := s.tasks.Show(ctx, ws, args)
+		if err != nil {
+			return api.SlashInvokeResult{}, err
+		}
+		return daemonTask(&t, ""), nil
+	case "claim":
+		if args == "" {
+			return api.SlashInvokeResult{}, invalidParams("claim: a task id is required")
+		}
+		t, err := s.tasks.Claim(ctx, ws, args, "")
+		if err != nil {
+			return api.SlashInvokeResult{}, err
+		}
+		return daemonTask(&t, "Claimed "+args), nil
+	case "comment":
+		id, text := splitFirst(args)
+		if id == "" || text == "" {
+			return api.SlashInvokeResult{}, invalidParams("comment: a task id and comment text are required")
+		}
+		t, err := s.tasks.Comment(ctx, ws, id, "", text)
+		if err != nil {
+			return api.SlashInvokeResult{}, err
+		}
+		return daemonTask(&t, "Commented on "+id), nil
+	case "close":
+		if args == "" {
+			return api.SlashInvokeResult{}, invalidParams("close: a task id is required")
+		}
+		t, err := s.tasks.CloseTask(ctx, ws, args)
+		if err != nil {
+			return api.SlashInvokeResult{}, err
+		}
+		return daemonTask(&t, "Closed "+args), nil
+	default:
+		// ownsCommand gated this, so an unhandled owned command is a daemon bug.
+		return api.SlashInvokeResult{}, internalErr("slash: unhandled daemon command " + command)
+	}
+}
+
+// forward sends a non-daemon command to the agent as a prompt turn, reconstructing
+// the "/command args" text the agent parses.
+func (s *Service) forward(ctx context.Context, p api.SlashInvokeParams) (api.SlashInvokeResult, error) {
+	if s.prompter == nil {
+		return api.SlashInvokeResult{}, internalErr("slash: no agent prompt path")
+	}
+	text := "/" + p.Command
+	if args := strings.TrimSpace(p.Args); args != "" {
+		text += " " + args
+	}
+	res, err := s.prompter.Prompt(ctx, api.AgentPromptParams{SessionID: p.SessionID, Text: text})
+	if err != nil {
+		return api.SlashInvokeResult{}, err
+	}
+	return api.SlashInvokeResult{Origin: api.SlashOriginProvider, StopReason: res.StopReason}, nil
+}
+
+// ownsCommand reports whether name is one of the daemon's own commands.
+func (s *Service) ownsCommand(name string) bool {
+	for _, c := range s.daemon {
+		if c.Name == name {
+			return true
+		}
+	}
+	return false
+}
+
+// daemonTask builds a daemon-origin invoke result for a single task, defaulting
+// the message to "<id>: <title>" when none is given.
+func daemonTask(t *api.Task, message string) api.SlashInvokeResult {
+	if message == "" {
+		message = string(t.Ref.ID)
+		if t.Title != "" {
+			message += ": " + t.Title
+		}
+	}
+	return api.SlashInvokeResult{Origin: api.SlashOriginDaemon, Task: t, Message: message}
+}
+
+// splitFirst splits s into its first whitespace-delimited token and the trimmed
+// remainder.
+func splitFirst(s string) (first, rest string) {
+	s = strings.TrimSpace(s)
+	if i := strings.IndexFunc(s, func(r rune) bool { return r == ' ' || r == '\t' || r == '\n' }); i >= 0 {
+		return s[:i], strings.TrimSpace(s[i+1:])
+	}
+	return s, ""
 }
 
 // completeTaskIDs lists the workspace's tasks and returns those whose id has the
@@ -220,4 +363,16 @@ func sessionEvent(id api.SessionID, typ string, payload any) api.Event {
 		Type:     typ,
 		Payload:  raw,
 	}
+}
+
+func invalidParams(msg string) *rpc.Error {
+	return &rpc.Error{Code: rpc.CodeInvalidParams, Message: "slash: " + msg}
+}
+
+func internalErr(msg string) *rpc.Error {
+	return &rpc.Error{Code: rpc.CodeInternalError, Message: msg}
+}
+
+func unknownSession(id api.SessionID) *rpc.Error {
+	return &rpc.Error{Code: rpc.CodeInvalidParams, Message: "slash: unknown session " + string(id)}
 }

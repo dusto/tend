@@ -44,6 +44,8 @@ Schemas live under `schemas/` (`methods/<name>.params.json` / `.result.json`, `e
   - Params: `SlashListParams` · Result: `SlashListResult`
 - **`slash.complete`** — Complete a daemon command's argument against live state (e.g. task ids); provider/unknown commands yield no candidates.
   - Params: `SlashCompleteParams` · Result: `SlashCompleteResult`
+- **`slash.invoke`** — Invoke a slash command: a daemon command runs its task action; any other command is forwarded to the agent as a prompt turn.
+  - Params: `SlashInvokeParams` · Result: `SlashInvokeResult`
 - **`client.register`** — Register the connection's stable client id, role (editor/observer), and prompt capability.
   - Params: `ClientRegisterParams` · Result: `ClientRegisterResult`
 - **`file.read`** — Read a repo file editor-aware (non-mutating): live buffer content + changedtick when open, else disk content + content hash.
