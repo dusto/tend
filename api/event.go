@@ -83,6 +83,7 @@ var EventDefs = []EventDef{
 	{Type: "provider_notification", Scope: ScopeSession, Payload: ProviderNotification{}, Summary: "A provider-private ACP notification preserved verbatim as a metadata event."},
 	{Type: "agent_mode_updated", Scope: ScopeSession, Payload: AgentModeUpdated{}, Summary: "A session's active mode (reasoning/thought level) changed, by a client set or the agent itself."},
 	{Type: "agent_model_updated", Scope: ScopeSession, Payload: AgentModelUpdated{}, Summary: "A session's active model changed."},
+	{Type: "agent_plan", Scope: ScopeSession, Payload: AgentPlan{}, Summary: "The agent's tactical per-turn plan (its todo list): the full set of entries with their status, replacing any prior plan for the turn."},
 	{Type: "task_created", Scope: ScopeWorkspace, Payload: TaskChange{}, Summary: "A task was created. Repo-wide: delivered on the workspace stream."},
 	{Type: "task_updated", Scope: ScopeWorkspace, Payload: TaskChange{}, Summary: "A task changed (e.g. claimed or linked). Repo-wide: delivered on the workspace stream."},
 	{Type: "task_commented", Scope: ScopeWorkspace, Payload: TaskChange{}, Summary: "A comment was added to a task. Repo-wide: delivered on the workspace stream."},
@@ -180,4 +181,23 @@ type AgentModeUpdated struct {
 type AgentModelUpdated struct {
 	SessionID      SessionID `json:"session_id"`
 	CurrentModelID string    `json:"current_model_id"`
+}
+
+// AgentPlan is the agent's tactical per-turn plan (its todo list). Each plan
+// update from the agent carries the full set of entries, replacing any prior
+// plan for the turn rather than appending — a client renders Entries as the
+// current plan.
+type AgentPlan struct {
+	SessionID SessionID   `json:"session_id"`
+	Entries   []PlanEntry `json:"entries"`
+}
+
+// PlanEntry is one item in an agent plan: what it intends to do, how it ranks it,
+// and how far along it is. Priority and Status carry the ACP plan vocabulary
+// (priority: high|medium|low; status: pending|in_progress|completed) passed
+// through verbatim so a client need not know the daemon's provider mapping.
+type PlanEntry struct {
+	Content  string `json:"content"`
+	Priority string `json:"priority,omitempty"`
+	Status   string `json:"status"`
 }

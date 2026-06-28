@@ -164,6 +164,23 @@ func mapUpdate(sessionID, kind string, update json.RawMessage) (api.Event, bool)
 			ToolCallID: u.ToolCallID,
 			Status:     u.Status,
 		}), true
+	case "plan":
+		var u struct {
+			Entries []struct {
+				Content  string `json:"content"`
+				Priority string `json:"priority"`
+				Status   string `json:"status"`
+			} `json:"entries"`
+		}
+		_ = json.Unmarshal(update, &u)
+		entries := make([]api.PlanEntry, len(u.Entries))
+		for i, e := range u.Entries {
+			entries[i] = api.PlanEntry{Content: e.Content, Priority: e.Priority, Status: e.Status}
+		}
+		return sessionEvent(sessionID, "agent_plan", api.AgentPlan{
+			SessionID: api.SessionID(sessionID),
+			Entries:   entries,
+		}), true
 	case "current_mode_update":
 		var u struct {
 			CurrentModeID string `json:"currentModeId"`

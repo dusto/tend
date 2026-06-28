@@ -19,8 +19,8 @@ const (
 	DaemonToEditorVersion = "0.3.0"
 	// 0.2.0 added the agent_thought_chunk session event; 0.3.0 added the
 	// agent_mode_updated and agent_model_updated session events; 0.4.0 added the
-	// provider_started workspace event.
-	DaemonToClientVersion = "0.4.0"
+	// provider_started workspace event; 0.5.0 added the agent_plan session event.
+	DaemonToClientVersion = "0.5.0"
 )
 
 // Versions reports the contract version of each method set.
