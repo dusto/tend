@@ -2,6 +2,7 @@ package harness
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sync"
@@ -447,9 +448,11 @@ func TestSlashCompleteOverSocket(t *testing.T) {
 		t.Errorf("tasks completion = %v, want [open]", res.Candidates)
 	}
 
-	// A non-daemon command yields nothing.
-	mustCall(t, c, "slash.complete", api.SlashCompleteParams{SessionID: started.SessionID, Command: "review", Prefix: "t"}, &res)
-	if len(res.Candidates) != 0 {
-		t.Errorf("provider command completion = %v, want none", res.Candidates)
+	// A non-daemon command yields nothing — and on the wire as an empty array
+	// (schema-required), not null. Capture the raw result to assert the shape.
+	var raw json.RawMessage
+	mustCall(t, c, "slash.complete", api.SlashCompleteParams{SessionID: started.SessionID, Command: "review", Prefix: "t"}, &raw)
+	if string(raw) != `{"candidates":[]}` {
+		t.Errorf("provider command completion wire shape = %s, want {\"candidates\":[]}", raw)
 	}
 }

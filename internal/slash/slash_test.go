@@ -255,6 +255,23 @@ func TestCompleteNoCandidatesForProviderOrUnknown(t *testing.T) {
 	}
 }
 
+func TestCompleteEmptyResultMarshalsAsArray(t *testing.T) {
+	reg := session.NewRegistry()
+	newSession(t, reg, "s1")
+	svc := NewService(reg, &fakeTasks{tasks: []api.Task{task("t1", "x")}}, &capture{})
+
+	// The result schema requires candidates to be an array; a no-match response
+	// must marshal as [] not null. Covers the no-command (default) path.
+	res, _ := svc.Complete(context.Background(), api.SlashCompleteParams{SessionID: "s1", Command: "review"})
+	raw, err := json.Marshal(res)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(raw) != `{"candidates":[]}` {
+		t.Errorf("marshaled empty result = %s, want {\"candidates\":[]}", raw)
+	}
+}
+
 func TestCompleteUnknownSessionIsEmpty(t *testing.T) {
 	reg := session.NewRegistry()
 	svc := NewService(reg, &fakeTasks{tasks: []api.Task{task("t1", "x")}}, &capture{})

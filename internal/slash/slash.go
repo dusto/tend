@@ -123,7 +123,7 @@ func (s *Service) List(_ context.Context, p api.SlashListParams) (api.SlashListR
 func (s *Service) Complete(ctx context.Context, p api.SlashCompleteParams) (api.SlashCompleteResult, error) {
 	sess, ok := s.sessions.Get(p.SessionID)
 	if !ok {
-		return api.SlashCompleteResult{}, nil
+		return noCandidates(), nil
 	}
 	switch daemonArgKinds[p.Command] {
 	case argTaskID:
@@ -131,7 +131,7 @@ func (s *Service) Complete(ctx context.Context, p api.SlashCompleteParams) (api.
 	case argStatus:
 		return completeStatus(p.Prefix), nil
 	default:
-		return api.SlashCompleteResult{}, nil
+		return noCandidates(), nil
 	}
 }
 
@@ -139,7 +139,7 @@ func (s *Service) Complete(ctx context.Context, p api.SlashCompleteParams) (api.
 // prefix (case-insensitive), as id/title candidates, capped at maxCandidates.
 func (s *Service) completeTaskIDs(ctx context.Context, ws api.WorkspaceID, prefix string) (api.SlashCompleteResult, error) {
 	if s.tasks == nil {
-		return api.SlashCompleteResult{}, nil
+		return noCandidates(), nil
 	}
 	ts, err := s.tasks.List(ctx, ws, "")
 	if err != nil {
@@ -162,13 +162,19 @@ func (s *Service) completeTaskIDs(ctx context.Context, ws api.WorkspaceID, prefi
 // completeStatus returns the task statuses matching the prefix (case-insensitive).
 func completeStatus(prefix string) api.SlashCompleteResult {
 	low := strings.ToLower(prefix)
-	var out []api.SlashCandidate
+	out := []api.SlashCandidate{}
 	for _, st := range []string{tasks.StatusOpen, tasks.StatusInProgress, tasks.StatusClosed} {
 		if strings.HasPrefix(st, low) {
 			out = append(out, api.SlashCandidate{Value: st})
 		}
 	}
 	return api.SlashCompleteResult{Candidates: out}
+}
+
+// noCandidates is an empty completion result with a non-nil slice, so it marshals
+// as the schema-required "candidates": [] rather than null.
+func noCandidates() api.SlashCompleteResult {
+	return api.SlashCompleteResult{Candidates: []api.SlashCandidate{}}
 }
 
 // merge returns the daemon commands followed by the provider commands as a fresh
