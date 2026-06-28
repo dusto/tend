@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "properties": {
+    "workspace_id": {
+      "type": "string"
+    },
+    "provider_id": {
+      "type": "string"
+    },
+    "worktree_root": {
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "type": "object",
+  "required": [
+    "workspace_id",
+    "provider_id",
+    "worktree_root"
+  ]
+}

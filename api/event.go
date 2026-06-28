@@ -78,6 +78,7 @@ var EventDefs = []EventDef{
 	{Type: "approval_requested", Scope: ScopeSession, Payload: ApprovalRequested{}, Summary: "A mutating action is awaiting approval."},
 	{Type: "approval_resolved", Scope: ScopeSession, Payload: ApprovalResolved{}, Summary: "A pending approval was resolved."},
 	{Type: "agent_error", Scope: ScopeSession, Payload: AgentError{}, Summary: "A session's turn failed (e.g. its provider process exited mid-turn)."},
+	{Type: "provider_started", Scope: ScopeWorkspace, Payload: ProviderStarted{}, Summary: "A provider process joined the pool (spawned for a turn or an explicit start). Repo-wide: delivered on the workspace stream."},
 	{Type: "provider_stopped", Scope: ScopeWorkspace, Payload: ProviderStopped{}, Summary: "A provider process left the pool (exit or crash). Repo-wide: delivered on the workspace stream."},
 	{Type: "provider_notification", Scope: ScopeSession, Payload: ProviderNotification{}, Summary: "A provider-private ACP notification preserved verbatim as a metadata event."},
 	{Type: "agent_mode_updated", Scope: ScopeSession, Payload: AgentModeUpdated{}, Summary: "A session's active mode (reasoning/thought level) changed, by a client set or the agent itself."},
@@ -145,6 +146,12 @@ type ApprovalResolved struct {
 type AgentError struct {
 	SessionID SessionID `json:"session_id"`
 	Message   string    `json:"message"`
+}
+
+// ProviderStarted signals that a provider process joined the pool, either
+// spawned to serve a turn or warmed by an explicit provider.start.
+type ProviderStarted struct {
+	ProviderID ProviderID `json:"provider_id"`
 }
 
 // ProviderStopped signals that a provider process left the pool.

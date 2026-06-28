@@ -24,6 +24,7 @@ import (
 	"github.com/dusto/tend/internal/files"
 	"github.com/dusto/tend/internal/handshake"
 	"github.com/dusto/tend/internal/lsp"
+	"github.com/dusto/tend/internal/provider"
 	"github.com/dusto/tend/internal/pty"
 	"github.com/dusto/tend/internal/rpc"
 	"github.com/dusto/tend/internal/session"
@@ -55,6 +56,7 @@ type Server struct {
 	sessions *session.Registry
 	pool     *acp.Pool
 	agent    *agent.Service
+	provider *provider.Service
 	// clients tracks connected-client identity/capabilities daemon-wide.
 	clients *client.Registry
 	// binder owns editor-binding decisions across sessions; gate is the shared
@@ -151,6 +153,7 @@ func New(ln net.Listener, logPath string, opts ...Option) (*Server, error) {
 	norm.SetModeSink(s.sessions)
 	s.pool = acp.NewPool(spawnProvider(o.acp, norm), s.store, acp.Options{Max: maxProcsPerProvider})
 	s.agent = agent.NewService(s.sessions, acp.NewManager(s.pool), norm)
+	s.provider = provider.NewService(o.acp, s.pool)
 
 	if _, _, err := s.newMux(); err != nil {
 		_ = log.Close()
@@ -240,6 +243,9 @@ func (s *Server) newMux() (*dispatch.Mux, func(), error) {
 		}
 		return ""
 	}); err != nil {
+		return nil, nil, err
+	}
+	if err := provider.Register(mux, s.provider); err != nil {
 		return nil, nil, err
 	}
 	if err := tasks.Register(mux, s.tasks); err != nil {

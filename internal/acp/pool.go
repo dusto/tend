@@ -204,6 +204,7 @@ func (p *Pool) Acquire(ctx context.Context, key Key, sessionID api.SessionID) (*
 			p.watch(key, e)
 			lease := &Lease{pool: p, key: key, e: e}
 			p.mu.Unlock()
+			p.emitStarted(key) // a process joined the pool, mirror of provider_stopped
 			return lease, nil
 		}
 
@@ -269,6 +270,62 @@ func (p *Pool) adjustSessions(key Key, proc Process, delta int) {
 			e.sessions = 0
 		}
 	}
+}
+
+// RunningFor reports how many live processes the pool holds for key (excluding
+// ones that have left or are being intentionally retired).
+func (p *Pool) RunningFor(key Key) int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	kp := p.pools[key]
+	if kp == nil {
+		return 0
+	}
+	n := 0
+	for _, e := range kp.procs {
+		if !e.removed && !e.retiring && e.proc != nil {
+			n++
+		}
+	}
+	return n
+}
+
+// Start warms key: it ensures the pool holds at least one process for it,
+// spawning one (which emits provider_started) when none is live. It is a no-op
+// when a process — busy or idle — already exists. Use it to pre-spawn a provider
+// rather than waiting for the first turn to spawn it lazily.
+func (p *Pool) Start(ctx context.Context, key Key) error {
+	if p.RunningFor(key) > 0 {
+		return nil
+	}
+	// Acquire spawns when none is reusable; releasing leaves it idle in the pool.
+	lease, err := p.Acquire(ctx, key, "")
+	if err != nil {
+		return err
+	}
+	lease.Release()
+	return nil
+}
+
+// StopKey terminates every live process the pool holds for key and returns the
+// count it closed. The processes leave the pool through the normal exit path, so
+// each emits provider_stopped (and fails any in-flight turn with agent_error) —
+// stopping a provider is observed exactly like it crashing.
+func (p *Pool) StopKey(key Key) int {
+	p.mu.Lock()
+	var procs []Process
+	if kp := p.pools[key]; kp != nil {
+		for _, e := range kp.procs {
+			if !e.removed && !e.retiring && e.proc != nil {
+				procs = append(procs, e.proc)
+			}
+		}
+	}
+	p.mu.Unlock()
+	for _, proc := range procs {
+		_ = proc.Close() // the watcher removes the entry and emits provider_stopped
+	}
+	return len(procs)
 }
 
 // Close terminates all processes and stops the pool. Subsequent Acquire calls
@@ -422,6 +479,21 @@ func idleEntry(kp *keyPool) *procEntry {
 		}
 	}
 	return nil
+}
+
+// emitStarted publishes provider_started on the workspace stream: a provider
+// joining the pool is a repo-wide event, shared by all worktrees.
+func (p *Pool) emitStarted(key Key) {
+	if p.emit == nil {
+		return
+	}
+	payload, _ := json.Marshal(api.ProviderStarted{ProviderID: key.Provider})
+	_, _ = p.emit.Publish(api.Event{
+		StreamID: api.WorkspaceStream(key.Workspace),
+		Scope:    api.ScopeWorkspace,
+		Type:     "provider_started",
+		Payload:  payload,
+	})
 }
 
 // emitStopped publishes provider_stopped on the workspace stream: a provider
