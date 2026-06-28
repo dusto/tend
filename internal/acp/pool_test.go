@@ -443,3 +443,97 @@ func waitForStable(t *testing.T) {
 	t.Helper()
 	time.Sleep(50 * time.Millisecond)
 }
+
+func TestRunningForCountsLiveProcesses(t *testing.T) {
+	sp := &spawner{}
+	p := NewPool(sp.fn, nil, Options{Max: 3})
+	t.Cleanup(func() { _ = p.Close() })
+
+	if got := p.RunningFor(testKey); got != 0 {
+		t.Fatalf("RunningFor on empty pool = %d, want 0", got)
+	}
+	l1 := acquire(t, p, "s1")
+	l2 := acquire(t, p, "s2") // l1 busy -> a second process
+	if got := p.RunningFor(testKey); got != 2 {
+		t.Errorf("RunningFor = %d, want 2", got)
+	}
+	l1.Release()
+	l2.Release()
+	if got := p.RunningFor(testKey); got != 2 {
+		t.Errorf("RunningFor after release = %d, want 2 (idle still live)", got)
+	}
+}
+
+func TestStartSpawnsOneAndEmitsStarted(t *testing.T) {
+	sp := &spawner{}
+	em := &fakeEmitter{}
+	p := NewPool(sp.fn, em, Options{Max: 3})
+	t.Cleanup(func() { _ = p.Close() })
+
+	ctx := context.Background()
+	if err := p.Start(ctx, testKey); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	if sp.count() != 1 {
+		t.Errorf("spawned %d, want 1", sp.count())
+	}
+	if got := p.RunningFor(testKey); got != 1 {
+		t.Errorf("RunningFor = %d, want 1", got)
+	}
+	if !slices.Contains(em.types(), "provider_started") {
+		t.Errorf("Start did not emit provider_started, got %v", em.types())
+	}
+
+	// A second Start with a process already live is a no-op (no extra spawn).
+	if err := p.Start(ctx, testKey); err != nil {
+		t.Fatalf("second Start: %v", err)
+	}
+	if sp.count() != 1 {
+		t.Errorf("second Start spawned again: count=%d, want 1", sp.count())
+	}
+}
+
+func TestStartEmitsStartedOnLazySpawn(t *testing.T) {
+	sp := &spawner{}
+	em := &fakeEmitter{}
+	p := NewPool(sp.fn, em, Options{Max: 2})
+	t.Cleanup(func() { _ = p.Close() })
+
+	// A lazy spawn through Acquire (the first-turn path) also emits provider_started.
+	l := acquire(t, p, "s1")
+	defer l.Release()
+	if !slices.Contains(em.types(), "provider_started") {
+		t.Errorf("Acquire spawn did not emit provider_started, got %v", em.types())
+	}
+}
+
+func TestStopKeyTerminatesAndEmitsStopped(t *testing.T) {
+	sp := &spawner{}
+	em := &fakeEmitter{}
+	p := NewPool(sp.fn, em, Options{Max: 3})
+	t.Cleanup(func() { _ = p.Close() })
+
+	l1 := acquire(t, p, "s1")
+	l2 := acquire(t, p, "s2")
+	l1.Release()
+	l2.Release()
+
+	if got := p.StopKey(testKey); got != 2 {
+		t.Errorf("StopKey stopped %d, want 2", got)
+	}
+	waitFor(t, func() bool { return p.RunningFor(testKey) == 0 }, "processes to leave the pool")
+	stopped := 0
+	for _, ty := range em.types() {
+		if ty == "provider_stopped" {
+			stopped++
+		}
+	}
+	if stopped != 2 {
+		t.Errorf("provider_stopped emitted %d times, want 2", stopped)
+	}
+
+	// Stopping a key with nothing running reports zero and is not an error.
+	if got := p.StopKey(testKey); got != 0 {
+		t.Errorf("StopKey on empty key = %d, want 0", got)
+	}
+}

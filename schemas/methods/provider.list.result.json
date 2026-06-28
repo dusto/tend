@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$defs": {
+    "ProviderInfo": {
+      "properties": {
+        "provider_id": {
+          "type": "string"
+        },
+        "command": {
+          "type": "string"
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "running": {
+          "type": "integer"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "provider_id",
+        "command",
+        "enabled",
+        "running"
+      ]
+    }
+  },
+  "properties": {
+    "providers": {
+      "items": {
+        "$ref": "#/$defs/ProviderInfo"
+      },
+      "type": "array"
+    }
+  },
+  "additionalProperties": false,
+  "type": "object",
+  "required": [
+    "providers"
+  ]
+}

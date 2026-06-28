@@ -229,11 +229,13 @@ func TestPerStreamMultiplexing(t *testing.T) {
 	mustCall(t, c, "events.subscribe", api.EventsSubscribeParams{StreamID: workspaceStream}, &api.EventsSubscribeResult{})
 	mustCall(t, c, "task.create", api.TaskCreateParams{WorkspaceID: "ws1", Title: "do it"}, &api.Task{})
 
-	if !c.WaitEventCount(workspaceStream, 1, 3*time.Second) {
-		t.Fatalf("workspace stream got no task event; got %v", c.EventTypes(workspaceStream))
+	// The workspace stream carries the provider_started from the turn's lazy
+	// spawn (seq 1) and then the task_created (seq 2): both are repo-wide events.
+	if !c.WaitEventCount(workspaceStream, 2, 3*time.Second) {
+		t.Fatalf("workspace stream missing events; got %v", c.EventTypes(workspaceStream))
 	}
-	if ws := c.EventTypes(workspaceStream); len(ws) != 1 || ws[0] != "task_created" {
-		t.Errorf("workspace stream = %v, want [task_created]", ws)
+	if ws := c.EventTypes(workspaceStream); len(ws) != 2 || ws[0] != "provider_started" || ws[1] != "task_created" {
+		t.Errorf("workspace stream = %v, want [provider_started task_created]", ws)
 	}
 	// The session stream still carries only the turn, not the task event.
 	for _, typ := range c.EventTypes(sessionStream) {
@@ -292,5 +294,52 @@ func TestCursorCompactedAndSummaryAdvance(t *testing.T) {
 	var rpcErr *rpc.Error
 	if !errors.As(err, &rpcErr) || rpcErr.Code != api.ErrCursorCompacted {
 		t.Fatalf("err = %v, want cursor_compacted", err)
+	}
+}
+
+// TestProviderLifecycle drives provider.list/start/stop over the socket: list
+// shows the configured provider idle, start warms it (emitting provider_started
+// on the workspace stream), and stop terminates it (emitting provider_stopped).
+func TestProviderLifecycle(t *testing.T) {
+	sock := fakeDaemon(t)
+	c := dial(t, sock)
+	mustCall(t, c, "daemon.hello", api.HelloParams{}, &api.HelloResult{})
+
+	workspaceStream := api.WorkspaceStream("ws1")
+	mustCall(t, c, "events.subscribe", api.EventsSubscribeParams{StreamID: workspaceStream}, &api.EventsSubscribeResult{})
+
+	var list api.ProviderListResult
+	mustCall(t, c, "provider.list", api.ProviderListParams{WorkspaceID: "ws1"}, &list)
+	if len(list.Providers) != 1 || list.Providers[0].ProviderID != "codex" || list.Providers[0].Running != 0 {
+		t.Fatalf("initial list = %+v, want one idle codex", list.Providers)
+	}
+
+	var start api.ProviderStartResult
+	mustCall(t, c, "provider.start", api.ProviderStartParams{WorkspaceID: "ws1", ProviderID: "codex"}, &start)
+	if start.Running != 1 {
+		t.Fatalf("start running = %d, want 1", start.Running)
+	}
+	if !c.WaitEventCount(workspaceStream, 1, 3*time.Second) {
+		t.Fatalf("no provider_started; got %v", c.EventTypes(workspaceStream))
+	}
+	if ws := c.EventTypes(workspaceStream); ws[0] != "provider_started" {
+		t.Errorf("first workspace event = %q, want provider_started", ws[0])
+	}
+
+	mustCall(t, c, "provider.list", api.ProviderListParams{WorkspaceID: "ws1"}, &list)
+	if list.Providers[0].Running != 1 {
+		t.Errorf("list after start: running = %d, want 1", list.Providers[0].Running)
+	}
+
+	var stop api.ProviderStopResult
+	mustCall(t, c, "provider.stop", api.ProviderStopParams{WorkspaceID: "ws1", ProviderID: "codex"}, &stop)
+	if stop.Stopped != 1 {
+		t.Fatalf("stop stopped = %d, want 1", stop.Stopped)
+	}
+	if !c.WaitEventCount(workspaceStream, 2, 3*time.Second) {
+		t.Fatalf("no provider_stopped; got %v", c.EventTypes(workspaceStream))
+	}
+	if ws := c.EventTypes(workspaceStream); ws[len(ws)-1] != "provider_stopped" {
+		t.Errorf("last workspace event = %q, want provider_stopped", ws[len(ws)-1])
 	}
 }

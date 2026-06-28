@@ -34,6 +34,12 @@ Schemas live under `schemas/` (`methods/<name>.params.json` / `.result.json`, `e
   - Params: `SessionSetModeParams` · Result: `SessionSetModeResult`
 - **`session.set_model`** — Set a session's active model from its available models; emits agent_model_updated. Errors when the provider offers no models.
   - Params: `SessionSetModelParams` · Result: `SessionSetModelResult`
+- **`provider.list`** — List the configured ACP providers with their enabled state and running-process count for a workspace.
+  - Params: `ProviderListParams` · Result: `ProviderListResult`
+- **`provider.start`** — Warm a provider for a workspace: ensure the pool holds at least one process for it; emits provider_started on a spawn.
+  - Params: `ProviderStartParams` · Result: `ProviderStartResult`
+- **`provider.stop`** — Stop a provider for a workspace: terminate its pooled processes; emits provider_stopped per process.
+  - Params: `ProviderStopParams` · Result: `ProviderStopResult`
 - **`client.register`** — Register the connection's stable client id, role (editor/observer), and prompt capability.
   - Params: `ClientRegisterParams` · Result: `ClientRegisterResult`
 - **`file.read`** — Read a repo file editor-aware (non-mutating): live buffer content + changedtick when open, else disk content + content hash.
@@ -123,6 +129,8 @@ Schemas live under `schemas/` (`methods/<name>.params.json` / `.result.json`, `e
   - Payload: `PaneOutput`
 - **`provider_notification`** (`session` stream) — A provider-private ACP notification preserved verbatim as a metadata event.
   - Payload: `ProviderNotification`
+- **`provider_started`** (`workspace` stream) — A provider process joined the pool (spawned for a turn or an explicit start). Repo-wide: delivered on the workspace stream.
+  - Payload: `ProviderStarted`
 - **`provider_stopped`** (`workspace` stream) — A provider process left the pool (exit or crash). Repo-wide: delivered on the workspace stream.
   - Payload: `ProviderStopped`
 - **`task_closed`** (`workspace` stream) — A task was closed. Repo-wide: delivered on the workspace stream.
