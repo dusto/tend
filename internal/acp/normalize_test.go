@@ -263,6 +263,56 @@ func TestNormalizeCurrentModeUpdate(t *testing.T) {
 	}
 }
 
+func TestNormalizePlan(t *testing.T) {
+	c := &capture{}
+	n := NewNormalizer(c, nil)
+	notify(n, SessionUpdateMethod, update("s1", map[string]any{
+		"sessionUpdate": "plan",
+		"entries": []map[string]any{
+			{"content": "read the spec", "priority": "high", "status": "completed"},
+			{"content": "write the code", "priority": "medium", "status": "in_progress"},
+			{"content": "add tests", "status": "pending"},
+		},
+	}))
+
+	ev := c.last(t)
+	if ev.Type != "agent_plan" || ev.StreamID != "session:s1" || ev.Scope != api.ScopeSession {
+		t.Fatalf("event = %+v", ev)
+	}
+	var p api.AgentPlan
+	if err := json.Unmarshal(ev.Payload, &p); err != nil {
+		t.Fatal(err)
+	}
+	if p.SessionID != "s1" || len(p.Entries) != 3 {
+		t.Fatalf("payload = %+v", p)
+	}
+	if p.Entries[0] != (api.PlanEntry{Content: "read the spec", Priority: "high", Status: "completed"}) {
+		t.Errorf("entry 0 = %+v", p.Entries[0])
+	}
+	// priority is optional in the ACP entry; absence passes through as empty.
+	if p.Entries[2] != (api.PlanEntry{Content: "add tests", Status: "pending"}) {
+		t.Errorf("entry 2 = %+v", p.Entries[2])
+	}
+}
+
+func TestNormalizeEmptyPlan(t *testing.T) {
+	// An empty plan (the agent cleared its todos) maps to a plan event with no
+	// entries, not a provider_notification.
+	c := &capture{}
+	n := NewNormalizer(c, nil)
+	notify(n, SessionUpdateMethod, update("s1", map[string]any{"sessionUpdate": "plan"}))
+
+	ev := c.last(t)
+	if ev.Type != "agent_plan" {
+		t.Fatalf("event type = %q, want agent_plan", ev.Type)
+	}
+	var p api.AgentPlan
+	_ = json.Unmarshal(ev.Payload, &p)
+	if len(p.Entries) != 0 {
+		t.Errorf("entries = %+v, want empty", p.Entries)
+	}
+}
+
 func TestPublishModeAndModelUpdated(t *testing.T) {
 	c := &capture{}
 	n := NewNormalizer(c, nil)

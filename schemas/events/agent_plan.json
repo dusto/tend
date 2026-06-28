@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$defs": {
+    "PlanEntry": {
+      "properties": {
+        "content": {
+          "type": "string"
+        },
+        "priority": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "content",
+        "status"
+      ]
+    }
+  },
+  "properties": {
+    "session_id": {
+      "type": "string"
+    },
+    "entries": {
+      "items": {
+        "$ref": "#/$defs/PlanEntry"
+      },
+      "type": "array"
+    }
+  },
+  "additionalProperties": false,
+  "type": "object",
+  "required": [
+    "session_id",
+    "entries"
+  ]
+}
