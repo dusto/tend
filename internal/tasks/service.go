@@ -158,6 +158,14 @@ func (s *Service) list(ctx context.Context, p api.TaskListParams) (api.TaskListR
 	return api.TaskListResult{Tasks: out}, nil
 }
 
+// List returns a workspace's tasks, optionally filtered by status, for daemon
+// features that need task data outside the task.* RPC surface (slash-command
+// argument completion).
+func (s *Service) List(ctx context.Context, ws api.WorkspaceID, status string) ([]api.Task, error) {
+	res, err := s.list(ctx, api.TaskListParams{WorkspaceID: ws, Status: status})
+	return res.Tasks, err
+}
+
 func (s *Service) claim(ctx context.Context, p api.TaskClaimParams) (api.Task, error) {
 	if err := s.provider(p.Ref.WorkspaceID).Claim(ctx, p.Ref, p.Assignee); err != nil {
 		return api.Task{}, invalidParams(err)

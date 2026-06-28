@@ -33,3 +33,26 @@ type SlashListParams struct {
 type SlashListResult struct {
 	Commands []SlashCommand `json:"commands"`
 }
+
+// SlashCompleteParams asks the daemon to complete a command's argument against
+// live state — e.g. task ids for the task-tracking commands. SessionID supplies
+// the workspace the completion is scoped to. Prefix is the partial argument
+// token typed so far ("" lists all candidates). The daemon completes only its
+// own commands' arguments; a provider or unknown command yields no candidates.
+type SlashCompleteParams struct {
+	SessionID SessionID `json:"session_id"`
+	Command   string    `json:"command"`
+	Prefix    string    `json:"prefix,omitempty"`
+}
+
+// SlashCompleteResult is the argument candidates matching the prefix.
+type SlashCompleteResult struct {
+	Candidates []SlashCandidate `json:"candidates"`
+}
+
+// SlashCandidate is one completion: Value is inserted; Detail is an optional
+// short description for display (e.g. a task's title).
+type SlashCandidate struct {
+	Value  string `json:"value"`
+	Detail string `json:"detail,omitempty"`
+}

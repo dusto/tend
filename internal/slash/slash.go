@@ -10,18 +10,54 @@ package slash
 import (
 	"context"
 	"encoding/json"
+	"strings"
 
 	"github.com/dusto/tend/api"
 	"github.com/dusto/tend/internal/dispatch"
+	"github.com/dusto/tend/internal/rpc"
 	"github.com/dusto/tend/internal/session"
+	"github.com/dusto/tend/internal/tasks"
 )
 
-// MethodList is the slash.list method name.
-const MethodList = "slash.list"
+// Method names.
+const (
+	MethodList     = "slash.list"
+	MethodComplete = "slash.complete"
+)
+
+// maxCandidates caps a completion response so a large task list cannot produce
+// an unbounded payload.
+const maxCandidates = 50
 
 // Publisher receives the slash_commands_updated event. *events.Store satisfies it.
 type Publisher interface {
 	Publish(api.Event) (api.Event, error)
+}
+
+// Tasks lists a workspace's tasks for argument completion. *tasks.Service
+// satisfies it; the narrow interface keeps the slash service testable without a
+// task provider.
+type Tasks interface {
+	List(ctx context.Context, ws api.WorkspaceID, status string) ([]api.Task, error)
+}
+
+// argKind classifies what a daemon command's argument completes against.
+type argKind int
+
+const (
+	argNone argKind = iota
+	argTaskID
+	argStatus
+)
+
+// daemonArgKinds maps each daemon command to how its leading argument completes.
+// A command absent here (or any provider command) gets no daemon completion.
+var daemonArgKinds = map[string]argKind{
+	"tasks":   argStatus,
+	"task":    argTaskID,
+	"claim":   argTaskID,
+	"comment": argTaskID,
+	"close":   argTaskID,
 }
 
 // Service backs slash.list and the slash_commands_updated event. It holds the
@@ -30,19 +66,23 @@ type Publisher interface {
 // (no separate bookkeeping to leak). It is safe for concurrent use.
 type Service struct {
 	sessions *session.Registry
+	tasks    Tasks
 	pub      Publisher
 	daemon   []api.SlashCommand
 }
 
-// NewService returns a Service that reads sessions, emits through pub, and offers
-// the built-in daemon commands.
-func NewService(sessions *session.Registry, pub Publisher) *Service {
-	return &Service{sessions: sessions, pub: pub, daemon: daemonCommands()}
+// NewService returns a Service that reads sessions, completes task arguments
+// through tasks, emits through pub, and offers the built-in daemon commands.
+func NewService(sessions *session.Registry, tasks Tasks, pub Publisher) *Service {
+	return &Service{sessions: sessions, tasks: tasks, pub: pub, daemon: daemonCommands()}
 }
 
 // Register installs the slash.* methods on m, backed by s.
 func Register(m *dispatch.Mux, s *Service) error {
-	return dispatch.Handle(m, MethodList, s.List)
+	if err := dispatch.Handle(m, MethodList, s.List); err != nil {
+		return err
+	}
+	return dispatch.Handle(m, MethodComplete, s.Complete)
 }
 
 // SetSessionCommands records the agent's advertised commands for a session and
@@ -73,6 +113,62 @@ func (s *Service) List(_ context.Context, p api.SlashListParams) (api.SlashListR
 		provider = sess.ProviderCommands()
 	}
 	return api.SlashListResult{Commands: s.merge(provider)}, nil
+}
+
+// Complete returns the candidates for a command's argument matching the prefix.
+// It completes only the daemon commands' arguments — task ids for the
+// task-tracking commands, status names for /tasks — resolving the workspace from
+// the session. A provider or unknown command, or an unknown session, yields no
+// candidates (not an error, so a client may call it optimistically).
+func (s *Service) Complete(ctx context.Context, p api.SlashCompleteParams) (api.SlashCompleteResult, error) {
+	sess, ok := s.sessions.Get(p.SessionID)
+	if !ok {
+		return api.SlashCompleteResult{}, nil
+	}
+	switch daemonArgKinds[p.Command] {
+	case argTaskID:
+		return s.completeTaskIDs(ctx, sess.WorkspaceID, p.Prefix)
+	case argStatus:
+		return completeStatus(p.Prefix), nil
+	default:
+		return api.SlashCompleteResult{}, nil
+	}
+}
+
+// completeTaskIDs lists the workspace's tasks and returns those whose id has the
+// prefix (case-insensitive), as id/title candidates, capped at maxCandidates.
+func (s *Service) completeTaskIDs(ctx context.Context, ws api.WorkspaceID, prefix string) (api.SlashCompleteResult, error) {
+	if s.tasks == nil {
+		return api.SlashCompleteResult{}, nil
+	}
+	ts, err := s.tasks.List(ctx, ws, "")
+	if err != nil {
+		return api.SlashCompleteResult{}, &rpc.Error{Code: rpc.CodeInternalError, Message: err.Error()}
+	}
+	low := strings.ToLower(prefix)
+	out := make([]api.SlashCandidate, 0, len(ts))
+	for _, t := range ts {
+		if !strings.HasPrefix(strings.ToLower(t.Ref.ID), low) {
+			continue
+		}
+		out = append(out, api.SlashCandidate{Value: t.Ref.ID, Detail: t.Title})
+		if len(out) >= maxCandidates {
+			break
+		}
+	}
+	return api.SlashCompleteResult{Candidates: out}, nil
+}
+
+// completeStatus returns the task statuses matching the prefix (case-insensitive).
+func completeStatus(prefix string) api.SlashCompleteResult {
+	low := strings.ToLower(prefix)
+	var out []api.SlashCandidate
+	for _, st := range []string{tasks.StatusOpen, tasks.StatusInProgress, tasks.StatusClosed} {
+		if strings.HasPrefix(st, low) {
+			out = append(out, api.SlashCandidate{Value: st})
+		}
+	}
+	return api.SlashCompleteResult{Candidates: out}
 }
 
 // merge returns the daemon commands followed by the provider commands as a fresh
