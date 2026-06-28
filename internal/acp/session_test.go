@@ -25,6 +25,13 @@ type fakeAgent struct {
 
 	started chan string   // if set, receives a session id when a prompt handler starts
 	gate    chan struct{} // if set, prompt handlers block on it
+
+	// modes/models returned in the session/new reply (nil = provider offers none).
+	newModes  *acpModeState
+	newModels *acpModelState
+	// set_mode/set_model the agent received.
+	lastSetMode  json.RawMessage
+	lastSetModel json.RawMessage
 }
 
 func (a *fakeAgent) handle(_ context.Context, req *rpc.Request) (any, error) {
@@ -34,8 +41,9 @@ func (a *fakeAgent) handle(_ context.Context, req *rpc.Request) (any, error) {
 		a.lastNew = append(json.RawMessage(nil), req.Params...)
 		a.nextSess++
 		id := fmt.Sprintf("sess-%d", a.nextSess)
+		res := NewSessionResult{SessionID: id, Modes: a.newModes, Models: a.newModels}
 		a.mu.Unlock()
-		return NewSessionResult{SessionID: id}, nil
+		return res, nil
 	case MethodPrompt:
 		var p PromptParams
 		_ = json.Unmarshal(req.Params, &p)
@@ -49,6 +57,16 @@ func (a *fakeAgent) handle(_ context.Context, req *rpc.Request) (any, error) {
 		a.prompts = append(a.prompts, p.SessionID)
 		a.mu.Unlock()
 		return PromptResult{StopReason: "end_turn"}, nil
+	case MethodSetMode:
+		a.mu.Lock()
+		a.lastSetMode = append(json.RawMessage(nil), req.Params...)
+		a.mu.Unlock()
+		return nil, nil
+	case MethodSetModel:
+		a.mu.Lock()
+		a.lastSetModel = append(json.RawMessage(nil), req.Params...)
+		a.mu.Unlock()
+		return nil, nil
 	}
 	return nil, &rpc.Error{Code: rpc.CodeMethodNotFound, Message: req.Method}
 }
@@ -238,5 +256,92 @@ func TestSessionHostingBlocksEviction(t *testing.T) {
 	case <-client.Done():
 	case <-time.After(2 * time.Second):
 		t.Fatal("process not evicted after its last session closed")
+	}
+}
+
+func TestOpenCapturesModesAndModels(t *testing.T) {
+	agent := &fakeAgent{
+		newModes: &acpModeState{
+			CurrentModeID: "default",
+			AvailableModes: []acpMode{
+				{ID: "default", Name: "Default"},
+				{ID: "think", Name: "Think harder", Description: "more reasoning"},
+			},
+		},
+		newModels: &acpModelState{
+			CurrentModelID: "sonnet",
+			AvailableModels: []acpModel{
+				{ModelID: "sonnet", Name: "Sonnet"},
+				{ModelID: "opus", Name: "Opus", Description: "most capable"},
+			},
+		},
+	}
+	m := newManager(t, agent, Options{Max: 1})
+	s := openSession(t, m, testKey)
+
+	if s.CurrentModeID != "default" {
+		t.Errorf("CurrentModeID = %q, want default", s.CurrentModeID)
+	}
+	if len(s.AvailableModes) != 2 || s.AvailableModes[1].ID != "think" || s.AvailableModes[1].Description != "more reasoning" {
+		t.Errorf("AvailableModes = %+v", s.AvailableModes)
+	}
+	if s.CurrentModelID != "sonnet" {
+		t.Errorf("CurrentModelID = %q, want sonnet", s.CurrentModelID)
+	}
+	// ACP's modelId maps onto the generic id.
+	if len(s.AvailableModels) != 2 || s.AvailableModels[1].ID != "opus" || s.AvailableModels[1].Name != "Opus" {
+		t.Errorf("AvailableModels = %+v", s.AvailableModels)
+	}
+}
+
+func TestOpenWithoutModesOrModels(t *testing.T) {
+	m := newManager(t, &fakeAgent{}, Options{Max: 1})
+	s := openSession(t, m, testKey)
+	if s.CurrentModeID != "" || s.AvailableModes != nil || s.CurrentModelID != "" || s.AvailableModels != nil {
+		t.Errorf("expected empty mode/model state, got mode %q/%v model %q/%v",
+			s.CurrentModeID, s.AvailableModes, s.CurrentModelID, s.AvailableModels)
+	}
+}
+
+func TestSetModeAndSetModelRouteToSession(t *testing.T) {
+	agent := &fakeAgent{}
+	m := newManager(t, agent, Options{Max: 1})
+	s := openSession(t, m, testKey)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if err := m.SetMode(ctx, s.ID, "think"); err != nil {
+		t.Fatalf("SetMode: %v", err)
+	}
+	if err := m.SetModel(ctx, s.ID, "opus"); err != nil {
+		t.Fatalf("SetModel: %v", err)
+	}
+
+	agent.mu.Lock()
+	gotMode, gotModel := agent.lastSetMode, agent.lastSetModel
+	agent.mu.Unlock()
+
+	var mode SetModeParams
+	if err := json.Unmarshal(gotMode, &mode); err != nil {
+		t.Fatalf("set_mode params: %v", err)
+	}
+	if mode.SessionID != string(s.ID) || mode.ModeID != "think" {
+		t.Errorf("set_mode = %+v, want sessionId=%s modeId=think", mode, s.ID)
+	}
+	var model SetModelParams
+	if err := json.Unmarshal(gotModel, &model); err != nil {
+		t.Fatalf("set_model params: %v", err)
+	}
+	if model.SessionID != string(s.ID) || model.ModelID != "opus" {
+		t.Errorf("set_model = %+v, want sessionId=%s modelId=opus", model, s.ID)
+	}
+}
+
+func TestSetModeUnknownSession(t *testing.T) {
+	m := newManager(t, &fakeAgent{}, Options{Max: 1})
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if err := m.SetMode(ctx, "nope", "x"); !errors.Is(err, ErrNoSession) {
+		t.Errorf("SetMode unknown session err = %v, want ErrNoSession", err)
 	}
 }

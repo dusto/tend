@@ -30,6 +30,10 @@ Schemas live under `schemas/` (`methods/<name>.params.json` / `.result.json`, `e
   - Params: `SessionListParams` · Result: `SessionListResult`
 - **`session.claim`** — Move a session's editor binding to the calling editor client, so editor-local calls for that session route to it.
   - Params: `SessionClaimParams` · Result: `SessionClaimResult`
+- **`session.set_mode`** — Set a session's active mode (reasoning/thought level) from its available modes; emits agent_mode_updated. Errors when the provider offers no modes.
+  - Params: `SessionSetModeParams` · Result: `SessionSetModeResult`
+- **`session.set_model`** — Set a session's active model from its available models; emits agent_model_updated. Errors when the provider offers no models.
+  - Params: `SessionSetModelParams` · Result: `SessionSetModelResult`
 - **`client.register`** — Register the connection's stable client id, role (editor/observer), and prompt capability.
   - Params: `ClientRegisterParams` · Result: `ClientRegisterResult`
 - **`file.read`** — Read a repo file editor-aware (non-mutating): live buffer content + changedtick when open, else disk content + content hash.
@@ -103,6 +107,10 @@ Schemas live under `schemas/` (`methods/<name>.params.json` / `.result.json`, `e
   - Payload: `AgentError`
 - **`agent_message_chunk`** (`session` stream) — A streamed chunk of an agent message.
   - Payload: `AgentMessageChunk`
+- **`agent_mode_updated`** (`session` stream) — A session's active mode (reasoning/thought level) changed, by a client set or the agent itself.
+  - Payload: `AgentModeUpdated`
+- **`agent_model_updated`** (`session` stream) — A session's active model changed.
+  - Payload: `AgentModelUpdated`
 - **`agent_thought_chunk`** (`session` stream) — A streamed chunk of the agent's reasoning (thinking), distinct from its message.
   - Payload: `AgentThoughtChunk`
 - **`approval_requested`** (`session` stream) — A mutating action is awaiting approval.

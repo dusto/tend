@@ -54,6 +54,8 @@ func info(s *session.Session, caller api.ClientID) api.SessionInfo {
 	if p, ok := s.Pending(); ok {
 		out.Pending = &api.SessionPending{Kind: p.Kind, ID: p.ID}
 	}
+	out.CurrentModeID, out.AvailableModes = s.Modes()
+	out.CurrentModelID, out.AvailableModels = s.Models()
 	return out
 }
 

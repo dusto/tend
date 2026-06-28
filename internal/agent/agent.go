@@ -19,12 +19,16 @@ import (
 	"github.com/dusto/tend/internal/session"
 )
 
-// Method names for the agent lifecycle, matching the api contract.
+// Method names for the agent lifecycle, matching the api contract. set_mode and
+// set_model are named session.* but live here because they drive the ACP manager
+// and publish session events, which the session-query service does not own.
 const (
-	MethodStart  = "agent.start"
-	MethodPrompt = "agent.prompt"
-	MethodCancel = "agent.cancel"
-	MethodStop   = "agent.stop"
+	MethodStart    = "agent.start"
+	MethodPrompt   = "agent.prompt"
+	MethodCancel   = "agent.cancel"
+	MethodStop     = "agent.stop"
+	MethodSetMode  = "session.set_mode"
+	MethodSetModel = "session.set_model"
 )
 
 // Manager is the slice of the ACP session manager the service drives. *acp.Manager
@@ -35,6 +39,8 @@ type Manager interface {
 	Prompt(ctx context.Context, id api.SessionID, params acp.PromptParams) (acp.PromptResult, error)
 	Cancel(ctx context.Context, id api.SessionID) error
 	Close(id api.SessionID)
+	SetMode(ctx context.Context, id api.SessionID, modeID string) error
+	SetModel(ctx context.Context, id api.SessionID, modelID string) error
 }
 
 // Service backs the agent.* methods. It is safe for concurrent use.
@@ -83,7 +89,13 @@ func Register(m *dispatch.Mux, s *Service, onStarted func(api.SessionID)) error 
 	if err := dispatch.Handle(m, MethodCancel, s.Cancel); err != nil {
 		return err
 	}
-	return dispatch.Handle(m, MethodStop, s.Stop)
+	if err := dispatch.Handle(m, MethodStop, s.Stop); err != nil {
+		return err
+	}
+	if err := dispatch.Handle(m, MethodSetMode, s.SetMode); err != nil {
+		return err
+	}
+	return dispatch.Handle(m, MethodSetModel, s.SetModel)
 }
 
 // Start opens a task-scoped session on a provider process for the task's
@@ -140,7 +152,68 @@ func (s *Service) Start(ctx context.Context, p api.AgentStartParams) (api.AgentS
 		return api.AgentStartResult{}, &rpc.Error{Code: rpc.CodeInternalError, Message: "agent: duplicate session id " + string(as.ID)}
 	}
 	sess := s.sessions.Create(as.ID, p.ProviderID, workspace, p.Task, p.WorktreeRoot)
+	// Record the provider's advertised mode/model choices (empty when it offers
+	// none) so session.list reports them and set_mode/set_model can validate.
+	sess.SetModes(as.CurrentModeID, as.AvailableModes)
+	sess.SetModels(as.CurrentModelID, as.AvailableModels)
 	return api.AgentStartResult{SessionID: sess.ID, StreamID: sess.Stream, Status: sess.Status()}, nil
+}
+
+// SetMode sets a session's active mode (reasoning/thought level) on its provider
+// and records it, emitting agent_mode_updated. It rejects an unknown session, an
+// empty mode id, and a mode the provider did not advertise — so a provider that
+// offers no modes degrades to a clear invalid-params error rather than a silent
+// no-op or a bad ACP call.
+func (s *Service) SetMode(ctx context.Context, p api.SessionSetModeParams) (api.SessionSetModeResult, error) {
+	sess, ok := s.sessions.Get(p.SessionID)
+	if !ok {
+		return api.SessionSetModeResult{}, unknownSession(p.SessionID)
+	}
+	if p.ModeID == "" {
+		return api.SessionSetModeResult{}, invalidParams("mode_id is required")
+	}
+	_, available := sess.Modes()
+	if !hasID(available, p.ModeID, func(m api.SessionMode) string { return m.ID }) {
+		return api.SessionSetModeResult{}, invalidParams("session " + string(p.SessionID) + " has no mode " + p.ModeID)
+	}
+	if err := s.manager.SetMode(ctx, p.SessionID, p.ModeID); err != nil {
+		return api.SessionSetModeResult{}, internalErr(err)
+	}
+	sess.SetCurrentMode(p.ModeID)
+	s.norm.PublishModeUpdated(string(p.SessionID), p.ModeID)
+	return api.SessionSetModeResult{SessionID: p.SessionID, CurrentModeID: p.ModeID}, nil
+}
+
+// SetModel sets a session's active model on its provider and records it, emitting
+// agent_model_updated. Validation mirrors SetMode.
+func (s *Service) SetModel(ctx context.Context, p api.SessionSetModelParams) (api.SessionSetModelResult, error) {
+	sess, ok := s.sessions.Get(p.SessionID)
+	if !ok {
+		return api.SessionSetModelResult{}, unknownSession(p.SessionID)
+	}
+	if p.ModelID == "" {
+		return api.SessionSetModelResult{}, invalidParams("model_id is required")
+	}
+	_, available := sess.Models()
+	if !hasID(available, p.ModelID, func(m api.SessionModel) string { return m.ID }) {
+		return api.SessionSetModelResult{}, invalidParams("session " + string(p.SessionID) + " has no model " + p.ModelID)
+	}
+	if err := s.manager.SetModel(ctx, p.SessionID, p.ModelID); err != nil {
+		return api.SessionSetModelResult{}, internalErr(err)
+	}
+	sess.SetCurrentModel(p.ModelID)
+	s.norm.PublishModelUpdated(string(p.SessionID), p.ModelID)
+	return api.SessionSetModelResult{SessionID: p.SessionID, CurrentModelID: p.ModelID}, nil
+}
+
+// hasID reports whether any element's id (via key) equals want.
+func hasID[T any](items []T, want string, key func(T) string) bool {
+	for _, it := range items {
+		if key(it) == want {
+			return true
+		}
+	}
+	return false
 }
 
 // Prompt runs one prompt turn on a session. It blocks until the turn ends; the

@@ -12,12 +12,14 @@ const (
 	// 0.2.0 added task.*; 0.3.0 added pane.open/list/read/close; 0.4.0 added
 	// pane.run; 0.5.0 added file.apply_change_set; 0.6.0 added file.diff;
 	// 0.7.0 added lsp.diagnostics; 0.8.0 added session.list/claim; 0.9.0 made
-	// agent.start's task optional (task-less sessions) + workspace_id.
-	PluginToDaemonVersion = "0.9.0"
+	// agent.start's task optional (task-less sessions) + workspace_id; 0.10.0
+	// added session.set_mode/set_model.
+	PluginToDaemonVersion = "0.10.0"
 	// 0.2.0 added editor.open + editor.diff; 0.3.0 added editor.diagnostics.
 	DaemonToEditorVersion = "0.3.0"
-	// 0.2.0 added the agent_thought_chunk session event.
-	DaemonToClientVersion = "0.2.0"
+	// 0.2.0 added the agent_thought_chunk session event; 0.3.0 added the
+	// agent_mode_updated and agent_model_updated session events.
+	DaemonToClientVersion = "0.3.0"
 )
 
 // Versions reports the contract version of each method set.

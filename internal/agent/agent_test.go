@@ -23,6 +23,16 @@ type fakeManager struct {
 	openErr      error
 	openParams   acp.NewSessionParams
 	openSpawnDir string // worktree root carried on the Open ctx
+	// mode/model state returned from Open (as captured from session/new).
+	openModeCurrent  string
+	openModes        []api.SessionMode
+	openModelCurrent string
+	openModels       []api.SessionModel
+
+	setModeErr  error
+	setModelErr error
+	setModeID   string // last mode id passed to SetMode
+	setModelID  string // last model id passed to SetModel
 
 	promptCalls int // number of Prompt invocations
 
@@ -43,7 +53,13 @@ func (m *fakeManager) Open(ctx context.Context, _ acp.Key, params acp.NewSession
 	if m.openErr != nil {
 		return nil, m.openErr
 	}
-	return &acp.Session{ID: m.openID}, nil
+	return &acp.Session{
+		ID:              m.openID,
+		CurrentModeID:   m.openModeCurrent,
+		AvailableModes:  m.openModes,
+		CurrentModelID:  m.openModelCurrent,
+		AvailableModels: m.openModels,
+	}, nil
 }
 
 func (m *fakeManager) Prompt(ctx context.Context, _ api.SessionID, _ acp.PromptParams) (acp.PromptResult, error) {
@@ -73,6 +89,22 @@ func (m *fakeManager) Close(id api.SessionID) {
 	m.mu.Lock()
 	m.closed = append(m.closed, id)
 	m.mu.Unlock()
+}
+
+func (m *fakeManager) SetMode(_ context.Context, _ api.SessionID, modeID string) error {
+	m.mu.Lock()
+	m.setModeID = modeID
+	err := m.setModeErr
+	m.mu.Unlock()
+	return err
+}
+
+func (m *fakeManager) SetModel(_ context.Context, _ api.SessionID, modelID string) error {
+	m.mu.Lock()
+	m.setModelID = modelID
+	err := m.setModelErr
+	m.mu.Unlock()
+	return err
 }
 
 func (m *fakeManager) cancels() []api.SessionID {
@@ -351,5 +383,135 @@ func startSession(t *testing.T, svc *Service) {
 		WorktreeRoot: "/repo/wt",
 	}); err != nil {
 		t.Fatalf("Start: %v", err)
+	}
+}
+
+func TestStartRecordsModesAndModels(t *testing.T) {
+	mgr := &fakeManager{
+		openID:           "sess-1",
+		openModeCurrent:  "default",
+		openModes:        []api.SessionMode{{ID: "default", Name: "Default"}, {ID: "think", Name: "Think"}},
+		openModelCurrent: "sonnet",
+		openModels:       []api.SessionModel{{ID: "sonnet", Name: "Sonnet"}, {ID: "opus", Name: "Opus"}},
+	}
+	svc, _ := newService(t, mgr)
+	startSession(t, svc)
+
+	s, _ := svc.sessions.Get("sess-1")
+	curMode, modes := s.Modes()
+	if curMode != "default" || len(modes) != 2 || modes[1].ID != "think" {
+		t.Errorf("modes = %q %+v", curMode, modes)
+	}
+	curModel, models := s.Models()
+	if curModel != "sonnet" || len(models) != 2 || models[1].ID != "opus" {
+		t.Errorf("models = %q %+v", curModel, models)
+	}
+}
+
+func TestSetModeUpdatesStateAndEmits(t *testing.T) {
+	mgr := &fakeManager{
+		openID:          "sess-1",
+		openModeCurrent: "default",
+		openModes:       []api.SessionMode{{ID: "default"}, {ID: "think"}},
+	}
+	svc, store := newService(t, mgr)
+	startSession(t, svc)
+
+	res, err := svc.SetMode(context.Background(), api.SessionSetModeParams{SessionID: "sess-1", ModeID: "think"})
+	if err != nil {
+		t.Fatalf("SetMode: %v", err)
+	}
+	if res.CurrentModeID != "think" || res.SessionID != "sess-1" {
+		t.Errorf("result = %+v", res)
+	}
+	if mgr.setModeID != "think" {
+		t.Errorf("manager got mode %q, want think", mgr.setModeID)
+	}
+	if s, _ := svc.sessions.Get("sess-1"); func() string { c, _ := s.Modes(); return c }() != "think" {
+		t.Error("session current mode not updated")
+	}
+	evs, _, _ := store.Read("session:sess-1", 0, 10)
+	if len(evs) != 1 || evs[0].Type != "agent_mode_updated" {
+		t.Fatalf("events = %+v, want one agent_mode_updated", evs)
+	}
+}
+
+func TestSetModelUpdatesStateAndEmits(t *testing.T) {
+	mgr := &fakeManager{
+		openID:           "sess-1",
+		openModelCurrent: "sonnet",
+		openModels:       []api.SessionModel{{ID: "sonnet"}, {ID: "opus"}},
+	}
+	svc, store := newService(t, mgr)
+	startSession(t, svc)
+
+	res, err := svc.SetModel(context.Background(), api.SessionSetModelParams{SessionID: "sess-1", ModelID: "opus"})
+	if err != nil {
+		t.Fatalf("SetModel: %v", err)
+	}
+	if res.CurrentModelID != "opus" {
+		t.Errorf("result = %+v", res)
+	}
+	if mgr.setModelID != "opus" {
+		t.Errorf("manager got model %q, want opus", mgr.setModelID)
+	}
+	evs, _, _ := store.Read("session:sess-1", 0, 10)
+	if len(evs) != 1 || evs[0].Type != "agent_model_updated" {
+		t.Fatalf("events = %+v, want one agent_model_updated", evs)
+	}
+}
+
+func TestSetModeRejectsBadInput(t *testing.T) {
+	cases := []struct {
+		name      string
+		modes     []api.SessionMode
+		sessionID api.SessionID
+		modeID    string
+	}{
+		{"unknown session", []api.SessionMode{{ID: "think"}}, "nope", "think"},
+		{"empty mode id", []api.SessionMode{{ID: "think"}}, "sess-1", ""},
+		{"mode not advertised", []api.SessionMode{{ID: "default"}}, "sess-1", "think"},
+		{"provider offers no modes", nil, "sess-1", "think"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			mgr := &fakeManager{openID: "sess-1", openModes: tc.modes}
+			svc, store := newService(t, mgr)
+			startSession(t, svc)
+
+			_, err := svc.SetMode(context.Background(), api.SessionSetModeParams{SessionID: tc.sessionID, ModeID: tc.modeID})
+			if err == nil {
+				t.Fatal("expected an error")
+			}
+			// A rejected set never reaches the provider and emits nothing.
+			if mgr.setModeID != "" {
+				t.Errorf("manager was called with %q on a rejected set", mgr.setModeID)
+			}
+			if hw := store.HighWater("session:sess-1"); hw != 0 {
+				t.Errorf("high water = %d, want 0 (no event on rejected set)", hw)
+			}
+		})
+	}
+}
+
+func TestSetModeManagerErrorLeavesStateUnchanged(t *testing.T) {
+	mgr := &fakeManager{
+		openID:          "sess-1",
+		openModeCurrent: "default",
+		openModes:       []api.SessionMode{{ID: "default"}, {ID: "think"}},
+		setModeErr:      errors.New("provider refused"),
+	}
+	svc, store := newService(t, mgr)
+	startSession(t, svc)
+
+	if _, err := svc.SetMode(context.Background(), api.SessionSetModeParams{SessionID: "sess-1", ModeID: "think"}); err == nil {
+		t.Fatal("expected error from manager")
+	}
+	// State stays on the prior mode and nothing is emitted.
+	if s, _ := svc.sessions.Get("sess-1"); func() string { c, _ := s.Modes(); return c }() != "default" {
+		t.Error("current mode changed despite manager error")
+	}
+	if hw := store.HighWater("session:sess-1"); hw != 0 {
+		t.Errorf("high water = %d, want 0", hw)
 	}
 }

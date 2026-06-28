@@ -37,6 +37,24 @@ type SessionPending struct {
 	ID   string      `json:"id"`
 }
 
+// SessionMode is one selectable agent mode advertised by the provider at
+// session/new. Modes are the provider's reasoning/behavior control (clients
+// surface them as the reasoning/thought level); the set is empty when the
+// provider offers no choice.
+type SessionMode struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+}
+
+// SessionModel is one selectable model advertised by the provider at
+// session/new; the set is empty when the provider offers no choice.
+type SessionModel struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+}
+
 // SessionInfo is the listed view of one daemon session: enough to render a
 // session overview (status, the task it works on, where it runs) and to route
 // to it (id + stream), without a follow-up call. Pending is set only when the
@@ -57,6 +75,38 @@ type SessionInfo struct {
 	// EditorBound is true when this client (the caller) currently holds the
 	// session's editor binding, so editor-local tools route to it.
 	EditorBound bool `json:"editor_bound"`
+	// CurrentModeID and AvailableModes describe the session's provider modes
+	// (reasoning/thought level); both are empty when the provider offers none.
+	CurrentModeID  string        `json:"current_mode_id,omitempty"`
+	AvailableModes []SessionMode `json:"available_modes,omitempty"`
+	// CurrentModelID and AvailableModels describe the session's provider models;
+	// both are empty when the provider offers no choice.
+	CurrentModelID  string         `json:"current_model_id,omitempty"`
+	AvailableModels []SessionModel `json:"available_models,omitempty"`
+}
+
+// SessionSetModeParams sets a session's active mode (reasoning/thought level).
+type SessionSetModeParams struct {
+	SessionID SessionID `json:"session_id"`
+	ModeID    string    `json:"mode_id"`
+}
+
+// SessionSetModeResult reports the session's new active mode after the change.
+type SessionSetModeResult struct {
+	SessionID     SessionID `json:"session_id"`
+	CurrentModeID string    `json:"current_mode_id"`
+}
+
+// SessionSetModelParams sets a session's active model.
+type SessionSetModelParams struct {
+	SessionID SessionID `json:"session_id"`
+	ModelID   string    `json:"model_id"`
+}
+
+// SessionSetModelResult reports the session's new active model after the change.
+type SessionSetModelResult struct {
+	SessionID      SessionID `json:"session_id"`
+	CurrentModelID string    `json:"current_model_id"`
 }
 
 // SessionListParams lists the daemon's sessions. WorkspaceID, when set, filters

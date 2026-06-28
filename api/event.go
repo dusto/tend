@@ -80,6 +80,8 @@ var EventDefs = []EventDef{
 	{Type: "agent_error", Scope: ScopeSession, Payload: AgentError{}, Summary: "A session's turn failed (e.g. its provider process exited mid-turn)."},
 	{Type: "provider_stopped", Scope: ScopeWorkspace, Payload: ProviderStopped{}, Summary: "A provider process left the pool (exit or crash). Repo-wide: delivered on the workspace stream."},
 	{Type: "provider_notification", Scope: ScopeSession, Payload: ProviderNotification{}, Summary: "A provider-private ACP notification preserved verbatim as a metadata event."},
+	{Type: "agent_mode_updated", Scope: ScopeSession, Payload: AgentModeUpdated{}, Summary: "A session's active mode (reasoning/thought level) changed, by a client set or the agent itself."},
+	{Type: "agent_model_updated", Scope: ScopeSession, Payload: AgentModelUpdated{}, Summary: "A session's active model changed."},
 	{Type: "task_created", Scope: ScopeWorkspace, Payload: TaskChange{}, Summary: "A task was created. Repo-wide: delivered on the workspace stream."},
 	{Type: "task_updated", Scope: ScopeWorkspace, Payload: TaskChange{}, Summary: "A task changed (e.g. claimed or linked). Repo-wide: delivered on the workspace stream."},
 	{Type: "task_commented", Scope: ScopeWorkspace, Payload: TaskChange{}, Summary: "A comment was added to a task. Repo-wide: delivered on the workspace stream."},
@@ -157,4 +159,18 @@ type ProviderNotification struct {
 	SessionID SessionID       `json:"session_id"`
 	Method    string          `json:"method"`
 	Raw       json.RawMessage `json:"raw,omitempty"`
+}
+
+// AgentModeUpdated signals that a session's active mode (reasoning/thought
+// level) changed — either a client called session.set_mode or the agent
+// switched modes itself (ACP current_mode_update).
+type AgentModeUpdated struct {
+	SessionID     SessionID `json:"session_id"`
+	CurrentModeID string    `json:"current_mode_id"`
+}
+
+// AgentModelUpdated signals that a session's active model changed.
+type AgentModelUpdated struct {
+	SessionID      SessionID `json:"session_id"`
+	CurrentModelID string    `json:"current_model_id"`
 }

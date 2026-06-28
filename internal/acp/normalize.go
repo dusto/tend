@@ -137,8 +137,37 @@ func mapUpdate(sessionID, kind string, update json.RawMessage) (api.Event, bool)
 			ToolCallID: u.ToolCallID,
 			Status:     u.Status,
 		}), true
+	case "current_mode_update":
+		var u struct {
+			CurrentModeID string `json:"currentModeId"`
+		}
+		_ = json.Unmarshal(update, &u)
+		return sessionEvent(sessionID, "agent_mode_updated", api.AgentModeUpdated{
+			SessionID:     api.SessionID(sessionID),
+			CurrentModeID: u.CurrentModeID,
+		}), true
 	}
 	return api.Event{}, false
+}
+
+// PublishModeUpdated emits agent_mode_updated for a session. The agent's own
+// mode changes arrive as current_mode_update notifications (handled in
+// mapUpdate); this is for a daemon-driven change (session.set_mode) where the
+// new mode is confirmed by the set call's success rather than a notification.
+func (n *Normalizer) PublishModeUpdated(sessionID, modeID string) {
+	n.publish(sessionEvent(sessionID, "agent_mode_updated", api.AgentModeUpdated{
+		SessionID:     api.SessionID(sessionID),
+		CurrentModeID: modeID,
+	}))
+}
+
+// PublishModelUpdated emits agent_model_updated for a session after a
+// session.set_model change.
+func (n *Normalizer) PublishModelUpdated(sessionID, modelID string) {
+	n.publish(sessionEvent(sessionID, "agent_model_updated", api.AgentModelUpdated{
+		SessionID:      api.SessionID(sessionID),
+		CurrentModelID: modelID,
+	}))
 }
 
 func (n *Normalizer) preserve(sessionID, method string, raw json.RawMessage) {

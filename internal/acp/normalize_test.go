@@ -241,3 +241,53 @@ func TestNormalizeOverACPStream(t *testing.T) {
 	}
 	t.Fatal("normalized event did not arrive over the ACP stream")
 }
+
+func TestNormalizeCurrentModeUpdate(t *testing.T) {
+	c := &capture{}
+	n := NewNormalizer(c, nil)
+	notify(n, SessionUpdateMethod, update("s1", map[string]any{
+		"sessionUpdate": "current_mode_update",
+		"currentModeId": "think",
+	}))
+
+	ev := c.last(t)
+	if ev.Type != "agent_mode_updated" || ev.StreamID != "session:s1" || ev.Scope != api.ScopeSession {
+		t.Fatalf("event = %+v", ev)
+	}
+	var p api.AgentModeUpdated
+	if err := json.Unmarshal(ev.Payload, &p); err != nil {
+		t.Fatal(err)
+	}
+	if p.SessionID != "s1" || p.CurrentModeID != "think" {
+		t.Errorf("payload = %+v", p)
+	}
+}
+
+func TestPublishModeAndModelUpdated(t *testing.T) {
+	c := &capture{}
+	n := NewNormalizer(c, nil)
+
+	n.PublishModeUpdated("s1", "think")
+	n.PublishModelUpdated("s1", "opus")
+
+	evs := c.events()
+	if len(evs) != 2 {
+		t.Fatalf("got %d events, want 2", len(evs))
+	}
+	if evs[0].Type != "agent_mode_updated" {
+		t.Errorf("event 0 type = %q", evs[0].Type)
+	}
+	var mode api.AgentModeUpdated
+	_ = json.Unmarshal(evs[0].Payload, &mode)
+	if mode.SessionID != "s1" || mode.CurrentModeID != "think" {
+		t.Errorf("mode payload = %+v", mode)
+	}
+	if evs[1].Type != "agent_model_updated" {
+		t.Errorf("event 1 type = %q", evs[1].Type)
+	}
+	var model api.AgentModelUpdated
+	_ = json.Unmarshal(evs[1].Payload, &model)
+	if model.SessionID != "s1" || model.CurrentModelID != "opus" {
+		t.Errorf("model payload = %+v", model)
+	}
+}
