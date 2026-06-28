@@ -76,11 +76,23 @@ func (s *Service) List(_ context.Context, p api.SlashListParams) (api.SlashListR
 }
 
 // merge returns the daemon commands followed by the provider commands as a fresh
-// slice (callers must not alias the service's daemon slice).
+// slice (callers must not alias the service's daemon slice). Daemon commands are
+// authoritative: a provider command whose name collides with a daemon command is
+// dropped, so the merged set has no duplicate names and every name routes
+// unambiguously (the daemon owns the colliding name; see the invoke bead).
 func (s *Service) merge(provider []api.SlashCommand) []api.SlashCommand {
+	owned := make(map[string]struct{}, len(s.daemon))
+	for _, c := range s.daemon {
+		owned[c.Name] = struct{}{}
+	}
 	out := make([]api.SlashCommand, 0, len(s.daemon)+len(provider))
 	out = append(out, s.daemon...)
-	out = append(out, provider...)
+	for _, c := range provider {
+		if _, clash := owned[c.Name]; clash {
+			continue
+		}
+		out = append(out, c)
+	}
 	return out
 }
 

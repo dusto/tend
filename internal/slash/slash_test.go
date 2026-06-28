@@ -114,6 +114,37 @@ func TestSetSessionCommandsReplacesPriorSet(t *testing.T) {
 	}
 }
 
+func TestProviderCommandsCannotShadowDaemonCommands(t *testing.T) {
+	reg := session.NewRegistry()
+	svc := NewService(reg, &capture{})
+	newSession(t, reg, "s1")
+
+	// The provider advertises a name the daemon owns ("close") plus a fresh one.
+	svc.SetSessionCommands("s1", []api.SlashCommand{
+		{Name: "close", Description: "provider close", Origin: api.SlashOriginProvider},
+		{Name: "review", Origin: api.SlashOriginProvider},
+	})
+
+	res, _ := svc.List(context.Background(), api.SlashListParams{SessionID: "s1"})
+	// "close" appears exactly once, as the daemon command; the provider duplicate
+	// is dropped. "review" (no collision) is kept.
+	closeCount := 0
+	for _, c := range res.Commands {
+		if c.Name == "close" {
+			closeCount++
+			if c.Origin != api.SlashOriginDaemon {
+				t.Errorf("close origin = %q, want daemon (authoritative)", c.Origin)
+			}
+		}
+	}
+	if closeCount != 1 {
+		t.Errorf("close appears %d times, want 1 (no provider shadow)", closeCount)
+	}
+	if !slices.Contains(names(res.Commands), "review") {
+		t.Errorf("non-colliding provider command 'review' was dropped: %v", names(res.Commands))
+	}
+}
+
 func TestSetSessionCommandsUnknownSessionNoOp(t *testing.T) {
 	reg := session.NewRegistry()
 	pub := &capture{}
