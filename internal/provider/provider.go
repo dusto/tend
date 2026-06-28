@@ -80,6 +80,9 @@ func (s *Service) Start(ctx context.Context, p api.ProviderStartParams) (api.Pro
 	if p.WorkspaceID == "" {
 		return api.ProviderStartResult{}, invalidParams("workspace_id is required")
 	}
+	if p.WorktreeRoot == "" {
+		return api.ProviderStartResult{}, invalidParams("worktree_root is required")
+	}
 	prov, ok := s.cfg.Provider(string(p.ProviderID))
 	if !ok {
 		return api.ProviderStartResult{}, invalidParams("unknown provider " + string(p.ProviderID))
@@ -88,6 +91,10 @@ func (s *Service) Start(ctx context.Context, p api.ProviderStartParams) (api.Pro
 		return api.ProviderStartResult{}, invalidParams("provider " + string(p.ProviderID) + " is disabled")
 	}
 	key := s.key(p.WorkspaceID, p.ProviderID)
+	// Carry the worktree root so a CwdWorkspace provider warmed here starts in it
+	// (and a later session reusing the idle process inherits that cwd), rather
+	// than falling back to the workspace's common git dir. Mirrors agent.start.
+	ctx = acp.WithWorktreeRoot(ctx, p.WorktreeRoot)
 	if err := s.pool.Start(ctx, key); err != nil {
 		return api.ProviderStartResult{}, internalErr(err)
 	}

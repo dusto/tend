@@ -315,7 +315,7 @@ func TestProviderLifecycle(t *testing.T) {
 	}
 
 	var start api.ProviderStartResult
-	mustCall(t, c, "provider.start", api.ProviderStartParams{WorkspaceID: "ws1", ProviderID: "codex"}, &start)
+	mustCall(t, c, "provider.start", api.ProviderStartParams{WorkspaceID: "ws1", ProviderID: "codex", WorktreeRoot: t.TempDir()}, &start)
 	if start.Running != 1 {
 		t.Fatalf("start running = %d, want 1", start.Running)
 	}

@@ -6,12 +6,16 @@
     },
     "provider_id": {
       "type": "string"
+    },
+    "worktree_root": {
+      "type": "string"
     }
   },
   "additionalProperties": false,
   "type": "object",
   "required": [
     "workspace_id",
-    "provider_id"
+    "provider_id",
+    "worktree_root"
   ]
 }

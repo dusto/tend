@@ -25,9 +25,15 @@ type ProviderListResult struct {
 
 // ProviderStartParams warms a provider for a workspace: it ensures the pool holds
 // at least one process for {workspace, provider}, spawning one if none is live.
+// WorktreeRoot is the directory a CwdWorkspace provider process starts in; it is
+// required so a warmed process gets a real worktree cwd rather than the repo's
+// common git dir (a pool process is shared per {workspace, provider} across
+// worktrees, so this is the root of whichever caller first spawns it — the same
+// rule as agent.start).
 type ProviderStartParams struct {
-	WorkspaceID WorkspaceID `json:"workspace_id"`
-	ProviderID  ProviderID  `json:"provider_id"`
+	WorkspaceID  WorkspaceID `json:"workspace_id"`
+	ProviderID   ProviderID  `json:"provider_id"`
+	WorktreeRoot string      `json:"worktree_root"`
 }
 
 // ProviderStartResult reports the provider's running-process count after the

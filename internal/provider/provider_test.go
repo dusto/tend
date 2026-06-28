@@ -13,20 +13,22 @@ import (
 // fakePool records the keys it is driven with and reports a canned running count
 // per key. startErr, when set, makes Start fail.
 type fakePool struct {
-	running  map[acp.Key]int
-	started  []acp.Key
-	stopped  []acp.Key
-	startErr error
+	running     map[acp.Key]int
+	started     []acp.Key
+	startedRoot string // worktree root carried on the most recent Start ctx
+	stopped     []acp.Key
+	startErr    error
 }
 
 func newFakePool() *fakePool { return &fakePool{running: map[acp.Key]int{}} }
 
 func (p *fakePool) RunningFor(key acp.Key) int { return p.running[key] }
 
-func (p *fakePool) Start(_ context.Context, key acp.Key) error {
+func (p *fakePool) Start(ctx context.Context, key acp.Key) error {
 	if p.startErr != nil {
 		return p.startErr
 	}
+	p.startedRoot = acp.WorktreeRootFromContext(ctx)
 	p.started = append(p.started, key)
 	if p.running[key] == 0 {
 		p.running[key] = 1
@@ -90,7 +92,7 @@ func TestStartWarmsProvider(t *testing.T) {
 	pool := newFakePool()
 	svc := NewService(testConfig(), pool)
 
-	res, err := svc.Start(context.Background(), api.ProviderStartParams{WorkspaceID: "ws1", ProviderID: "codex"})
+	res, err := svc.Start(context.Background(), api.ProviderStartParams{WorkspaceID: "ws1", ProviderID: "codex", WorktreeRoot: "/repo/wt"})
 	if err != nil {
 		t.Fatalf("Start: %v", err)
 	}
@@ -101,16 +103,28 @@ func TestStartWarmsProvider(t *testing.T) {
 	if len(pool.started) != 1 || pool.started[0] != want {
 		t.Errorf("pool.started = %v, want [%v]", pool.started, want)
 	}
+	// The worktree root must reach the spawn so a warmed CwdWorkspace process
+	// starts in it, not the workspace's common git dir.
+	if pool.startedRoot != "/repo/wt" {
+		t.Errorf("worktree root carried to pool = %q, want /repo/wt", pool.startedRoot)
+	}
+}
+
+func TestStartRequiresWorktreeRoot(t *testing.T) {
+	svc := NewService(testConfig(), newFakePool())
+	if _, err := svc.Start(context.Background(), api.ProviderStartParams{WorkspaceID: "ws1", ProviderID: "codex"}); codeOf(t, err) != rpc.CodeInvalidParams {
+		t.Fatalf("Start without worktree_root: got %v, want invalid params", err)
+	}
 }
 
 func TestStartRejectsUnknownAndDisabled(t *testing.T) {
 	svc := NewService(testConfig(), newFakePool())
 	ctx := context.Background()
 
-	if _, err := svc.Start(ctx, api.ProviderStartParams{WorkspaceID: "ws1", ProviderID: "nope"}); codeOf(t, err) != rpc.CodeInvalidParams {
+	if _, err := svc.Start(ctx, api.ProviderStartParams{WorkspaceID: "ws1", ProviderID: "nope", WorktreeRoot: "/repo/wt"}); codeOf(t, err) != rpc.CodeInvalidParams {
 		t.Errorf("Start unknown: got %v, want invalid params", err)
 	}
-	if _, err := svc.Start(ctx, api.ProviderStartParams{WorkspaceID: "ws1", ProviderID: "kiro"}); codeOf(t, err) != rpc.CodeInvalidParams {
+	if _, err := svc.Start(ctx, api.ProviderStartParams{WorkspaceID: "ws1", ProviderID: "kiro", WorktreeRoot: "/repo/wt"}); codeOf(t, err) != rpc.CodeInvalidParams {
 		t.Errorf("Start disabled: got %v, want invalid params", err)
 	}
 	if _, err := svc.Start(ctx, api.ProviderStartParams{ProviderID: "codex"}); codeOf(t, err) != rpc.CodeInvalidParams {
@@ -123,7 +137,7 @@ func TestStartPropagatesPoolError(t *testing.T) {
 	pool.startErr = errors.New("spawn failed")
 	svc := NewService(testConfig(), pool)
 
-	if _, err := svc.Start(context.Background(), api.ProviderStartParams{WorkspaceID: "ws1", ProviderID: "codex"}); codeOf(t, err) != rpc.CodeInternalError {
+	if _, err := svc.Start(context.Background(), api.ProviderStartParams{WorkspaceID: "ws1", ProviderID: "codex", WorktreeRoot: "/repo/wt"}); codeOf(t, err) != rpc.CodeInternalError {
 		t.Fatalf("Start with failing pool: got %v, want internal error", err)
 	}
 }
