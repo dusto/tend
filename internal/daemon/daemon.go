@@ -155,7 +155,7 @@ func New(ln net.Listener, logPath string, opts ...Option) (*Server, error) {
 	norm.SetModeSink(s.sessions)
 	// The agent's advertised commands (available_commands_update) are aggregated
 	// with the daemon commands by the slash service, which emits the merged event.
-	s.slash = slash.NewService(s.sessions, s.store)
+	s.slash = slash.NewService(s.sessions, s.tasks, s.store)
 	norm.SetCommandSink(s.slash)
 	s.pool = acp.NewPool(spawnProvider(o.acp, norm), s.store, acp.Options{Max: maxProcsPerProvider})
 	s.agent = agent.NewService(s.sessions, acp.NewManager(s.pool), norm)

@@ -2,6 +2,7 @@ package harness
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sync"
@@ -410,4 +411,48 @@ func waitForEventType(c *Client, stream api.StreamID, typ string, d time.Duratio
 		time.Sleep(5 * time.Millisecond)
 	}
 	return false
+}
+
+// TestSlashCompleteOverSocket drives slash.complete end-to-end: it completes a
+// task command's argument against tasks created through task.create, completes a
+// status for /tasks, and returns nothing for a non-daemon command.
+func TestSlashCompleteOverSocket(t *testing.T) {
+	sock := fakeDaemon(t)
+	c := dial(t, sock)
+	mustCall(t, c, "daemon.hello", api.HelloParams{}, &api.HelloResult{})
+	mustCall(t, c, "client.register", api.ClientRegisterParams{ClientID: "ed", Role: api.RoleEditor, PromptCapable: true}, &api.ClientRegisterResult{})
+
+	var started api.AgentStartResult
+	mustCall(t, c, "agent.start", api.AgentStartParams{
+		ProviderID:   "codex",
+		Task:         api.TaskRef{Provider: "beads", WorkspaceID: "ws1", ID: "t-seed"},
+		WorktreeRoot: t.TempDir(),
+	}, &started)
+
+	mustCall(t, c, "task.create", api.TaskCreateParams{WorkspaceID: "ws1", Title: "first"}, &api.Task{})
+	mustCall(t, c, "task.create", api.TaskCreateParams{WorkspaceID: "ws1", Title: "second"}, &api.Task{})
+
+	// A task command completes its id argument against the workspace's tasks.
+	var res api.SlashCompleteResult
+	mustCall(t, c, "slash.complete", api.SlashCompleteParams{SessionID: started.SessionID, Command: "claim", Prefix: "t"}, &res)
+	if len(res.Candidates) < 2 {
+		t.Fatalf("claim completion = %v, want at least the two created task ids", res.Candidates)
+	}
+	if res.Candidates[0].Detail == "" {
+		t.Errorf("candidate detail empty; want the task title")
+	}
+
+	// /tasks completes a status.
+	mustCall(t, c, "slash.complete", api.SlashCompleteParams{SessionID: started.SessionID, Command: "tasks", Prefix: "op"}, &res)
+	if len(res.Candidates) != 1 || res.Candidates[0].Value != "open" {
+		t.Errorf("tasks completion = %v, want [open]", res.Candidates)
+	}
+
+	// A non-daemon command yields nothing — and on the wire as an empty array
+	// (schema-required), not null. Capture the raw result to assert the shape.
+	var raw json.RawMessage
+	mustCall(t, c, "slash.complete", api.SlashCompleteParams{SessionID: started.SessionID, Command: "review", Prefix: "t"}, &raw)
+	if string(raw) != `{"candidates":[]}` {
+		t.Errorf("provider command completion wire shape = %s, want {\"candidates\":[]}", raw)
+	}
 }
