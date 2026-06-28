@@ -22,18 +22,35 @@ type Publisher interface {
 // falls back to a verbatim provider_notification.
 type MetadataParser func(sessionID, method string, raw json.RawMessage) (api.Event, bool)
 
+// ModeSink records an agent-driven mode change on the authoritative session
+// state. The agent can switch modes itself (ACP current_mode_update); the event
+// alone is not enough, because session.list reads the registry, so a later list
+// or a reconnect would report a stale current mode. *session.Registry satisfies
+// this. Optional: nil means mode-change events are published but not recorded.
+type ModeSink interface {
+	SetSessionMode(sessionID api.SessionID, modeID string)
+}
+
 // Normalizer is the inbound handler installed on an ACP process: it converts the
 // agent's session/update notifications into TEND events on the session's stream,
 // and preserves anything it does not recognize as a provider_notification so no
 // agent output is silently dropped. It implements rpc.Handler.
 type Normalizer struct {
-	pub   Publisher
-	parse MetadataParser // optional
+	pub      Publisher
+	parse    MetadataParser // optional
+	modeSink ModeSink       // optional
 }
 
 // NewNormalizer returns a Normalizer that publishes through pub. parse may be nil.
 func NewNormalizer(pub Publisher, parse MetadataParser) *Normalizer {
 	return &Normalizer{pub: pub, parse: parse}
+}
+
+// SetModeSink wires the authoritative session state that agent-driven mode
+// changes are written back to. Set once at daemon wiring, before any ACP process
+// is handling notifications.
+func (n *Normalizer) SetModeSink(sink ModeSink) {
+	n.modeSink = sink
 }
 
 // Handle implements rpc.Handler. It processes inbound notifications; inbound
@@ -72,6 +89,16 @@ func (n *Normalizer) handleUpdate(params json.RawMessage) {
 	_ = json.Unmarshal(env.Update, &kind)
 
 	if ev, ok := mapUpdate(env.SessionID, kind.SessionUpdate, env.Update); ok {
+		// An agent-driven mode change must also update the authoritative session
+		// state, not just stream the event — session.list reads the registry, so
+		// without this a later list or reconnect reports a stale current mode.
+		if kind.SessionUpdate == "current_mode_update" && n.modeSink != nil {
+			var u struct {
+				CurrentModeID string `json:"currentModeId"`
+			}
+			_ = json.Unmarshal(env.Update, &u)
+			n.modeSink.SetSessionMode(api.SessionID(env.SessionID), u.CurrentModeID)
+		}
 		n.publish(ev)
 		return
 	}

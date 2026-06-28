@@ -291,3 +291,51 @@ func TestPublishModeAndModelUpdated(t *testing.T) {
 		t.Errorf("model payload = %+v", model)
 	}
 }
+
+// fakeModeSink records SetSessionMode calls.
+type fakeModeSink struct {
+	sessionID api.SessionID
+	modeID    string
+	calls     int
+}
+
+func (f *fakeModeSink) SetSessionMode(id api.SessionID, modeID string) {
+	f.sessionID = id
+	f.modeID = modeID
+	f.calls++
+}
+
+func TestCurrentModeUpdateWritesBackToSink(t *testing.T) {
+	c := &capture{}
+	sink := &fakeModeSink{}
+	n := NewNormalizer(c, nil)
+	n.SetModeSink(sink)
+
+	notify(n, SessionUpdateMethod, update("s1", map[string]any{
+		"sessionUpdate": "current_mode_update",
+		"currentModeId": "think",
+	}))
+
+	// The authoritative session state is updated, not just the streamed event,
+	// so a later session.list reports the new mode.
+	if sink.calls != 1 || sink.sessionID != "s1" || sink.modeID != "think" {
+		t.Errorf("sink = %+v, want one call for s1/think", sink)
+	}
+	// The event is still published for live subscribers.
+	if ev := c.last(t); ev.Type != "agent_mode_updated" {
+		t.Errorf("event type = %q, want agent_mode_updated", ev.Type)
+	}
+}
+
+func TestCurrentModeUpdateWithoutSink(t *testing.T) {
+	// No sink wired: the event still publishes and nothing panics.
+	c := &capture{}
+	n := NewNormalizer(c, nil)
+	notify(n, SessionUpdateMethod, update("s1", map[string]any{
+		"sessionUpdate": "current_mode_update",
+		"currentModeId": "think",
+	}))
+	if ev := c.last(t); ev.Type != "agent_mode_updated" {
+		t.Errorf("event type = %q, want agent_mode_updated", ev.Type)
+	}
+}

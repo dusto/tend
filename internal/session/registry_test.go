@@ -43,3 +43,18 @@ func TestRegistryDuplicatePanics(t *testing.T) {
 	}()
 	r.Create("s1", "codex", "ws1", api.TaskRef{}, "/a")
 }
+
+func TestRegistrySetSessionMode(t *testing.T) {
+	r := NewRegistry()
+	s := r.Create("s1", "codex", "ws1", api.TaskRef{}, "/repo")
+	s.SetModes("default", []api.SessionMode{{ID: "default"}, {ID: "think"}})
+
+	// An agent-driven mode change is recorded on the session.
+	r.SetSessionMode("s1", "think")
+	if cur, _ := s.Modes(); cur != "think" {
+		t.Errorf("current mode = %q, want think", cur)
+	}
+
+	// An unknown session id is a no-op, not a panic.
+	r.SetSessionMode("missing", "x")
+}

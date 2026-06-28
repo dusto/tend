@@ -146,6 +146,9 @@ func New(ln net.Listener, logPath string, opts ...Option) (*Server, error) {
 	// the event store, a process pool that spawns providers with that normalizer
 	// installed, and the session manager/service over it.
 	norm := acp.NewNormalizer(s.store, nil)
+	// Agent-driven mode changes (current_mode_update) write back to the session
+	// registry so session.list reports the current mode, not just the live event.
+	norm.SetModeSink(s.sessions)
 	s.pool = acp.NewPool(spawnProvider(o.acp, norm), s.store, acp.Options{Max: maxProcsPerProvider})
 	s.agent = agent.NewService(s.sessions, acp.NewManager(s.pool), norm)
 

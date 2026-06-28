@@ -54,6 +54,15 @@ func (r *Registry) Remove(id api.SessionID) {
 	r.mu.Unlock()
 }
 
+// SetSessionMode records an agent-driven mode change (ACP current_mode_update)
+// on the session, so session.list reflects it. Unknown ids are a no-op — a
+// notification can outlive the session it names. This satisfies acp.ModeSink.
+func (r *Registry) SetSessionMode(id api.SessionID, modeID string) {
+	if s, ok := r.Get(id); ok {
+		s.SetCurrentMode(modeID)
+	}
+}
+
 // List returns the live sessions in unspecified order.
 func (r *Registry) List() []*Session {
 	r.mu.Lock()
