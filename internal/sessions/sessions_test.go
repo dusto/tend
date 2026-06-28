@@ -151,3 +151,28 @@ func mustGet(t *testing.T, r *session.Registry, id api.SessionID) *session.Sessi
 	}
 	return s
 }
+
+func TestListReportsModesAndModels(t *testing.T) {
+	svc, sess, _, _ := fixture(t)
+	s := sess.Create("s1", "codex", "ws1", ref("ws1", "t1"), "/repo")
+	s.SetModes("default", []api.SessionMode{{ID: "default", Name: "Default"}, {ID: "think", Name: "Think"}})
+	s.SetModels("sonnet", []api.SessionModel{{ID: "sonnet", Name: "Sonnet"}})
+
+	got := svc.List("ed", api.SessionListParams{}).Sessions[0]
+	if got.CurrentModeID != "default" || len(got.AvailableModes) != 2 || got.AvailableModes[1].ID != "think" {
+		t.Errorf("modes = %q %+v", got.CurrentModeID, got.AvailableModes)
+	}
+	if got.CurrentModelID != "sonnet" || len(got.AvailableModels) != 1 {
+		t.Errorf("models = %q %+v", got.CurrentModelID, got.AvailableModels)
+	}
+}
+
+func TestListOmitsModesWhenProviderOffersNone(t *testing.T) {
+	svc, sess, _, _ := fixture(t)
+	sess.Create("s1", "codex", "ws1", ref("ws1", "t1"), "/repo")
+
+	got := svc.List("ed", api.SessionListParams{}).Sessions[0]
+	if got.CurrentModeID != "" || got.AvailableModes != nil || got.CurrentModelID != "" || got.AvailableModels != nil {
+		t.Errorf("expected empty mode/model fields, got %+v", got)
+	}
+}

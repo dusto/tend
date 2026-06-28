@@ -29,6 +29,24 @@
         },
         "editor_bound": {
           "type": "boolean"
+        },
+        "current_mode_id": {
+          "type": "string"
+        },
+        "available_modes": {
+          "items": {
+            "$ref": "#/$defs/SessionMode"
+          },
+          "type": "array"
+        },
+        "current_model_id": {
+          "type": "string"
+        },
+        "available_models": {
+          "items": {
+            "$ref": "#/$defs/SessionModel"
+          },
+          "type": "array"
         }
       },
       "additionalProperties": false,
@@ -41,6 +59,44 @@
         "stream_id",
         "status",
         "editor_bound"
+      ]
+    },
+    "SessionMode": {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "id",
+        "name"
+      ]
+    },
+    "SessionModel": {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "id",
+        "name"
       ]
     },
     "SessionPending": {

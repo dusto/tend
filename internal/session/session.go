@@ -37,6 +37,13 @@ type Session struct {
 	mu      sync.Mutex
 	status  api.SessionStatus
 	pending *Pending
+	// Provider mode/model selection, captured from session/new and updated on
+	// set_mode/set_model or the agent's own current_mode_update. The available
+	// lists are empty when the provider offers no choice.
+	currentModeID   string
+	availableModes  []api.SessionMode
+	currentModelID  string
+	availableModels []api.SessionModel
 	// Editor binding: owner is the client currently serving editor-local calls
 	// ("" when headless); expectedEditor is the editor identity auto-bind matches,
 	// recorded when the binding is claimed and retained across disconnects so the
@@ -119,6 +126,52 @@ func (s *Session) SetStatus(to api.SessionStatus, pending *Pending) error {
 	}
 	s.status = to
 	return nil
+}
+
+// SetModes records the provider's advertised modes and the active one, captured
+// at session start. A nil/empty list means the provider offers no modes.
+func (s *Session) SetModes(current string, available []api.SessionMode) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.currentModeID = current
+	s.availableModes = available
+}
+
+// SetModels records the provider's advertised models and the active one.
+func (s *Session) SetModels(current string, available []api.SessionModel) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.currentModelID = current
+	s.availableModels = available
+}
+
+// SetCurrentMode updates only the active mode (after a set_mode or an agent-side
+// current_mode_update), leaving the available list unchanged.
+func (s *Session) SetCurrentMode(id string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.currentModeID = id
+}
+
+// SetCurrentModel updates only the active model.
+func (s *Session) SetCurrentModel(id string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.currentModelID = id
+}
+
+// Modes returns the active mode id and the available modes.
+func (s *Session) Modes() (string, []api.SessionMode) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.currentModeID, s.availableModes
+}
+
+// Models returns the active model id and the available models.
+func (s *Session) Models() (string, []api.SessionModel) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.currentModelID, s.availableModels
 }
 
 // Owner returns the session's editor-binding owner and whether one is bound.

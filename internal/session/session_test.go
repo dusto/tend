@@ -99,3 +99,32 @@ func mustTransition(t *testing.T, s *Session, to api.SessionStatus, p *Pending) 
 		t.Fatalf("transition to %s: %v", to, err)
 	}
 }
+
+func TestModeAndModelState(t *testing.T) {
+	s := newSession(t)
+
+	// Defaults: no modes/models until recorded.
+	if cur, modes := s.Modes(); cur != "" || modes != nil {
+		t.Errorf("default modes = %q %+v", cur, modes)
+	}
+
+	s.SetModes("default", []api.SessionMode{{ID: "default"}, {ID: "think"}})
+	s.SetModels("sonnet", []api.SessionModel{{ID: "sonnet"}, {ID: "opus"}})
+
+	if cur, modes := s.Modes(); cur != "default" || len(modes) != 2 {
+		t.Errorf("modes = %q %+v", cur, modes)
+	}
+	if cur, models := s.Models(); cur != "sonnet" || len(models) != 2 {
+		t.Errorf("models = %q %+v", cur, models)
+	}
+
+	// Current-only updates leave the available lists intact.
+	s.SetCurrentMode("think")
+	s.SetCurrentModel("opus")
+	if cur, modes := s.Modes(); cur != "think" || len(modes) != 2 {
+		t.Errorf("after SetCurrentMode = %q %+v", cur, modes)
+	}
+	if cur, models := s.Models(); cur != "opus" || len(models) != 2 {
+		t.Errorf("after SetCurrentModel = %q %+v", cur, models)
+	}
+}

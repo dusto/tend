@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "properties": {
+    "session_id": {
+      "type": "string"
+    },
+    "current_model_id": {
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "type": "object",
+  "required": [
+    "session_id",
+    "current_model_id"
+  ]
+}
