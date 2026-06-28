@@ -31,6 +31,15 @@ type ModeSink interface {
 	SetSessionMode(sessionID api.SessionID, modeID string)
 }
 
+// CommandSink receives the agent's advertised slash commands (ACP
+// available_commands_update). The implementation stores them per session and
+// emits the merged slash_commands_updated event; the normalizer only adapts the
+// ACP wire format to it. *slash.Service satisfies this. Optional: nil leaves
+// available_commands_update preserved as a provider_notification.
+type CommandSink interface {
+	SetSessionCommands(sessionID api.SessionID, commands []api.SlashCommand)
+}
+
 // Normalizer is the inbound handler installed on an ACP process: it converts the
 // agent's session/update notifications into TEND events on the session's stream,
 // and preserves anything it does not recognize as a provider_notification so no
@@ -39,6 +48,7 @@ type Normalizer struct {
 	pub      Publisher
 	parse    MetadataParser // optional
 	modeSink ModeSink       // optional
+	cmdSink  CommandSink    // optional
 }
 
 // NewNormalizer returns a Normalizer that publishes through pub. parse may be nil.
@@ -51,6 +61,13 @@ func NewNormalizer(pub Publisher, parse MetadataParser) *Normalizer {
 // is handling notifications.
 func (n *Normalizer) SetModeSink(sink ModeSink) {
 	n.modeSink = sink
+}
+
+// SetCommandSink wires the slash-command aggregator the agent's advertised
+// commands are written to. Set once at daemon wiring, before any ACP process is
+// handling notifications.
+func (n *Normalizer) SetCommandSink(sink CommandSink) {
+	n.cmdSink = sink
 }
 
 // Handle implements rpc.Handler. It processes inbound notifications; inbound
@@ -88,6 +105,15 @@ func (n *Normalizer) handleUpdate(params json.RawMessage) {
 	}
 	_ = json.Unmarshal(env.Update, &kind)
 
+	// The agent's advertised commands are handed to the slash aggregator, which
+	// owns storing them and emitting the merged slash_commands_updated event (the
+	// daemon commands are not visible here). Without a sink wired, fall through so
+	// the update is still preserved as a provider_notification.
+	if kind.SessionUpdate == "available_commands_update" && n.cmdSink != nil {
+		n.cmdSink.SetSessionCommands(api.SessionID(env.SessionID), parseAvailableCommands(env.Update))
+		return
+	}
+
 	if ev, ok := mapUpdate(env.SessionID, kind.SessionUpdate, env.Update); ok {
 		// An agent-driven mode change must also update the authoritative session
 		// state, not just stream the event — session.list reads the registry, so
@@ -110,6 +136,36 @@ func (n *Normalizer) handleUpdate(params json.RawMessage) {
 		}
 	}
 	n.preserve(env.SessionID, method, env.Update)
+}
+
+// parseAvailableCommands converts an ACP available_commands_update into the
+// daemon's provider-origin slash commands, taking the optional input hint as the
+// argument hint.
+func parseAvailableCommands(update json.RawMessage) []api.SlashCommand {
+	var u struct {
+		AvailableCommands []struct {
+			Name        string `json:"name"`
+			Description string `json:"description"`
+			Input       *struct {
+				Hint string `json:"hint"`
+			} `json:"input"`
+		} `json:"availableCommands"`
+	}
+	_ = json.Unmarshal(update, &u)
+	out := make([]api.SlashCommand, len(u.AvailableCommands))
+	for i, c := range u.AvailableCommands {
+		hint := ""
+		if c.Input != nil {
+			hint = c.Input.Hint
+		}
+		out[i] = api.SlashCommand{
+			Name:        c.Name,
+			Description: c.Description,
+			Origin:      api.SlashOriginProvider,
+			ArgHint:     hint,
+		}
+	}
+	return out
 }
 
 // mapUpdate translates a recognized ACP session update into a TEND event.

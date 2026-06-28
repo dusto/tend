@@ -84,6 +84,7 @@ var EventDefs = []EventDef{
 	{Type: "agent_mode_updated", Scope: ScopeSession, Payload: AgentModeUpdated{}, Summary: "A session's active mode (reasoning/thought level) changed, by a client set or the agent itself."},
 	{Type: "agent_model_updated", Scope: ScopeSession, Payload: AgentModelUpdated{}, Summary: "A session's active model changed."},
 	{Type: "agent_plan", Scope: ScopeSession, Payload: AgentPlan{}, Summary: "The agent's tactical per-turn plan (its todo list): the full set of entries with their status, replacing any prior plan for the turn."},
+	{Type: "slash_commands_updated", Scope: ScopeSession, Payload: SlashCommandsUpdated{}, Summary: "A session's merged slash-command set changed (the agent advertised new commands): the full set of provider + daemon commands, replacing the prior set."},
 	{Type: "task_created", Scope: ScopeWorkspace, Payload: TaskChange{}, Summary: "A task was created. Repo-wide: delivered on the workspace stream."},
 	{Type: "task_updated", Scope: ScopeWorkspace, Payload: TaskChange{}, Summary: "A task changed (e.g. claimed or linked). Repo-wide: delivered on the workspace stream."},
 	{Type: "task_commented", Scope: ScopeWorkspace, Payload: TaskChange{}, Summary: "A comment was added to a task. Repo-wide: delivered on the workspace stream."},
@@ -190,6 +191,15 @@ type AgentModelUpdated struct {
 type AgentPlan struct {
 	SessionID SessionID   `json:"session_id"`
 	Entries   []PlanEntry `json:"entries"`
+}
+
+// SlashCommandsUpdated signals that a session's merged slash-command set changed,
+// carrying the full set (provider + daemon commands) so a client replaces rather
+// than merges. Emitted when the agent advertises commands (ACP
+// available_commands_update); the daemon commands are constant within the set.
+type SlashCommandsUpdated struct {
+	SessionID SessionID      `json:"session_id"`
+	Commands  []SlashCommand `json:"commands"`
 }
 
 // PlanEntry is one item in an agent plan: what it intends to do, how it ranks it,

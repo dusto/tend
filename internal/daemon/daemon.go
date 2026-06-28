@@ -29,6 +29,7 @@ import (
 	"github.com/dusto/tend/internal/rpc"
 	"github.com/dusto/tend/internal/session"
 	"github.com/dusto/tend/internal/sessions"
+	"github.com/dusto/tend/internal/slash"
 	"github.com/dusto/tend/internal/tasks"
 	"github.com/dusto/tend/internal/workspace"
 )
@@ -57,6 +58,7 @@ type Server struct {
 	pool     *acp.Pool
 	agent    *agent.Service
 	provider *provider.Service
+	slash    *slash.Service
 	// clients tracks connected-client identity/capabilities daemon-wide.
 	clients *client.Registry
 	// binder owns editor-binding decisions across sessions; gate is the shared
@@ -151,6 +153,10 @@ func New(ln net.Listener, logPath string, opts ...Option) (*Server, error) {
 	// Agent-driven mode changes (current_mode_update) write back to the session
 	// registry so session.list reports the current mode, not just the live event.
 	norm.SetModeSink(s.sessions)
+	// The agent's advertised commands (available_commands_update) are aggregated
+	// with the daemon commands by the slash service, which emits the merged event.
+	s.slash = slash.NewService(s.sessions, s.store)
+	norm.SetCommandSink(s.slash)
 	s.pool = acp.NewPool(spawnProvider(o.acp, norm), s.store, acp.Options{Max: maxProcsPerProvider})
 	s.agent = agent.NewService(s.sessions, acp.NewManager(s.pool), norm)
 	s.provider = provider.NewService(o.acp, s.pool)
@@ -246,6 +252,9 @@ func (s *Server) newMux() (*dispatch.Mux, func(), error) {
 		return nil, nil, err
 	}
 	if err := provider.Register(mux, s.provider); err != nil {
+		return nil, nil, err
+	}
+	if err := slash.Register(mux, s.slash); err != nil {
 		return nil, nil, err
 	}
 	if err := tasks.Register(mux, s.tasks); err != nil {

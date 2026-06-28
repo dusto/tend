@@ -40,6 +40,8 @@ Schemas live under `schemas/` (`methods/<name>.params.json` / `.result.json`, `e
   - Params: `ProviderStartParams` · Result: `ProviderStartResult`
 - **`provider.stop`** — Stop a provider for a workspace: terminate its pooled processes; emits provider_stopped per process.
   - Params: `ProviderStopParams` · Result: `ProviderStopResult`
+- **`slash.list`** — List a session's merged slash-command set: the agent's advertised commands plus the daemon/harness commands.
+  - Params: `SlashListParams` · Result: `SlashListResult`
 - **`client.register`** — Register the connection's stable client id, role (editor/observer), and prompt capability.
   - Params: `ClientRegisterParams` · Result: `ClientRegisterResult`
 - **`file.read`** — Read a repo file editor-aware (non-mutating): live buffer content + changedtick when open, else disk content + content hash.
@@ -135,6 +137,8 @@ Schemas live under `schemas/` (`methods/<name>.params.json` / `.result.json`, `e
   - Payload: `ProviderStarted`
 - **`provider_stopped`** (`workspace` stream) — A provider process left the pool (exit or crash). Repo-wide: delivered on the workspace stream.
   - Payload: `ProviderStopped`
+- **`slash_commands_updated`** (`session` stream) — A session's merged slash-command set changed (the agent advertised new commands): the full set of provider + daemon commands, replacing the prior set.
+  - Payload: `SlashCommandsUpdated`
 - **`task_closed`** (`workspace` stream) — A task was closed. Repo-wide: delivered on the workspace stream.
   - Payload: `TaskChange`
 - **`task_commented`** (`workspace` stream) — A comment was added to a task. Repo-wide: delivered on the workspace stream.
