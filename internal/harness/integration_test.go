@@ -343,3 +343,71 @@ func TestProviderLifecycle(t *testing.T) {
 		t.Errorf("last workspace event = %q, want provider_stopped", ws[len(ws)-1])
 	}
 }
+
+// TestSlashCommandsAggregated drives the daemon's slash-command aggregation over
+// the socket: slash.list returns the daemon commands before the agent advertises
+// any, and once the agent sends available_commands_update (via the "commands"
+// prompt), a slash_commands_updated event arrives on the session stream and
+// slash.list reflects the merged provider + daemon set.
+func TestSlashCommandsAggregated(t *testing.T) {
+	sock := fakeDaemon(t)
+	c := dial(t, sock)
+	mustCall(t, c, "daemon.hello", api.HelloParams{}, &api.HelloResult{})
+	mustCall(t, c, "client.register", api.ClientRegisterParams{ClientID: "ed", Role: api.RoleEditor, PromptCapable: true}, &api.ClientRegisterResult{})
+
+	var started api.AgentStartResult
+	mustCall(t, c, "agent.start", api.AgentStartParams{
+		ProviderID:   "codex",
+		Task:         api.TaskRef{Provider: "beads", WorkspaceID: "ws1", ID: "t1"},
+		WorktreeRoot: t.TempDir(),
+	}, &started)
+	mustCall(t, c, "events.subscribe", api.EventsSubscribeParams{StreamID: started.StreamID}, &api.EventsSubscribeResult{})
+
+	// Before the agent advertises anything, only the daemon commands are offered.
+	var list api.SlashListResult
+	mustCall(t, c, "slash.list", api.SlashListParams{SessionID: started.SessionID}, &list)
+	if len(list.Commands) == 0 {
+		t.Fatal("slash.list returned no commands; want the daemon set")
+	}
+	for _, cmd := range list.Commands {
+		if cmd.Origin != api.SlashOriginDaemon {
+			t.Fatalf("pre-advertise command %q origin = %q, want daemon", cmd.Name, cmd.Origin)
+		}
+	}
+	daemonCount := len(list.Commands)
+
+	// The "commands" prompt makes the fake agent advertise two provider commands.
+	mustCall(t, c, "agent.prompt", api.AgentPromptParams{SessionID: started.SessionID, Text: "commands"}, &api.AgentPromptResult{})
+
+	if !waitForEventType(c, started.StreamID, "slash_commands_updated", 3*time.Second) {
+		t.Fatalf("no slash_commands_updated; got %v", c.EventTypes(started.StreamID))
+	}
+
+	mustCall(t, c, "slash.list", api.SlashListParams{SessionID: started.SessionID}, &list)
+	if len(list.Commands) != daemonCount+2 {
+		t.Fatalf("merged set = %d commands, want %d daemon + 2 provider", len(list.Commands), daemonCount)
+	}
+	var review *api.SlashCommand
+	for i := range list.Commands {
+		if list.Commands[i].Name == "review" {
+			review = &list.Commands[i]
+		}
+	}
+	if review == nil || review.Origin != api.SlashOriginProvider || review.ArgHint != "<path>" {
+		t.Errorf("review command = %+v, want provider origin with hint <path>", review)
+	}
+}
+
+// waitForEventType reports whether an event of type typ arrives on stream within d.
+func waitForEventType(c *Client, stream api.StreamID, typ string, d time.Duration) bool {
+	deadline := time.Now().Add(d)
+	for time.Now().Before(deadline) {
+		for _, got := range c.EventTypes(stream) {
+			if got == typ {
+				return true
+			}
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	return false
+}

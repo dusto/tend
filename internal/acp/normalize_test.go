@@ -377,6 +377,66 @@ func TestCurrentModeUpdateWritesBackToSink(t *testing.T) {
 	}
 }
 
+// fakeCommandSink records the commands handed to it.
+type fakeCommandSink struct {
+	sessionID api.SessionID
+	commands  []api.SlashCommand
+	calls     int
+}
+
+func (f *fakeCommandSink) SetSessionCommands(id api.SessionID, cmds []api.SlashCommand) {
+	f.sessionID = id
+	f.commands = cmds
+	f.calls++
+}
+
+func TestAvailableCommandsRoutedToSink(t *testing.T) {
+	c := &capture{}
+	sink := &fakeCommandSink{}
+	n := NewNormalizer(c, nil)
+	n.SetCommandSink(sink)
+
+	notify(n, SessionUpdateMethod, update("s1", map[string]any{
+		"sessionUpdate": "available_commands_update",
+		"availableCommands": []map[string]any{
+			{"name": "review", "description": "review the diff", "input": map[string]any{"hint": "<path>"}},
+			{"name": "compact"},
+		},
+	}))
+
+	// The commands go to the aggregator (which owns the merged event); the
+	// normalizer does not also emit a provider_notification for them.
+	if sink.calls != 1 || sink.sessionID != "s1" || len(sink.commands) != 2 {
+		t.Fatalf("sink = %+v, want one call for s1 with 2 commands", sink)
+	}
+	got := sink.commands[0]
+	if got.Name != "review" || got.Origin != api.SlashOriginProvider || got.ArgHint != "<path>" || got.Description != "review the diff" {
+		t.Errorf("command 0 = %+v", got)
+	}
+	if sink.commands[1].Name != "compact" || sink.commands[1].ArgHint != "" {
+		t.Errorf("command 1 = %+v, want compact with no hint", sink.commands[1])
+	}
+	if evs := c.events(); len(evs) != 0 {
+		t.Errorf("normalizer emitted %v, want nothing (the sink owns the event)", evs)
+	}
+}
+
+func TestAvailableCommandsWithoutSinkPreserved(t *testing.T) {
+	// No command sink wired: the update is still preserved as a provider_notification
+	// so nothing the agent advertised is silently dropped.
+	c := &capture{}
+	n := NewNormalizer(c, nil)
+	notify(n, SessionUpdateMethod, update("s1", map[string]any{
+		"sessionUpdate":     "available_commands_update",
+		"availableCommands": []map[string]any{{"name": "review"}},
+	}))
+
+	ev := c.last(t)
+	if ev.Type != "provider_notification" {
+		t.Fatalf("event type = %q, want provider_notification", ev.Type)
+	}
+}
+
 func TestCurrentModeUpdateWithoutSink(t *testing.T) {
 	// No sink wired: the event still publishes and nothing panics.
 	c := &capture{}

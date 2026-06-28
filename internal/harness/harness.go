@@ -63,6 +63,19 @@ func RunFakeACP() {
 					"sessionId": p.SessionID, "update": update,
 				})
 			}
+			// A prompt of "commands" makes the agent advertise slash commands
+			// (ACP available_commands_update) before its messages, so a test can
+			// drive the daemon's slash-command aggregation. Gated behind the marker
+			// so the default turn keeps its fixed event shape.
+			if firstText(p.Prompt) == "commands" {
+				send(map[string]any{
+					"sessionUpdate": "available_commands_update",
+					"availableCommands": []map[string]any{
+						{"name": "review", "description": "review the diff", "input": map[string]any{"hint": "<path>"}},
+						{"name": "compact"},
+					},
+				})
+			}
 			send(map[string]any{"sessionUpdate": "agent_message_chunk", "content": map[string]any{"text": "hello "}})
 			send(map[string]any{"sessionUpdate": "agent_message_chunk", "content": map[string]any{"text": "world"}})
 			send(map[string]any{"sessionUpdate": "tool_call", "toolCallId": "t1", "title": "read_file"})
@@ -82,21 +95,26 @@ func RunFakeACP() {
 	<-conn.Done()
 }
 
-// holdPath returns the release-file path encoded in a "hold:<path>" prompt, so
-// the fake agent knows to keep the turn open until that file appears.
-func holdPath(prompt []json.RawMessage) (string, bool) {
+// firstText returns the text of the prompt's first content block, or "" when the
+// prompt is empty or its first block is not text.
+func firstText(prompt []json.RawMessage) string {
 	if len(prompt) == 0 {
-		return "", false
+		return ""
 	}
 	var block struct {
 		Text string `json:"text"`
 	}
-	if json.Unmarshal(prompt[0], &block) != nil {
-		return "", false
-	}
+	_ = json.Unmarshal(prompt[0], &block)
+	return block.Text
+}
+
+// holdPath returns the release-file path encoded in a "hold:<path>" prompt, so
+// the fake agent knows to keep the turn open until that file appears.
+func holdPath(prompt []json.RawMessage) (string, bool) {
+	text := firstText(prompt)
 	const marker = "hold:"
-	if len(block.Text) > len(marker) && block.Text[:len(marker)] == marker {
-		return block.Text[len(marker):], true
+	if len(text) > len(marker) && text[:len(marker)] == marker {
+		return text[len(marker):], true
 	}
 	return "", false
 }

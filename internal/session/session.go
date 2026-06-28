@@ -44,6 +44,9 @@ type Session struct {
 	availableModes  []api.SessionMode
 	currentModelID  string
 	availableModels []api.SessionModel
+	// providerCommands are the agent's advertised slash commands, captured from
+	// the ACP available_commands_update. Empty until the agent advertises any.
+	providerCommands []api.SlashCommand
 	// Editor binding: owner is the client currently serving editor-local calls
 	// ("" when headless); expectedEditor is the editor identity auto-bind matches,
 	// recorded when the binding is claimed and retained across disconnects so the
@@ -172,6 +175,21 @@ func (s *Session) Models() (string, []api.SessionModel) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.currentModelID, s.availableModels
+}
+
+// SetProviderCommands records the agent's advertised slash commands, replacing
+// any prior set (each available_commands_update carries the full list).
+func (s *Session) SetProviderCommands(cmds []api.SlashCommand) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.providerCommands = cmds
+}
+
+// ProviderCommands returns the agent's advertised slash commands.
+func (s *Session) ProviderCommands() []api.SlashCommand {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.providerCommands
 }
 
 // Owner returns the session's editor-binding owner and whether one is bound.
