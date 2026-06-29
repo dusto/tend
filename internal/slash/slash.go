@@ -260,7 +260,7 @@ func (s *Service) ownsCommand(name string) bool {
 // the message to "<id>: <title>" when none is given.
 func daemonTask(t *api.Task, message string) api.SlashInvokeResult {
 	if message == "" {
-		message = string(t.Ref.ID)
+		message = t.Ref.ID
 		if t.Title != "" {
 			message += ": " + t.Title
 		}
