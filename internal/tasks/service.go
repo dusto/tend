@@ -160,10 +160,41 @@ func (s *Service) list(ctx context.Context, p api.TaskListParams) (api.TaskListR
 
 // List returns a workspace's tasks, optionally filtered by status, for daemon
 // features that need task data outside the task.* RPC surface (slash-command
-// argument completion).
+// argument completion and invocation).
 func (s *Service) List(ctx context.Context, ws api.WorkspaceID, status string) ([]api.Task, error) {
 	res, err := s.list(ctx, api.TaskListParams{WorkspaceID: ws, Status: status})
 	return res.Tasks, err
+}
+
+// Show, Claim, Comment, and Close run a task action by workspace + bare id, for
+// the slash-command invoke path. They build the provider-qualified ref
+// internally so a caller need not know the workspace's provider name.
+
+// Show returns one task by id.
+func (s *Service) Show(ctx context.Context, ws api.WorkspaceID, id string) (api.Task, error) {
+	return s.showRef(ctx, s.ref(ws, id))
+}
+
+// Claim assigns a task and marks it in progress, returning the updated task.
+func (s *Service) Claim(ctx context.Context, ws api.WorkspaceID, id, assignee string) (api.Task, error) {
+	return s.claim(ctx, api.TaskClaimParams{Ref: s.ref(ws, id), Assignee: assignee})
+}
+
+// Comment appends a comment to a task, returning the updated task.
+func (s *Service) Comment(ctx context.Context, ws api.WorkspaceID, id, author, text string) (api.Task, error) {
+	return s.comment(ctx, api.TaskCommentParams{Ref: s.ref(ws, id), Author: author, Text: text})
+}
+
+// CloseTask closes a task, returning the updated task. (Named to avoid the
+// service's lifecycle Close.)
+func (s *Service) CloseTask(ctx context.Context, ws api.WorkspaceID, id string) (api.Task, error) {
+	return s.close(ctx, api.TaskCloseParams{Ref: s.ref(ws, id)})
+}
+
+// ref builds a provider-qualified task ref for a workspace + bare id, using the
+// workspace provider's name.
+func (s *Service) ref(ws api.WorkspaceID, id string) api.TaskRef {
+	return api.TaskRef{Provider: s.provider(ws).Name(), WorkspaceID: ws, ID: id}
 }
 
 func (s *Service) claim(ctx context.Context, p api.TaskClaimParams) (api.Task, error) {

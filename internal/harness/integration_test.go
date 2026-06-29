@@ -456,3 +456,42 @@ func TestSlashCompleteOverSocket(t *testing.T) {
 		t.Errorf("provider command completion wire shape = %s, want {\"candidates\":[]}", raw)
 	}
 }
+
+// TestSlashInvokeOverSocket drives slash.invoke end-to-end: a daemon command runs
+// a task action (claiming a task created via task.create), and a non-daemon
+// command is forwarded to the agent as a prompt turn.
+func TestSlashInvokeOverSocket(t *testing.T) {
+	sock := fakeDaemon(t)
+	c := dial(t, sock)
+	mustCall(t, c, "daemon.hello", api.HelloParams{}, &api.HelloResult{})
+	mustCall(t, c, "client.register", api.ClientRegisterParams{ClientID: "ed", Role: api.RoleEditor, PromptCapable: true}, &api.ClientRegisterResult{})
+
+	var started api.AgentStartResult
+	mustCall(t, c, "agent.start", api.AgentStartParams{
+		ProviderID:   "codex",
+		Task:         api.TaskRef{Provider: "beads", WorkspaceID: "ws1", ID: "t-seed"},
+		WorktreeRoot: t.TempDir(),
+	}, &started)
+	mustCall(t, c, "events.subscribe", api.EventsSubscribeParams{StreamID: started.StreamID}, &api.EventsSubscribeResult{})
+
+	var created api.Task
+	mustCall(t, c, "task.create", api.TaskCreateParams{WorkspaceID: "ws1", Title: "do it"}, &created)
+
+	// A daemon command runs the task action and returns the updated task.
+	var claim api.SlashInvokeResult
+	mustCall(t, c, "slash.invoke", api.SlashInvokeParams{SessionID: started.SessionID, Command: "claim", Args: created.Ref.ID}, &claim)
+	if claim.Origin != api.SlashOriginDaemon || claim.Task == nil || claim.Task.Status != "in_progress" {
+		t.Fatalf("claim result = %+v, want daemon origin with the task now in_progress", claim)
+	}
+
+	// A non-daemon command is forwarded to the agent: the turn runs and streams
+	// its events onto the session stream.
+	var fwd api.SlashInvokeResult
+	mustCall(t, c, "slash.invoke", api.SlashInvokeParams{SessionID: started.SessionID, Command: "review", Args: "src/foo.go"}, &fwd)
+	if fwd.Origin != api.SlashOriginProvider || fwd.StopReason == "" {
+		t.Errorf("forward result = %+v, want provider origin with a stop reason", fwd)
+	}
+	if !waitForEventType(c, started.StreamID, "agent_message_chunk", 3*time.Second) {
+		t.Errorf("forwarded command produced no turn events; got %v", c.EventTypes(started.StreamID))
+	}
+}

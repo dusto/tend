@@ -56,3 +56,25 @@ type SlashCandidate struct {
 	Value  string `json:"value"`
 	Detail string `json:"detail,omitempty"`
 }
+
+// SlashInvokeParams invokes a slash command for a session. Command is the bare
+// name (no leading slash); Args is the raw argument text after it. The daemon
+// runs a command it owns as a daemon action and forwards anything else to the
+// agent as a prompt turn.
+type SlashInvokeParams struct {
+	SessionID SessionID `json:"session_id"`
+	Command   string    `json:"command"`
+	Args      string    `json:"args,omitempty"`
+}
+
+// SlashInvokeResult reports how a command was handled. Origin is "daemon" (the
+// daemon ran a task action) or "provider" (the command was forwarded to the
+// agent). Message is a human-readable outcome; Task/Tasks carry a daemon
+// command's result; StopReason is the turn's stop reason for a forwarded command.
+type SlashInvokeResult struct {
+	Origin     string `json:"origin"`
+	Message    string `json:"message,omitempty"`
+	Task       *Task  `json:"task,omitempty"`
+	Tasks      []Task `json:"tasks,omitempty"`
+	StopReason string `json:"stop_reason,omitempty"`
+}
