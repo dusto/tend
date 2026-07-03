@@ -387,6 +387,40 @@ func TestOpenCapturesConfigOptions(t *testing.T) {
 	}
 }
 
+func TestOpenMapsEffortCategoryToThoughtLevel(t *testing.T) {
+	// Older claude-agent-acp advertises its reasoning selector under the "effort"
+	// category (id "effort") rather than the spec's "thought_level"; it must still
+	// populate the thought-level axis and route sets to session/set_config_option.
+	agent := &fakeAgent{
+		newConfigOptions: []acpConfigOption{{
+			ID: "effort", Category: "effort", CurrentValue: "medium",
+			Options: []acpConfigOptionChoice{{Value: "low", Name: "Low"}, {Value: "high", Name: "High"}},
+		}},
+	}
+	m := newManager(t, agent, Options{Max: 1})
+	s := openSession(t, m, testKey)
+
+	if s.CurrentThoughtLevelID != "medium" || len(s.AvailableThoughtLevels) != 2 || s.thoughtConfigID != "effort" {
+		t.Fatalf("thought axis = %q/%+v id=%q, want the effort option captured", s.CurrentThoughtLevelID, s.AvailableThoughtLevels, s.thoughtConfigID)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if err := m.SetThoughtLevel(ctx, s.ID, "high"); err != nil {
+		t.Fatalf("SetThoughtLevel: %v", err)
+	}
+	agent.mu.Lock()
+	gotConfig := agent.lastSetConfigOption
+	agent.mu.Unlock()
+	var cfg SetConfigOptionParams
+	if err := json.Unmarshal(gotConfig, &cfg); err != nil {
+		t.Fatalf("set_config_option params: %v", err)
+	}
+	if cfg.ConfigID != "effort" || cfg.Value != "high" {
+		t.Errorf("set_config_option = %+v, want configId=effort value=high", cfg)
+	}
+}
+
 func TestSetModelRoutesConfigOptionWhenConfigBacked(t *testing.T) {
 	agent := &fakeAgent{
 		newConfigOptions: []acpConfigOption{{

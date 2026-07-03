@@ -477,7 +477,8 @@ func TestConfigOptionUpdateWritesBackAndEmits(t *testing.T) {
 		"sessionUpdate": "config_option_update",
 		"configOptions": []map[string]any{
 			{"id": "m", "category": "model", "currentValue": "opus"},
-			{"id": "t", "category": "thought_level", "currentValue": "high"},
+			// claude's alias category folds onto the thought-level axis.
+			{"id": "effort", "category": "effort", "currentValue": "high"},
 			{"id": "b", "category": "model_config", "currentValue": true},
 		},
 	}))

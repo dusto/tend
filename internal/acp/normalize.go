@@ -192,7 +192,7 @@ func (n *Normalizer) handleConfigOptionUpdate(sessionID string, update json.RawM
 		if json.Unmarshal(opt.CurrentValue, &value) != nil {
 			continue
 		}
-		switch opt.Category {
+		switch canonicalCategory(opt.Category) {
 		case configCategoryModel:
 			if n.configSink != nil {
 				n.configSink.SetSessionModel(sid, value)

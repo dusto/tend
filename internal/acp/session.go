@@ -52,7 +52,24 @@ const (
 	configCategoryMode         = "mode"
 	configCategoryModel        = "model"
 	configCategoryThoughtLevel = "thought_level"
+	// configCategoryEffort is claude-agent-acp's pre-spec category name for the
+	// reasoning/thought-level selector: it advertised "effort" (PR #464) before
+	// the ACP spec settled on "thought_level". Newer claude builds send
+	// "thought_level", but the alias keeps older ones working. See
+	// canonicalCategory.
+	configCategoryEffort = "effort"
 )
+
+// canonicalCategory folds a provider's config-option category into the daemon's
+// selector axis, mapping known vendor aliases (claude's "effort") onto the spec
+// category so a single code path captures both. Unknown categories pass through
+// unchanged (and are ignored by the axis switches).
+func canonicalCategory(category string) string {
+	if category == configCategoryEffort {
+		return configCategoryThoughtLevel
+	}
+	return category
+}
 
 // acpConfigOption is one ACP SessionConfigOption from session/new: a selector
 // with an id, a category, the current value, and the choices.
@@ -215,7 +232,7 @@ func (m *Manager) Open(ctx context.Context, key Key, params NewSessionParams) (*
 	// configOptions (newer path) supplement/override the legacy fields per axis;
 	// a provider may send both (claude: legacy modes + a "model" config option).
 	for _, opt := range res.ConfigOptions {
-		switch opt.Category {
+		switch canonicalCategory(opt.Category) {
 		case configCategoryModel:
 			s.CurrentModelID = opt.CurrentValue
 			s.AvailableModels = toAPIModelsFromOptions(opt.Options)
