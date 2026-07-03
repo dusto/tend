@@ -54,12 +54,31 @@ func (r *Registry) Remove(id api.SessionID) {
 	r.mu.Unlock()
 }
 
-// SetSessionMode records an agent-driven mode change (ACP current_mode_update)
-// on the session, so session.list reflects it. Unknown ids are a no-op — a
-// notification can outlive the session it names. This satisfies acp.ModeSink.
+// SetSessionMode records an agent-driven mode change (ACP current_mode_update,
+// or a config_option_update on a mode-category option) on the session, so
+// session.list reflects it. Unknown ids are a no-op — a notification can outlive
+// the session it names. This satisfies acp.ModeSink and acp.ConfigSink.
 func (r *Registry) SetSessionMode(id api.SessionID, modeID string) {
 	if s, ok := r.Get(id); ok {
 		s.SetCurrentMode(modeID)
+	}
+}
+
+// SetSessionModel records an agent-driven model change (a config_option_update
+// on a model-category option) on the session. Unknown ids are a no-op. Part of
+// acp.ConfigSink.
+func (r *Registry) SetSessionModel(id api.SessionID, modelID string) {
+	if s, ok := r.Get(id); ok {
+		s.SetCurrentModel(modelID)
+	}
+}
+
+// SetSessionThoughtLevel records an agent-driven thought-level change (a
+// config_option_update on a thought_level-category option) on the session.
+// Unknown ids are a no-op. Part of acp.ConfigSink.
+func (r *Registry) SetSessionThoughtLevel(id api.SessionID, thoughtLevelID string) {
+	if s, ok := r.Get(id); ok {
+		s.SetCurrentThoughtLevel(thoughtLevelID)
 	}
 }
 

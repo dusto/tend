@@ -186,7 +186,8 @@ type AgentModelUpdated struct {
 }
 
 // AgentThoughtLevelUpdated signals that a session's active reasoning/thought
-// level changed (a client called session.set_thought_level).
+// level changed, by a client set (session.set_thought_level) or the agent itself
+// (a config_option_update).
 type AgentThoughtLevelUpdated struct {
 	SessionID             SessionID `json:"session_id"`
 	CurrentThoughtLevelID string    `json:"current_thought_level_id"`

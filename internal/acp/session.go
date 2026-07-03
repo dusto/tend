@@ -109,10 +109,12 @@ type SetModelParams struct {
 
 // SetConfigOptionParams is the session/set_config_option request: change the
 // value of a config option (identified by its id) advertised in configOptions.
+// The chosen option value is carried as "value" (the ACP wire field), not
+// "configValue".
 type SetConfigOptionParams struct {
-	SessionID   string `json:"sessionId"`
-	ConfigID    string `json:"configId"`
-	ConfigValue string `json:"configValue"`
+	SessionID string `json:"sessionId"`
+	ConfigID  string `json:"configId"`
+	Value     string `json:"value"`
 }
 
 // PromptParams is the session/prompt request. SessionID is set by the manager.
@@ -373,9 +375,9 @@ func (m *Manager) configID(sessionID api.SessionID, category string) string {
 // setConfigOption changes a config option's value on the session's process.
 func (m *Manager) setConfigOption(ctx context.Context, sessionID api.SessionID, configID, value string) error {
 	return m.callOnSession(ctx, sessionID, MethodSetConfigOption, SetConfigOptionParams{
-		SessionID:   string(sessionID),
-		ConfigID:    configID,
-		ConfigValue: value,
+		SessionID: string(sessionID),
+		ConfigID:  configID,
+		Value:     value,
 	})
 }
 

@@ -449,3 +449,71 @@ func TestCurrentModeUpdateWithoutSink(t *testing.T) {
 		t.Errorf("event type = %q, want agent_mode_updated", ev.Type)
 	}
 }
+
+// fakeConfigSink records the per-axis config-option writes it receives.
+type fakeConfigSink struct {
+	model        string
+	mode         string
+	thoughtLevel string
+	calls        int
+}
+
+func (f *fakeConfigSink) SetSessionMode(_ api.SessionID, id string)  { f.mode = id; f.calls++ }
+func (f *fakeConfigSink) SetSessionModel(_ api.SessionID, id string) { f.model = id; f.calls++ }
+func (f *fakeConfigSink) SetSessionThoughtLevel(_ api.SessionID, id string) {
+	f.thoughtLevel = id
+	f.calls++
+}
+
+func TestConfigOptionUpdateWritesBackAndEmits(t *testing.T) {
+	c := &capture{}
+	sink := &fakeConfigSink{}
+	n := NewNormalizer(c, nil)
+	n.SetConfigSink(sink)
+
+	// A config_option_update carries the full selector set; several axes can move
+	// at once. A boolean toggle carries no daemon axis and is ignored.
+	notify(n, SessionUpdateMethod, update("s1", map[string]any{
+		"sessionUpdate": "config_option_update",
+		"configOptions": []map[string]any{
+			{"id": "m", "category": "model", "currentValue": "opus"},
+			{"id": "t", "category": "thought_level", "currentValue": "high"},
+			{"id": "b", "category": "model_config", "currentValue": true},
+		},
+	}))
+
+	// Each recognized select axis writes back to the registry.
+	if sink.model != "opus" || sink.thoughtLevel != "high" || sink.mode != "" {
+		t.Errorf("sink = %+v, want model=opus thought=high mode empty", sink)
+	}
+	if sink.calls != 2 {
+		t.Errorf("sink.calls = %d, want 2 (boolean toggle ignored)", sink.calls)
+	}
+	// And each emits its matching axis event for live subscribers.
+	types := map[string]bool{}
+	for _, ev := range c.events() {
+		types[ev.Type] = true
+	}
+	if !types["agent_model_updated"] || !types["agent_thought_level_updated"] {
+		t.Errorf("emitted types = %v, want model + thought-level updates", types)
+	}
+	if len(c.events()) != 2 {
+		t.Errorf("emitted %d events, want 2", len(c.events()))
+	}
+}
+
+func TestConfigOptionUpdateWithoutSink(t *testing.T) {
+	// No config sink wired: the axis event still publishes and nothing panics.
+	c := &capture{}
+	n := NewNormalizer(c, nil)
+	notify(n, SessionUpdateMethod, update("s1", map[string]any{
+		"sessionUpdate": "config_option_update",
+		"configOptions": []map[string]any{
+			{"id": "m", "category": "model", "currentValue": "sonnet"},
+		},
+	}))
+	ev := c.last(t)
+	if ev.Type != "agent_model_updated" {
+		t.Errorf("event type = %q, want agent_model_updated", ev.Type)
+	}
+}

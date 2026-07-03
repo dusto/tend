@@ -414,8 +414,8 @@ func TestSetModelRoutesConfigOptionWhenConfigBacked(t *testing.T) {
 	if err := json.Unmarshal(gotConfig, &cfg); err != nil {
 		t.Fatalf("set_config_option params: %v", err)
 	}
-	if cfg.ConfigID != "model" || cfg.ConfigValue != "opus" || cfg.SessionID != string(s.ID) {
-		t.Errorf("set_config_option = %+v, want configId=model configValue=opus", cfg)
+	if cfg.ConfigID != "model" || cfg.Value != "opus" || cfg.SessionID != string(s.ID) {
+		t.Errorf("set_config_option = %+v, want configId=model value=opus", cfg)
 	}
 }
 
@@ -441,8 +441,8 @@ func TestSetThoughtLevelRoutesToConfigOption(t *testing.T) {
 	if err := json.Unmarshal(gotConfig, &cfg); err != nil {
 		t.Fatalf("set_config_option params: %v", err)
 	}
-	if cfg.ConfigID != "reasoning" || cfg.ConfigValue != "high" {
-		t.Errorf("set_config_option = %+v, want configId=reasoning configValue=high", cfg)
+	if cfg.ConfigID != "reasoning" || cfg.Value != "high" {
+		t.Errorf("set_config_option = %+v, want configId=reasoning value=high", cfg)
 	}
 }
 
