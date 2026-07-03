@@ -10,6 +10,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"sync"
 
 	"github.com/dusto/tend/api"
@@ -227,6 +228,12 @@ func (s *Service) Prompt(ctx context.Context, p api.AgentPromptParams) (api.Agen
 	if !ok {
 		return api.AgentPromptResult{}, unknownSession(p.SessionID)
 	}
+	// Build the ACP prompt content before any state transition, so a malformed
+	// request fails without leaving the session running.
+	prompt, err := promptBlocks(p)
+	if err != nil {
+		return api.AgentPromptResult{}, invalidParams(err.Error())
+	}
 	// Recover an errored session: the state model requires error -> idle before a
 	// new turn can start (idle -> running), so a retry passes through idle.
 	if sess.Status() == api.StatusError {
@@ -243,7 +250,7 @@ func (s *Service) Prompt(ctx context.Context, p api.AgentPromptParams) (api.Agen
 	defer s.clearInflight(p.SessionID)
 	defer cancel()
 
-	params := acp.PromptParams{Prompt: []json.RawMessage{textBlock(p.Text)}}
+	params := acp.PromptParams{Prompt: prompt}
 	res, err := s.manager.Prompt(turnCtx, p.SessionID, params)
 	if err != nil {
 		// A turn cancelled through agent.cancel (turnCtx cancelled while the
@@ -306,6 +313,56 @@ func (s *Service) cancelInflight(id api.SessionID) {
 	s.mu.Unlock()
 	if cancel != nil {
 		cancel()
+	}
+}
+
+// promptBlocks builds the ACP prompt content for a turn. With no Content it
+// preserves the plain-text path (a single text block from Text, even when empty,
+// as before); with Content it converts each block to its ACP form, rejecting an
+// unknown or incomplete block.
+func promptBlocks(p api.AgentPromptParams) ([]json.RawMessage, error) {
+	if len(p.Content) == 0 {
+		return []json.RawMessage{textBlock(p.Text)}, nil
+	}
+	blocks := make([]json.RawMessage, 0, len(p.Content))
+	for i, c := range p.Content {
+		b, err := acpContentBlock(c)
+		if err != nil {
+			return nil, fmt.Errorf("content[%d]: %w", i, err)
+		}
+		blocks = append(blocks, b)
+	}
+	return blocks, nil
+}
+
+// acpContentBlock converts one editor content block to its ACP wire form
+// (camelCase, as providers expect). Resource links carry a uri; image/audio
+// blobs carry a mime type and base64 data.
+func acpContentBlock(c api.PromptContentBlock) (json.RawMessage, error) {
+	switch c.Type {
+	case api.PromptContentText:
+		return textBlock(c.Text), nil
+	case api.PromptContentResourceLink:
+		if c.URI == "" {
+			return nil, fmt.Errorf("%s requires uri", c.Type)
+		}
+		return json.Marshal(struct {
+			Type string `json:"type"`
+			URI  string `json:"uri"`
+			Name string `json:"name,omitempty"`
+		}{Type: c.Type, URI: c.URI, Name: c.Name})
+	case api.PromptContentImage, api.PromptContentAudio:
+		if c.MimeType == "" || c.Data == "" {
+			return nil, fmt.Errorf("%s requires mime_type and data", c.Type)
+		}
+		return json.Marshal(struct {
+			Type     string `json:"type"`
+			MimeType string `json:"mimeType"`
+			URI      string `json:"uri,omitempty"`
+			Data     string `json:"data"`
+		}{Type: c.Type, MimeType: c.MimeType, URI: c.URI, Data: c.Data})
+	default:
+		return nil, fmt.Errorf("unknown content type %q", c.Type)
 	}
 }
 
