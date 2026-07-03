@@ -1,17 +1,51 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$defs": {
+    "PromptContentBlock": {
+      "properties": {
+        "type": {
+          "type": "string"
+        },
+        "text": {
+          "type": "string"
+        },
+        "uri": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "mime_type": {
+          "type": "string"
+        },
+        "data": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "type"
+      ]
+    }
+  },
   "properties": {
     "session_id": {
       "type": "string"
     },
     "text": {
       "type": "string"
+    },
+    "content": {
+      "items": {
+        "$ref": "#/$defs/PromptContentBlock"
+      },
+      "type": "array"
     }
   },
   "additionalProperties": false,
   "type": "object",
   "required": [
-    "session_id",
-    "text"
+    "session_id"
   ]
 }

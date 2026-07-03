@@ -15,8 +15,9 @@ const (
 	// agent.start's task optional (task-less sessions) + workspace_id; 0.10.0
 	// added session.set_mode/set_model; 0.11.0 added provider.list/start/stop;
 	// 0.12.0 added slash.list; 0.13.0 added slash.complete; 0.14.0 added
-	// slash.invoke.
-	PluginToDaemonVersion = "0.14.0"
+	// slash.invoke; 0.15.0 added agent.prompt content blocks (attach
+	// files/images/audio).
+	PluginToDaemonVersion = "0.15.0"
 	// 0.2.0 added editor.open + editor.diff; 0.3.0 added editor.diagnostics.
 	DaemonToEditorVersion = "0.3.0"
 	// 0.2.0 added the agent_thought_chunk session event; 0.3.0 added the

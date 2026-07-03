@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"path/filepath"
 	"sync"
@@ -34,7 +35,8 @@ type fakeManager struct {
 	setModeID   string // last mode id passed to SetMode
 	setModelID  string // last model id passed to SetModel
 
-	promptCalls int // number of Prompt invocations
+	promptCalls  int              // number of Prompt invocations
+	promptParams acp.PromptParams // params from the last Prompt call
 
 	promptResult acp.PromptResult
 	promptErr    error
@@ -62,9 +64,10 @@ func (m *fakeManager) Open(ctx context.Context, _ acp.Key, params acp.NewSession
 	}, nil
 }
 
-func (m *fakeManager) Prompt(ctx context.Context, _ api.SessionID, _ acp.PromptParams) (acp.PromptResult, error) {
+func (m *fakeManager) Prompt(ctx context.Context, _ api.SessionID, params acp.PromptParams) (acp.PromptResult, error) {
 	m.mu.Lock()
 	m.promptCalls++
+	m.promptParams = params
 	block := m.promptBlock
 	res, errResult := m.promptResult, m.promptErr
 	m.mu.Unlock()
@@ -263,6 +266,94 @@ func TestPromptUnknownSession(t *testing.T) {
 	svc, _ := newService(t, &fakeManager{})
 	if _, err := svc.Prompt(context.Background(), api.AgentPromptParams{SessionID: "nope"}); err == nil {
 		t.Error("expected error for unknown session")
+	}
+}
+
+// decodeBlocks unmarshals the ACP prompt content the manager received.
+func decodeBlocks(t *testing.T, params acp.PromptParams) []map[string]any {
+	t.Helper()
+	out := make([]map[string]any, len(params.Prompt))
+	for i, raw := range params.Prompt {
+		if err := json.Unmarshal(raw, &out[i]); err != nil {
+			t.Fatalf("block %d: %v", i, err)
+		}
+	}
+	return out
+}
+
+func TestPromptTextOnlyBuildsSingleTextBlock(t *testing.T) {
+	mgr := &fakeManager{openID: "sess-1", promptResult: acp.PromptResult{StopReason: "end_turn"}}
+	svc, _ := newService(t, mgr)
+	startSession(t, svc)
+
+	if _, err := svc.Prompt(context.Background(), api.AgentPromptParams{SessionID: "sess-1", Text: "hi"}); err != nil {
+		t.Fatalf("Prompt: %v", err)
+	}
+	blocks := decodeBlocks(t, mgr.promptParams)
+	if len(blocks) != 1 || blocks[0]["type"] != "text" || blocks[0]["text"] != "hi" {
+		t.Fatalf("blocks = %+v, want one text block", blocks)
+	}
+}
+
+func TestPromptContentBlocksForwardedAsACP(t *testing.T) {
+	mgr := &fakeManager{openID: "sess-1", promptResult: acp.PromptResult{StopReason: "end_turn"}}
+	svc, _ := newService(t, mgr)
+	startSession(t, svc)
+
+	_, err := svc.Prompt(context.Background(), api.AgentPromptParams{
+		SessionID: "sess-1",
+		Text:      "ignored when content is set",
+		Content: []api.PromptContentBlock{
+			{Type: api.PromptContentText, Text: "look at this"},
+			{Type: api.PromptContentResourceLink, URI: "file:///r/main.go", Name: "main.go"},
+			{Type: api.PromptContentImage, MimeType: "image/png", Data: "AAAA"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Prompt: %v", err)
+	}
+	blocks := decodeBlocks(t, mgr.promptParams)
+	if len(blocks) != 3 {
+		t.Fatalf("blocks = %+v, want 3", blocks)
+	}
+	if blocks[0]["type"] != "text" || blocks[0]["text"] != "look at this" {
+		t.Errorf("block 0 = %+v", blocks[0])
+	}
+	// Resource link: uri + name, no text.
+	if blocks[1]["type"] != "resource_link" || blocks[1]["uri"] != "file:///r/main.go" || blocks[1]["name"] != "main.go" {
+		t.Errorf("block 1 = %+v", blocks[1])
+	}
+	// Image: ACP camelCase mimeType + base64 data.
+	if blocks[2]["type"] != "image" || blocks[2]["mimeType"] != "image/png" || blocks[2]["data"] != "AAAA" {
+		t.Errorf("block 2 = %+v", blocks[2])
+	}
+}
+
+func TestPromptRejectsBadContentWithoutRunning(t *testing.T) {
+	cases := []api.PromptContentBlock{
+		{Type: "bogus"},                                       // unknown type
+		{Type: api.PromptContentResourceLink},                 // missing uri
+		{Type: api.PromptContentImage, MimeType: "image/png"}, // missing data
+	}
+	for i, block := range cases {
+		mgr := &fakeManager{openID: "sess-1"}
+		svc, _ := newService(t, mgr)
+		startSession(t, svc)
+
+		_, err := svc.Prompt(context.Background(), api.AgentPromptParams{
+			SessionID: "sess-1",
+			Content:   []api.PromptContentBlock{block},
+		})
+		if err == nil {
+			t.Errorf("case %d: expected validation error", i)
+		}
+		// A rejected turn never reaches the manager and leaves the session idle.
+		if mgr.promptCalls != 0 {
+			t.Errorf("case %d: prompt calls = %d, want 0", i, mgr.promptCalls)
+		}
+		if s, _ := svc.sessions.Get("sess-1"); s.Status() != api.StatusIdle {
+			t.Errorf("case %d: status = %q, want idle", i, s.Status())
+		}
 	}
 }
 
