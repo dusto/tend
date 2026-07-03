@@ -38,9 +38,9 @@ type SessionPending struct {
 }
 
 // SessionMode is one selectable agent mode advertised by the provider at
-// session/new. Modes are the provider's reasoning/behavior control (clients
-// surface them as the reasoning/thought level); the set is empty when the
-// provider offers no choice.
+// session/new. Modes are the provider's behavior control (e.g. a permission
+// mode); the set is empty when the provider offers no choice. Reasoning effort
+// is a separate axis, SessionThoughtLevel.
 type SessionMode struct {
 	ID          string `json:"id"`
 	Name        string `json:"name"`
@@ -50,6 +50,15 @@ type SessionMode struct {
 // SessionModel is one selectable model advertised by the provider at
 // session/new; the set is empty when the provider offers no choice.
 type SessionModel struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+}
+
+// SessionThoughtLevel is one selectable reasoning/thought level advertised by
+// the provider at session/new (a distinct axis from mode); the set is empty when
+// the provider offers no choice.
+type SessionThoughtLevel struct {
 	ID          string `json:"id"`
 	Name        string `json:"name"`
 	Description string `json:"description,omitempty"`
@@ -76,13 +85,17 @@ type SessionInfo struct {
 	// session's editor binding, so editor-local tools route to it.
 	EditorBound bool `json:"editor_bound"`
 	// CurrentModeID and AvailableModes describe the session's provider modes
-	// (reasoning/thought level); both are empty when the provider offers none.
+	// (behavior/permission mode); both are empty when the provider offers none.
 	CurrentModeID  string        `json:"current_mode_id,omitempty"`
 	AvailableModes []SessionMode `json:"available_modes,omitempty"`
 	// CurrentModelID and AvailableModels describe the session's provider models;
 	// both are empty when the provider offers no choice.
 	CurrentModelID  string         `json:"current_model_id,omitempty"`
 	AvailableModels []SessionModel `json:"available_models,omitempty"`
+	// CurrentThoughtLevelID and AvailableThoughtLevels describe the session's
+	// reasoning/thought level; both are empty when the provider offers no choice.
+	CurrentThoughtLevelID  string                `json:"current_thought_level_id,omitempty"`
+	AvailableThoughtLevels []SessionThoughtLevel `json:"available_thought_levels,omitempty"`
 }
 
 // SessionSetModeParams sets a session's active mode (reasoning/thought level).
@@ -107,6 +120,18 @@ type SessionSetModelParams struct {
 type SessionSetModelResult struct {
 	SessionID      SessionID `json:"session_id"`
 	CurrentModelID string    `json:"current_model_id"`
+}
+
+// SessionSetThoughtLevelParams sets a session's active reasoning/thought level.
+type SessionSetThoughtLevelParams struct {
+	SessionID      SessionID `json:"session_id"`
+	ThoughtLevelID string    `json:"thought_level_id"`
+}
+
+// SessionSetThoughtLevelResult reports the session's new active thought level.
+type SessionSetThoughtLevelResult struct {
+	SessionID             SessionID `json:"session_id"`
+	CurrentThoughtLevelID string    `json:"current_thought_level_id"`
 }
 
 // SessionListParams lists the daemon's sessions. WorkspaceID, when set, filters

@@ -270,6 +270,15 @@ func (n *Normalizer) PublishModelUpdated(sessionID, modelID string) {
 	}))
 }
 
+// PublishThoughtLevelUpdated emits agent_thought_level_updated for a session
+// after a session.set_thought_level change.
+func (n *Normalizer) PublishThoughtLevelUpdated(sessionID, thoughtLevelID string) {
+	n.publish(sessionEvent(sessionID, "agent_thought_level_updated", api.AgentThoughtLevelUpdated{
+		SessionID:             api.SessionID(sessionID),
+		CurrentThoughtLevelID: thoughtLevelID,
+	}))
+}
+
 func (n *Normalizer) preserve(sessionID, method string, raw json.RawMessage) {
 	if sessionID == "" {
 		return // cannot attribute to a session stream

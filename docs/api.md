@@ -30,10 +30,12 @@ Schemas live under `schemas/` (`methods/<name>.params.json` / `.result.json`, `e
   - Params: `SessionListParams` · Result: `SessionListResult`
 - **`session.claim`** — Move a session's editor binding to the calling editor client, so editor-local calls for that session route to it.
   - Params: `SessionClaimParams` · Result: `SessionClaimResult`
-- **`session.set_mode`** — Set a session's active mode (reasoning/thought level) from its available modes; emits agent_mode_updated. Errors when the provider offers no modes.
+- **`session.set_mode`** — Set a session's active mode (behavior/permission mode) from its available modes; emits agent_mode_updated. Errors when the provider offers no modes.
   - Params: `SessionSetModeParams` · Result: `SessionSetModeResult`
 - **`session.set_model`** — Set a session's active model from its available models; emits agent_model_updated. Errors when the provider offers no models.
   - Params: `SessionSetModelParams` · Result: `SessionSetModelResult`
+- **`session.set_thought_level`** — Set a session's active reasoning/thought level from its available thought levels; emits agent_thought_level_updated. Errors when the provider offers no thought levels.
+  - Params: `SessionSetThoughtLevelParams` · Result: `SessionSetThoughtLevelResult`
 - **`provider.list`** — List the configured ACP providers with their enabled state and running-process count for a workspace.
   - Params: `ProviderListParams` · Result: `ProviderListResult`
 - **`provider.start`** — Warm a provider for a workspace: ensure the pool holds at least one process for it; emits provider_started on a spawn.
@@ -119,7 +121,7 @@ Schemas live under `schemas/` (`methods/<name>.params.json` / `.result.json`, `e
   - Payload: `AgentError`
 - **`agent_message_chunk`** (`session` stream) — A streamed chunk of an agent message.
   - Payload: `AgentMessageChunk`
-- **`agent_mode_updated`** (`session` stream) — A session's active mode (reasoning/thought level) changed, by a client set or the agent itself.
+- **`agent_mode_updated`** (`session` stream) — A session's active mode (behavior/permission mode) changed, by a client set or the agent itself.
   - Payload: `AgentModeUpdated`
 - **`agent_model_updated`** (`session` stream) — A session's active model changed.
   - Payload: `AgentModelUpdated`
@@ -127,6 +129,8 @@ Schemas live under `schemas/` (`methods/<name>.params.json` / `.result.json`, `e
   - Payload: `AgentPlan`
 - **`agent_thought_chunk`** (`session` stream) — A streamed chunk of the agent's reasoning (thinking), distinct from its message.
   - Payload: `AgentThoughtChunk`
+- **`agent_thought_level_updated`** (`session` stream) — A session's active reasoning/thought level changed.
+  - Payload: `AgentThoughtLevelUpdated`
 - **`approval_requested`** (`session` stream) — A mutating action is awaiting approval.
   - Payload: `ApprovalRequested`
 - **`approval_resolved`** (`session` stream) — A pending approval was resolved.

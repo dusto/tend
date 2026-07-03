@@ -11,11 +11,12 @@ import (
 
 // ACP session method names.
 const (
-	MethodNewSession = "session/new"
-	MethodPrompt     = "session/prompt"
-	MethodCancel     = "session/cancel"
-	MethodSetMode    = "session/set_mode"
-	MethodSetModel   = "session/set_model"
+	MethodNewSession      = "session/new"
+	MethodPrompt          = "session/prompt"
+	MethodCancel          = "session/cancel"
+	MethodSetMode         = "session/set_mode"
+	MethodSetModel        = "session/set_model"
+	MethodSetConfigOption = "session/set_config_option"
 )
 
 // ErrNoSession is returned when a prompt names an unknown session.
@@ -38,6 +39,36 @@ type NewSessionResult struct {
 	SessionID string         `json:"sessionId"`
 	Modes     *acpModeState  `json:"modes,omitempty"`
 	Models    *acpModelState `json:"models,omitempty"`
+	// ConfigOptions is the newer unified selector array. Providers advertise
+	// model / mode / thought-level choices here (e.g. claude-agent-acp puts its
+	// model in a "model" config option while still sending permission modes on
+	// the legacy Modes field). A config-backed selector is changed with
+	// session/set_config_option (by option id), not session/set_model.
+	ConfigOptions []acpConfigOption `json:"configOptions,omitempty"`
+}
+
+// Config option categories the daemon maps to its selector axes.
+const (
+	configCategoryMode         = "mode"
+	configCategoryModel        = "model"
+	configCategoryThoughtLevel = "thought_level"
+)
+
+// acpConfigOption is one ACP SessionConfigOption from session/new: a selector
+// with an id, a category, the current value, and the choices.
+type acpConfigOption struct {
+	ID           string                  `json:"id"`
+	Category     string                  `json:"category"`
+	CurrentValue string                  `json:"currentValue"`
+	Name         string                  `json:"name"`
+	Description  string                  `json:"description"`
+	Options      []acpConfigOptionChoice `json:"options"`
+}
+
+type acpConfigOptionChoice struct {
+	Value       string `json:"value"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
 }
 
 // acpModeState mirrors the ACP SessionModeState carried by session/new.
@@ -76,6 +107,14 @@ type SetModelParams struct {
 	ModelID   string `json:"modelId"`
 }
 
+// SetConfigOptionParams is the session/set_config_option request: change the
+// value of a config option (identified by its id) advertised in configOptions.
+type SetConfigOptionParams struct {
+	SessionID   string `json:"sessionId"`
+	ConfigID    string `json:"configId"`
+	ConfigValue string `json:"configValue"`
+}
+
 // PromptParams is the session/prompt request. SessionID is set by the manager.
 type PromptParams struct {
 	SessionID string            `json:"sessionId"`
@@ -101,10 +140,19 @@ type Session struct {
 	key    Key
 	client *Client
 
-	CurrentModeID   string
-	AvailableModes  []api.SessionMode
-	CurrentModelID  string
-	AvailableModels []api.SessionModel
+	CurrentModeID          string
+	AvailableModes         []api.SessionMode
+	CurrentModelID         string
+	AvailableModels        []api.SessionModel
+	CurrentThoughtLevelID  string
+	AvailableThoughtLevels []api.SessionThoughtLevel
+
+	// Config-option ids for selectors that came from ACP configOptions (empty for
+	// a legacy modes/models selector). When set, a change routes to
+	// session/set_config_option with this id rather than session/set_mode|model.
+	modeConfigID    string
+	modelConfigID   string
+	thoughtConfigID string
 }
 
 // Manager creates task-scoped ACP sessions on pooled processes and routes
@@ -162,10 +210,64 @@ func (m *Manager) Open(ctx context.Context, key Key, params NewSessionParams) (*
 		s.CurrentModelID = res.Models.CurrentModelID
 		s.AvailableModels = toAPIModels(res.Models.AvailableModels)
 	}
+	// configOptions (newer path) supplement/override the legacy fields per axis;
+	// a provider may send both (claude: legacy modes + a "model" config option).
+	for _, opt := range res.ConfigOptions {
+		switch opt.Category {
+		case configCategoryModel:
+			s.CurrentModelID = opt.CurrentValue
+			s.AvailableModels = toAPIModelsFromOptions(opt.Options)
+			s.modelConfigID = opt.ID
+		case configCategoryMode:
+			s.CurrentModeID = opt.CurrentValue
+			s.AvailableModes = toAPIModesFromOptions(opt.Options)
+			s.modeConfigID = opt.ID
+		case configCategoryThoughtLevel:
+			s.CurrentThoughtLevelID = opt.CurrentValue
+			s.AvailableThoughtLevels = toAPIThoughtLevelsFromOptions(opt.Options)
+			s.thoughtConfigID = opt.ID
+		}
+	}
 	m.mu.Lock()
 	m.sessions[s.ID] = s
 	m.mu.Unlock()
 	return s, nil
+}
+
+// toAPIModesFromOptions / toAPIModelsFromOptions / toAPIThoughtLevelsFromOptions
+// convert a config option's choices (value/name/description) to the TEND wire
+// shape, using each choice's value as the selector id.
+func toAPIModesFromOptions(in []acpConfigOptionChoice) []api.SessionMode {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]api.SessionMode, len(in))
+	for i, c := range in {
+		out[i] = api.SessionMode{ID: c.Value, Name: c.Name, Description: c.Description}
+	}
+	return out
+}
+
+func toAPIModelsFromOptions(in []acpConfigOptionChoice) []api.SessionModel {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]api.SessionModel, len(in))
+	for i, c := range in {
+		out[i] = api.SessionModel{ID: c.Value, Name: c.Name, Description: c.Description}
+	}
+	return out
+}
+
+func toAPIThoughtLevelsFromOptions(in []acpConfigOptionChoice) []api.SessionThoughtLevel {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]api.SessionThoughtLevel, len(in))
+	for i, c := range in {
+		out[i] = api.SessionThoughtLevel{ID: c.Value, Name: c.Name, Description: c.Description}
+	}
+	return out
 }
 
 // toAPIModes converts ACP modes to the TEND wire shape.
@@ -217,15 +319,64 @@ func (m *Manager) Prompt(ctx context.Context, sessionID api.SessionID, params Pr
 	return res, nil
 }
 
-// SetMode sets a session's active mode on its process via session/set_mode. Like
-// Prompt it routes to the session's process and serializes through the pool.
+// SetMode sets a session's active mode on its process. A config-backed mode
+// (from configOptions) changes via session/set_config_option; a legacy mode via
+// session/set_mode. Like Prompt it serializes through the pool.
 func (m *Manager) SetMode(ctx context.Context, sessionID api.SessionID, modeID string) error {
+	if cfg := m.configID(sessionID, configCategoryMode); cfg != "" {
+		return m.setConfigOption(ctx, sessionID, cfg, modeID)
+	}
 	return m.callOnSession(ctx, sessionID, MethodSetMode, SetModeParams{SessionID: string(sessionID), ModeID: modeID})
 }
 
-// SetModel sets a session's active model on its process via session/set_model.
+// SetModel sets a session's active model. A config-backed model (from
+// configOptions, e.g. claude-agent-acp) changes via session/set_config_option;
+// a legacy model via session/set_model.
 func (m *Manager) SetModel(ctx context.Context, sessionID api.SessionID, modelID string) error {
+	if cfg := m.configID(sessionID, configCategoryModel); cfg != "" {
+		return m.setConfigOption(ctx, sessionID, cfg, modelID)
+	}
 	return m.callOnSession(ctx, sessionID, MethodSetModel, SetModelParams{SessionID: string(sessionID), ModelID: modelID})
+}
+
+// SetThoughtLevel sets a session's active reasoning/thought level. Thought
+// levels come only from configOptions, so this always routes to
+// session/set_config_option.
+func (m *Manager) SetThoughtLevel(ctx context.Context, sessionID api.SessionID, thoughtLevelID string) error {
+	cfg := m.configID(sessionID, configCategoryThoughtLevel)
+	if cfg == "" {
+		return ErrNoSession
+	}
+	return m.setConfigOption(ctx, sessionID, cfg, thoughtLevelID)
+}
+
+// configID returns the config-option id backing a selector category on a
+// session, or "" for a legacy (or unknown) selector.
+func (m *Manager) configID(sessionID api.SessionID, category string) string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	s := m.sessions[sessionID]
+	if s == nil {
+		return ""
+	}
+	switch category {
+	case configCategoryMode:
+		return s.modeConfigID
+	case configCategoryModel:
+		return s.modelConfigID
+	case configCategoryThoughtLevel:
+		return s.thoughtConfigID
+	}
+	return ""
+}
+
+// setConfigOption changes a config option's value on the session's process.
+func (m *Manager) setConfigOption(ctx context.Context, sessionID api.SessionID, configID, value string) error {
+	return m.callOnSession(ctx, sessionID, MethodSetConfigOption, SetConfigOptionParams{
+		SessionID:   string(sessionID),
+		ConfigID:    configID,
+		ConfigValue: value,
+	})
 }
 
 // callOnSession runs a request on the session's process, acquiring the process

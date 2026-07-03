@@ -24,16 +24,20 @@ type fakeManager struct {
 	openErr      error
 	openParams   acp.NewSessionParams
 	openSpawnDir string // worktree root carried on the Open ctx
-	// mode/model state returned from Open (as captured from session/new).
-	openModeCurrent  string
-	openModes        []api.SessionMode
-	openModelCurrent string
-	openModels       []api.SessionModel
+	// mode/model/thought state returned from Open (as captured from session/new).
+	openModeCurrent         string
+	openModes               []api.SessionMode
+	openModelCurrent        string
+	openModels              []api.SessionModel
+	openThoughtLevelCurrent string
+	openThoughtLevels       []api.SessionThoughtLevel
 
-	setModeErr  error
-	setModelErr error
-	setModeID   string // last mode id passed to SetMode
-	setModelID  string // last model id passed to SetModel
+	setModeErr         error
+	setModelErr        error
+	setThoughtLevelErr error
+	setModeID          string // last mode id passed to SetMode
+	setModelID         string // last model id passed to SetModel
+	setThoughtLevelID  string // last thought level id passed to SetThoughtLevel
 
 	promptCalls  int              // number of Prompt invocations
 	promptParams acp.PromptParams // params from the last Prompt call
@@ -56,11 +60,13 @@ func (m *fakeManager) Open(ctx context.Context, _ acp.Key, params acp.NewSession
 		return nil, m.openErr
 	}
 	return &acp.Session{
-		ID:              m.openID,
-		CurrentModeID:   m.openModeCurrent,
-		AvailableModes:  m.openModes,
-		CurrentModelID:  m.openModelCurrent,
-		AvailableModels: m.openModels,
+		ID:                     m.openID,
+		CurrentModeID:          m.openModeCurrent,
+		AvailableModes:         m.openModes,
+		CurrentModelID:         m.openModelCurrent,
+		AvailableModels:        m.openModels,
+		CurrentThoughtLevelID:  m.openThoughtLevelCurrent,
+		AvailableThoughtLevels: m.openThoughtLevels,
 	}, nil
 }
 
@@ -106,6 +112,14 @@ func (m *fakeManager) SetModel(_ context.Context, _ api.SessionID, modelID strin
 	m.mu.Lock()
 	m.setModelID = modelID
 	err := m.setModelErr
+	m.mu.Unlock()
+	return err
+}
+
+func (m *fakeManager) SetThoughtLevel(_ context.Context, _ api.SessionID, thoughtLevelID string) error {
+	m.mu.Lock()
+	m.setThoughtLevelID = thoughtLevelID
+	err := m.setThoughtLevelErr
 	m.mu.Unlock()
 	return err
 }
@@ -549,6 +563,44 @@ func TestSetModelUpdatesStateAndEmits(t *testing.T) {
 	evs, _, _ := store.Read("session:sess-1", 0, 10)
 	if len(evs) != 1 || evs[0].Type != "agent_model_updated" {
 		t.Fatalf("events = %+v, want one agent_model_updated", evs)
+	}
+}
+
+func TestSetThoughtLevelUpdatesStateAndEmits(t *testing.T) {
+	mgr := &fakeManager{
+		openID:                  "sess-1",
+		openThoughtLevelCurrent: "medium",
+		openThoughtLevels:       []api.SessionThoughtLevel{{ID: "medium"}, {ID: "high"}},
+	}
+	svc, store := newService(t, mgr)
+	startSession(t, svc)
+
+	res, err := svc.SetThoughtLevel(context.Background(), api.SessionSetThoughtLevelParams{SessionID: "sess-1", ThoughtLevelID: "high"})
+	if err != nil {
+		t.Fatalf("SetThoughtLevel: %v", err)
+	}
+	if res.CurrentThoughtLevelID != "high" || res.SessionID != "sess-1" {
+		t.Errorf("result = %+v", res)
+	}
+	if mgr.setThoughtLevelID != "high" {
+		t.Errorf("manager got thought level %q, want high", mgr.setThoughtLevelID)
+	}
+	if s, _ := svc.sessions.Get("sess-1"); func() string { c, _ := s.ThoughtLevels(); return c }() != "high" {
+		t.Error("session current thought level not updated")
+	}
+	evs, _, _ := store.Read("session:sess-1", 0, 10)
+	if len(evs) != 1 || evs[0].Type != "agent_thought_level_updated" {
+		t.Fatalf("events = %+v, want one agent_thought_level_updated", evs)
+	}
+}
+
+func TestSetThoughtLevelRejectsUnavailable(t *testing.T) {
+	// A provider that offers no thought levels rejects the set (no silent no-op).
+	mgr := &fakeManager{openID: "sess-1"}
+	svc, _ := newService(t, mgr)
+	startSession(t, svc)
+	if _, err := svc.SetThoughtLevel(context.Background(), api.SessionSetThoughtLevelParams{SessionID: "sess-1", ThoughtLevelID: "high"}); err == nil {
+		t.Error("expected error for a session with no thought levels")
 	}
 }
 

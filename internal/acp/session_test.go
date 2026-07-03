@@ -26,12 +26,14 @@ type fakeAgent struct {
 	started chan string   // if set, receives a session id when a prompt handler starts
 	gate    chan struct{} // if set, prompt handlers block on it
 
-	// modes/models returned in the session/new reply (nil = provider offers none).
-	newModes  *acpModeState
-	newModels *acpModelState
-	// set_mode/set_model the agent received.
-	lastSetMode  json.RawMessage
-	lastSetModel json.RawMessage
+	// modes/models/configOptions returned in the session/new reply (nil = none).
+	newModes         *acpModeState
+	newModels        *acpModelState
+	newConfigOptions []acpConfigOption
+	// set_mode/set_model/set_config_option the agent received.
+	lastSetMode         json.RawMessage
+	lastSetModel        json.RawMessage
+	lastSetConfigOption json.RawMessage
 }
 
 func (a *fakeAgent) handle(_ context.Context, req *rpc.Request) (any, error) {
@@ -41,7 +43,7 @@ func (a *fakeAgent) handle(_ context.Context, req *rpc.Request) (any, error) {
 		a.lastNew = append(json.RawMessage(nil), req.Params...)
 		a.nextSess++
 		id := fmt.Sprintf("sess-%d", a.nextSess)
-		res := NewSessionResult{SessionID: id, Modes: a.newModes, Models: a.newModels}
+		res := NewSessionResult{SessionID: id, Modes: a.newModes, Models: a.newModels, ConfigOptions: a.newConfigOptions}
 		a.mu.Unlock()
 		return res, nil
 	case MethodPrompt:
@@ -65,6 +67,11 @@ func (a *fakeAgent) handle(_ context.Context, req *rpc.Request) (any, error) {
 	case MethodSetModel:
 		a.mu.Lock()
 		a.lastSetModel = append(json.RawMessage(nil), req.Params...)
+		a.mu.Unlock()
+		return nil, nil
+	case MethodSetConfigOption:
+		a.mu.Lock()
+		a.lastSetConfigOption = append(json.RawMessage(nil), req.Params...)
 		a.mu.Unlock()
 		return nil, nil
 	}
@@ -334,6 +341,108 @@ func TestSetModeAndSetModelRouteToSession(t *testing.T) {
 	}
 	if model.SessionID != string(s.ID) || model.ModelID != "opus" {
 		t.Errorf("set_model = %+v, want sessionId=%s modelId=opus", model, s.ID)
+	}
+}
+
+func TestOpenCapturesConfigOptions(t *testing.T) {
+	// claude-agent-acp shape: permission modes on the legacy field, the model and
+	// a thought level via configOptions.
+	agent := &fakeAgent{
+		newModes: &acpModeState{
+			CurrentModeID:  "default",
+			AvailableModes: []acpMode{{ID: "default", Name: "Default"}, {ID: "plan", Name: "Plan"}},
+		},
+		newConfigOptions: []acpConfigOption{
+			{
+				ID: "model", Category: "model", CurrentValue: "sonnet",
+				Options: []acpConfigOptionChoice{
+					{Value: "sonnet", Name: "Sonnet"}, {Value: "opus", Name: "Opus"},
+				},
+			},
+			{
+				ID: "reasoning", Category: "thought_level", CurrentValue: "medium",
+				Options: []acpConfigOptionChoice{
+					{Value: "low", Name: "Low"}, {Value: "medium", Name: "Medium"}, {Value: "high", Name: "High"},
+				},
+			},
+		},
+	}
+	m := newManager(t, agent, Options{Max: 1})
+	s := openSession(t, m, testKey)
+
+	// Legacy modes captured as before.
+	if s.CurrentModeID != "default" || len(s.AvailableModes) != 2 {
+		t.Errorf("modes = %q/%+v", s.CurrentModeID, s.AvailableModes)
+	}
+	// Model from the config option (value -> id).
+	if s.CurrentModelID != "sonnet" || len(s.AvailableModels) != 2 || s.AvailableModels[1].ID != "opus" {
+		t.Errorf("models = %q/%+v", s.CurrentModelID, s.AvailableModels)
+	}
+	// Thought level as its own axis.
+	if s.CurrentThoughtLevelID != "medium" || len(s.AvailableThoughtLevels) != 3 || s.AvailableThoughtLevels[2].ID != "high" {
+		t.Errorf("thought levels = %q/%+v", s.CurrentThoughtLevelID, s.AvailableThoughtLevels)
+	}
+	if s.modelConfigID != "model" || s.thoughtConfigID != "reasoning" {
+		t.Errorf("config ids = model:%q thought:%q", s.modelConfigID, s.thoughtConfigID)
+	}
+}
+
+func TestSetModelRoutesConfigOptionWhenConfigBacked(t *testing.T) {
+	agent := &fakeAgent{
+		newConfigOptions: []acpConfigOption{{
+			ID: "model", Category: "model", CurrentValue: "sonnet",
+			Options: []acpConfigOptionChoice{{Value: "sonnet"}, {Value: "opus"}},
+		}},
+	}
+	m := newManager(t, agent, Options{Max: 1})
+	s := openSession(t, m, testKey)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if err := m.SetModel(ctx, s.ID, "opus"); err != nil {
+		t.Fatalf("SetModel: %v", err)
+	}
+
+	agent.mu.Lock()
+	gotModel, gotConfig := agent.lastSetModel, agent.lastSetConfigOption
+	agent.mu.Unlock()
+	// A config-backed model routes to set_config_option, not set_model.
+	if gotModel != nil {
+		t.Errorf("expected no session/set_model, got %s", gotModel)
+	}
+	var cfg SetConfigOptionParams
+	if err := json.Unmarshal(gotConfig, &cfg); err != nil {
+		t.Fatalf("set_config_option params: %v", err)
+	}
+	if cfg.ConfigID != "model" || cfg.ConfigValue != "opus" || cfg.SessionID != string(s.ID) {
+		t.Errorf("set_config_option = %+v, want configId=model configValue=opus", cfg)
+	}
+}
+
+func TestSetThoughtLevelRoutesToConfigOption(t *testing.T) {
+	agent := &fakeAgent{
+		newConfigOptions: []acpConfigOption{{
+			ID: "reasoning", Category: "thought_level", CurrentValue: "medium",
+			Options: []acpConfigOptionChoice{{Value: "low"}, {Value: "high"}},
+		}},
+	}
+	m := newManager(t, agent, Options{Max: 1})
+	s := openSession(t, m, testKey)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if err := m.SetThoughtLevel(ctx, s.ID, "high"); err != nil {
+		t.Fatalf("SetThoughtLevel: %v", err)
+	}
+	agent.mu.Lock()
+	gotConfig := agent.lastSetConfigOption
+	agent.mu.Unlock()
+	var cfg SetConfigOptionParams
+	if err := json.Unmarshal(gotConfig, &cfg); err != nil {
+		t.Fatalf("set_config_option params: %v", err)
+	}
+	if cfg.ConfigID != "reasoning" || cfg.ConfigValue != "high" {
+		t.Errorf("set_config_option = %+v, want configId=reasoning configValue=high", cfg)
 	}
 }
 
