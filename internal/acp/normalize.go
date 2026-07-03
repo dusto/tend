@@ -40,15 +40,28 @@ type CommandSink interface {
 	SetSessionCommands(sessionID api.SessionID, commands []api.SlashCommand)
 }
 
+// ConfigSink records an agent-driven config-option change (ACP
+// config_option_update) on the authoritative session state, per selector axis.
+// Like a mode change, the streamed event alone is not enough: session.list reads
+// the registry, so a later list or reconnect would report a stale current value.
+// *session.Registry satisfies this. Optional: nil means config-option changes are
+// published but not recorded.
+type ConfigSink interface {
+	SetSessionMode(sessionID api.SessionID, modeID string)
+	SetSessionModel(sessionID api.SessionID, modelID string)
+	SetSessionThoughtLevel(sessionID api.SessionID, thoughtLevelID string)
+}
+
 // Normalizer is the inbound handler installed on an ACP process: it converts the
 // agent's session/update notifications into TEND events on the session's stream,
 // and preserves anything it does not recognize as a provider_notification so no
 // agent output is silently dropped. It implements rpc.Handler.
 type Normalizer struct {
-	pub      Publisher
-	parse    MetadataParser // optional
-	modeSink ModeSink       // optional
-	cmdSink  CommandSink    // optional
+	pub        Publisher
+	parse      MetadataParser // optional
+	modeSink   ModeSink       // optional
+	cmdSink    CommandSink    // optional
+	configSink ConfigSink     // optional
 }
 
 // NewNormalizer returns a Normalizer that publishes through pub. parse may be nil.
@@ -68,6 +81,13 @@ func (n *Normalizer) SetModeSink(sink ModeSink) {
 // handling notifications.
 func (n *Normalizer) SetCommandSink(sink CommandSink) {
 	n.cmdSink = sink
+}
+
+// SetConfigSink wires the authoritative session state that agent-driven
+// config-option changes are written back to. Set once at daemon wiring, before
+// any ACP process is handling notifications.
+func (n *Normalizer) SetConfigSink(sink ConfigSink) {
+	n.configSink = sink
 }
 
 // Handle implements rpc.Handler. It processes inbound notifications; inbound
@@ -114,6 +134,15 @@ func (n *Normalizer) handleUpdate(params json.RawMessage) {
 		return
 	}
 
+	// A config_option_update carries the provider's full configOptions set with
+	// their current values. It can move several axes at once, so it does not fit
+	// mapUpdate's single-event shape: record each recognized selector on the
+	// registry and emit its matching update event.
+	if kind.SessionUpdate == "config_option_update" {
+		n.handleConfigOptionUpdate(env.SessionID, env.Update)
+		return
+	}
+
 	if ev, ok := mapUpdate(env.SessionID, kind.SessionUpdate, env.Update); ok {
 		// An agent-driven mode change must also update the authoritative session
 		// state, not just stream the event — session.list reads the registry, so
@@ -136,6 +165,60 @@ func (n *Normalizer) handleUpdate(params json.RawMessage) {
 		}
 	}
 	n.preserve(env.SessionID, method, env.Update)
+}
+
+// handleConfigOptionUpdate processes an ACP config_option_update: for each
+// recognized select-category option it records the new current value on the
+// registry (via the config sink) and emits the matching axis update event.
+// Boolean toggles and unknown categories carry no daemon selector and are
+// skipped, so no agent output is lost — those still flow as the raw update is
+// otherwise dropped here (a config_option_update is fully consumed).
+func (n *Normalizer) handleConfigOptionUpdate(sessionID string, update json.RawMessage) {
+	var u struct {
+		ConfigOptions []struct {
+			ID           string          `json:"id"`
+			Category     string          `json:"category"`
+			CurrentValue json.RawMessage `json:"currentValue"`
+		} `json:"configOptions"`
+	}
+	if err := json.Unmarshal(update, &u); err != nil {
+		return
+	}
+	sid := api.SessionID(sessionID)
+	for _, opt := range u.ConfigOptions {
+		// Only single-value selectors map to a daemon axis; a boolean toggle's
+		// currentValue is not a string, so it is skipped.
+		var value string
+		if json.Unmarshal(opt.CurrentValue, &value) != nil {
+			continue
+		}
+		switch canonicalCategory(opt.Category) {
+		case configCategoryModel:
+			if n.configSink != nil {
+				n.configSink.SetSessionModel(sid, value)
+			}
+			n.publish(sessionEvent(sessionID, "agent_model_updated", api.AgentModelUpdated{
+				SessionID:      sid,
+				CurrentModelID: value,
+			}))
+		case configCategoryMode:
+			if n.configSink != nil {
+				n.configSink.SetSessionMode(sid, value)
+			}
+			n.publish(sessionEvent(sessionID, "agent_mode_updated", api.AgentModeUpdated{
+				SessionID:     sid,
+				CurrentModeID: value,
+			}))
+		case configCategoryThoughtLevel:
+			if n.configSink != nil {
+				n.configSink.SetSessionThoughtLevel(sid, value)
+			}
+			n.publish(sessionEvent(sessionID, "agent_thought_level_updated", api.AgentThoughtLevelUpdated{
+				SessionID:             sid,
+				CurrentThoughtLevelID: value,
+			}))
+		}
+	}
 }
 
 // parseAvailableCommands converts an ACP available_commands_update into the
@@ -267,6 +350,15 @@ func (n *Normalizer) PublishModelUpdated(sessionID, modelID string) {
 	n.publish(sessionEvent(sessionID, "agent_model_updated", api.AgentModelUpdated{
 		SessionID:      api.SessionID(sessionID),
 		CurrentModelID: modelID,
+	}))
+}
+
+// PublishThoughtLevelUpdated emits agent_thought_level_updated for a session
+// after a session.set_thought_level change.
+func (n *Normalizer) PublishThoughtLevelUpdated(sessionID, thoughtLevelID string) {
+	n.publish(sessionEvent(sessionID, "agent_thought_level_updated", api.AgentThoughtLevelUpdated{
+		SessionID:             api.SessionID(sessionID),
+		CurrentThoughtLevelID: thoughtLevelID,
 	}))
 }
 

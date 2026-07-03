@@ -81,8 +81,9 @@ var EventDefs = []EventDef{
 	{Type: "provider_started", Scope: ScopeWorkspace, Payload: ProviderStarted{}, Summary: "A provider process joined the pool (spawned for a turn or an explicit start). Repo-wide: delivered on the workspace stream."},
 	{Type: "provider_stopped", Scope: ScopeWorkspace, Payload: ProviderStopped{}, Summary: "A provider process left the pool (exit or crash). Repo-wide: delivered on the workspace stream."},
 	{Type: "provider_notification", Scope: ScopeSession, Payload: ProviderNotification{}, Summary: "A provider-private ACP notification preserved verbatim as a metadata event."},
-	{Type: "agent_mode_updated", Scope: ScopeSession, Payload: AgentModeUpdated{}, Summary: "A session's active mode (reasoning/thought level) changed, by a client set or the agent itself."},
+	{Type: "agent_mode_updated", Scope: ScopeSession, Payload: AgentModeUpdated{}, Summary: "A session's active mode (behavior/permission mode) changed, by a client set or the agent itself."},
 	{Type: "agent_model_updated", Scope: ScopeSession, Payload: AgentModelUpdated{}, Summary: "A session's active model changed."},
+	{Type: "agent_thought_level_updated", Scope: ScopeSession, Payload: AgentThoughtLevelUpdated{}, Summary: "A session's active reasoning/thought level changed."},
 	{Type: "agent_plan", Scope: ScopeSession, Payload: AgentPlan{}, Summary: "The agent's tactical per-turn plan (its todo list): the full set of entries with their status, replacing any prior plan for the turn."},
 	{Type: "slash_commands_updated", Scope: ScopeSession, Payload: SlashCommandsUpdated{}, Summary: "A session's merged slash-command set changed (the agent advertised new commands): the full set of provider + daemon commands, replacing the prior set."},
 	{Type: "task_created", Scope: ScopeWorkspace, Payload: TaskChange{}, Summary: "A task was created. Repo-wide: delivered on the workspace stream."},
@@ -182,6 +183,14 @@ type AgentModeUpdated struct {
 type AgentModelUpdated struct {
 	SessionID      SessionID `json:"session_id"`
 	CurrentModelID string    `json:"current_model_id"`
+}
+
+// AgentThoughtLevelUpdated signals that a session's active reasoning/thought
+// level changed, by a client set (session.set_thought_level) or the agent itself
+// (a config_option_update).
+type AgentThoughtLevelUpdated struct {
+	SessionID             SessionID `json:"session_id"`
+	CurrentThoughtLevelID string    `json:"current_thought_level_id"`
 }
 
 // AgentPlan is the agent's tactical per-turn plan (its todo list). Each plan

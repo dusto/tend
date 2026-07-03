@@ -40,10 +40,12 @@ type Session struct {
 	// Provider mode/model selection, captured from session/new and updated on
 	// set_mode/set_model or the agent's own current_mode_update. The available
 	// lists are empty when the provider offers no choice.
-	currentModeID   string
-	availableModes  []api.SessionMode
-	currentModelID  string
-	availableModels []api.SessionModel
+	currentModeID          string
+	availableModes         []api.SessionMode
+	currentModelID         string
+	availableModels        []api.SessionModel
+	currentThoughtLevelID  string
+	availableThoughtLevels []api.SessionThoughtLevel
 	// providerCommands are the agent's advertised slash commands, captured from
 	// the ACP available_commands_update. Empty until the agent advertises any.
 	providerCommands []api.SlashCommand
@@ -163,6 +165,22 @@ func (s *Session) SetCurrentModel(id string) {
 	s.currentModelID = id
 }
 
+// SetThoughtLevels records the provider's advertised thought levels and the
+// active one, captured from session/new.
+func (s *Session) SetThoughtLevels(current string, available []api.SessionThoughtLevel) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.currentThoughtLevelID = current
+	s.availableThoughtLevels = available
+}
+
+// SetCurrentThoughtLevel updates only the active thought level.
+func (s *Session) SetCurrentThoughtLevel(id string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.currentThoughtLevelID = id
+}
+
 // Modes returns the active mode id and the available modes.
 func (s *Session) Modes() (string, []api.SessionMode) {
 	s.mu.Lock()
@@ -175,6 +193,13 @@ func (s *Session) Models() (string, []api.SessionModel) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.currentModelID, s.availableModels
+}
+
+// ThoughtLevels returns the active thought level id and the available levels.
+func (s *Session) ThoughtLevels() (string, []api.SessionThoughtLevel) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.currentThoughtLevelID, s.availableThoughtLevels
 }
 
 // SetProviderCommands records the agent's advertised slash commands, replacing

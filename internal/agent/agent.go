@@ -24,12 +24,13 @@ import (
 // set_model are named session.* but live here because they drive the ACP manager
 // and publish session events, which the session-query service does not own.
 const (
-	MethodStart    = "agent.start"
-	MethodPrompt   = "agent.prompt"
-	MethodCancel   = "agent.cancel"
-	MethodStop     = "agent.stop"
-	MethodSetMode  = "session.set_mode"
-	MethodSetModel = "session.set_model"
+	MethodStart           = "agent.start"
+	MethodPrompt          = "agent.prompt"
+	MethodCancel          = "agent.cancel"
+	MethodStop            = "agent.stop"
+	MethodSetMode         = "session.set_mode"
+	MethodSetModel        = "session.set_model"
+	MethodSetThoughtLevel = "session.set_thought_level"
 )
 
 // Manager is the slice of the ACP session manager the service drives. *acp.Manager
@@ -42,6 +43,7 @@ type Manager interface {
 	Close(id api.SessionID)
 	SetMode(ctx context.Context, id api.SessionID, modeID string) error
 	SetModel(ctx context.Context, id api.SessionID, modelID string) error
+	SetThoughtLevel(ctx context.Context, id api.SessionID, thoughtLevelID string) error
 }
 
 // Service backs the agent.* methods. It is safe for concurrent use.
@@ -96,7 +98,10 @@ func Register(m *dispatch.Mux, s *Service, onStarted func(api.SessionID)) error 
 	if err := dispatch.Handle(m, MethodSetMode, s.SetMode); err != nil {
 		return err
 	}
-	return dispatch.Handle(m, MethodSetModel, s.SetModel)
+	if err := dispatch.Handle(m, MethodSetModel, s.SetModel); err != nil {
+		return err
+	}
+	return dispatch.Handle(m, MethodSetThoughtLevel, s.SetThoughtLevel)
 }
 
 // Start opens a task-scoped session on a provider process for the task's
@@ -153,18 +158,20 @@ func (s *Service) Start(ctx context.Context, p api.AgentStartParams) (api.AgentS
 		return api.AgentStartResult{}, &rpc.Error{Code: rpc.CodeInternalError, Message: "agent: duplicate session id " + string(as.ID)}
 	}
 	sess := s.sessions.Create(as.ID, p.ProviderID, workspace, p.Task, p.WorktreeRoot)
-	// Record the provider's advertised mode/model choices (empty when it offers
-	// none) so session.list reports them and set_mode/set_model can validate.
+	// Record the provider's advertised mode/model/thought-level choices (empty
+	// when it offers none) so session.list reports them and the set_* methods can
+	// validate.
 	sess.SetModes(as.CurrentModeID, as.AvailableModes)
 	sess.SetModels(as.CurrentModelID, as.AvailableModels)
+	sess.SetThoughtLevels(as.CurrentThoughtLevelID, as.AvailableThoughtLevels)
 	return api.AgentStartResult{SessionID: sess.ID, StreamID: sess.Stream, Status: sess.Status()}, nil
 }
 
-// SetMode sets a session's active mode (reasoning/thought level) on its provider
-// and records it, emitting agent_mode_updated. It rejects an unknown session, an
-// empty mode id, and a mode the provider did not advertise — so a provider that
-// offers no modes degrades to a clear invalid-params error rather than a silent
-// no-op or a bad ACP call.
+// SetMode sets a session's active mode (behavior/permission mode) on its
+// provider and records it, emitting agent_mode_updated. It rejects an unknown
+// session, an empty mode id, and a mode the provider did not advertise — so a
+// provider that offers no modes degrades to a clear invalid-params error rather
+// than a silent no-op or a bad ACP call.
 func (s *Service) SetMode(ctx context.Context, p api.SessionSetModeParams) (api.SessionSetModeResult, error) {
 	sess, ok := s.sessions.Get(p.SessionID)
 	if !ok {
@@ -205,6 +212,29 @@ func (s *Service) SetModel(ctx context.Context, p api.SessionSetModelParams) (ap
 	sess.SetCurrentModel(p.ModelID)
 	s.norm.PublishModelUpdated(string(p.SessionID), p.ModelID)
 	return api.SessionSetModelResult{SessionID: p.SessionID, CurrentModelID: p.ModelID}, nil
+}
+
+// SetThoughtLevel sets a session's active reasoning/thought level on its provider
+// and records it, emitting agent_thought_level_updated. Validation mirrors
+// SetMode; thought levels come from the provider's configOptions.
+func (s *Service) SetThoughtLevel(ctx context.Context, p api.SessionSetThoughtLevelParams) (api.SessionSetThoughtLevelResult, error) {
+	sess, ok := s.sessions.Get(p.SessionID)
+	if !ok {
+		return api.SessionSetThoughtLevelResult{}, unknownSession(p.SessionID)
+	}
+	if p.ThoughtLevelID == "" {
+		return api.SessionSetThoughtLevelResult{}, invalidParams("thought_level_id is required")
+	}
+	_, available := sess.ThoughtLevels()
+	if !hasID(available, p.ThoughtLevelID, func(t api.SessionThoughtLevel) string { return t.ID }) {
+		return api.SessionSetThoughtLevelResult{}, invalidParams("session " + string(p.SessionID) + " has no thought level " + p.ThoughtLevelID)
+	}
+	if err := s.manager.SetThoughtLevel(ctx, p.SessionID, p.ThoughtLevelID); err != nil {
+		return api.SessionSetThoughtLevelResult{}, internalErr(err)
+	}
+	sess.SetCurrentThoughtLevel(p.ThoughtLevelID)
+	s.norm.PublishThoughtLevelUpdated(string(p.SessionID), p.ThoughtLevelID)
+	return api.SessionSetThoughtLevelResult{SessionID: p.SessionID, CurrentThoughtLevelID: p.ThoughtLevelID}, nil
 }
 
 // hasID reports whether any element's id (via key) equals want.

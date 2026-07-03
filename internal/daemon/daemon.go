@@ -153,6 +153,9 @@ func New(ln net.Listener, logPath string, opts ...Option) (*Server, error) {
 	// Agent-driven mode changes (current_mode_update) write back to the session
 	// registry so session.list reports the current mode, not just the live event.
 	norm.SetModeSink(s.sessions)
+	// Agent-driven config-option changes (config_option_update) likewise write
+	// back the current model/mode/thought-level so session.list stays accurate.
+	norm.SetConfigSink(s.sessions)
 	s.pool = acp.NewPool(spawnProvider(o.acp, norm), s.store, acp.Options{Max: maxProcsPerProvider})
 	s.agent = agent.NewService(s.sessions, acp.NewManager(s.pool), norm)
 	s.provider = provider.NewService(o.acp, s.pool)

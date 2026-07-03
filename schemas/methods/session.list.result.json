@@ -47,6 +47,15 @@
             "$ref": "#/$defs/SessionModel"
           },
           "type": "array"
+        },
+        "current_thought_level_id": {
+          "type": "string"
+        },
+        "available_thought_levels": {
+          "items": {
+            "$ref": "#/$defs/SessionThoughtLevel"
+          },
+          "type": "array"
         }
       },
       "additionalProperties": false,
@@ -113,6 +122,25 @@
       "required": [
         "kind",
         "id"
+      ]
+    },
+    "SessionThoughtLevel": {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "id",
+        "name"
       ]
     },
     "TaskRef": {
