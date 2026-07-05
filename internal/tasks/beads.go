@@ -20,11 +20,12 @@ import (
 // performs (it does not observe out-of-band bd changes). It is safe for
 // concurrent use.
 type Beads struct {
-	name string
-	ws   api.WorkspaceID
-	dir  string   // working directory to run bd in (the repo)
-	bin  string   // bd executable
-	env  []string // extra environment for bd (nil inherits the daemon's)
+	name   string
+	ws     api.WorkspaceID
+	dir    string   // working directory to run bd in (the repo)
+	labels []string // label subset this source is scoped to (nil is the whole dir)
+	bin    string   // bd executable
+	env    []string // extra environment for bd (nil inherits the daemon's)
 	// run executes bd with args and returns stdout; the field is the seam tests
 	// replace with a fake bd.
 	run func(ctx context.Context, args ...string) ([]byte, error)
@@ -35,12 +36,15 @@ type Beads struct {
 
 // NewBeads returns a beads-backed Provider named name for workspace ws, running
 // bd in dir. name is the source identity carried in TaskRef.Provider (so several
-// beads backlogs are distinguishable); an empty name defaults to "beads".
-func NewBeads(name string, ws api.WorkspaceID, dir string) *Beads {
+// beads backlogs are distinguishable); an empty name defaults to "beads". labels
+// scope the source to a subset of dir's backlog: List filters to tasks carrying
+// all of them and Create tags new tasks with them, so one planning repo can back
+// several code repos that each see only their slice.
+func NewBeads(name string, ws api.WorkspaceID, dir string, labels ...string) *Beads {
 	if name == "" {
 		name = "beads"
 	}
-	b := &Beads{name: name, ws: ws, dir: dir, bin: "bd", subs: make(map[chan Event]struct{})}
+	b := &Beads{name: name, ws: ws, dir: dir, labels: labels, bin: "bd", subs: make(map[chan Event]struct{})}
 	b.run = b.exec
 	return b
 }
@@ -74,12 +78,15 @@ func (b *Beads) exec(ctx context.Context, args ...string) ([]byte, error) {
 
 // Create creates an issue and returns it.
 func (b *Beads) Create(ctx context.Context, p CreateParams) (Task, error) {
+	// Tag new tasks with the source's labels too, so a task written through a
+	// filtered source lands in that source's view.
+	labels := unionLabels(p.Labels, b.labels)
 	args := []string{"create", p.Title, "--json"}
 	if p.Description != "" {
 		args = append(args, "-d", p.Description)
 	}
-	if len(p.Labels) > 0 {
-		args = append(args, "-l", strings.Join(p.Labels, ","))
+	if len(labels) > 0 {
+		args = append(args, "-l", strings.Join(labels, ","))
 	}
 	out, err := b.run(ctx, args...)
 	if err != nil {
@@ -91,7 +98,7 @@ func (b *Beads) Create(ctx context.Context, p CreateParams) (Task, error) {
 	}
 	t := b.toTask(iss)
 	if len(t.Labels) == 0 {
-		t.Labels = p.Labels // bd create output may omit labels it was given
+		t.Labels = labels // bd create output may omit labels it was given
 	}
 	b.publish(Event{Ref: t.Ref, Kind: EventCreated})
 	return t, nil
@@ -121,6 +128,10 @@ func (b *Beads) List(ctx context.Context, f Filter) ([]Task, error) {
 	args := []string{"list", "--json"}
 	if f.Status != "" {
 		args = append(args, "--status", f.Status)
+	}
+	// Scope to the source's labels (bd -l is AND: a task must carry all of them).
+	if len(b.labels) > 0 {
+		args = append(args, "-l", strings.Join(b.labels, ","))
 	}
 	out, err := b.run(ctx, args...)
 	if err != nil {
@@ -250,6 +261,31 @@ func (b *Beads) toTask(i bdIssue) Task {
 		t.Comments = append(t.Comments, Comment{Author: c.Author, Text: c.Text, At: c.CreatedAt})
 	}
 	return t
+}
+
+// unionLabels returns requested followed by any of extra not already present,
+// preserving order and dropping duplicates.
+func unionLabels(requested, extra []string) []string {
+	if len(extra) == 0 {
+		return requested
+	}
+	seen := make(map[string]struct{}, len(requested)+len(extra))
+	out := make([]string, 0, len(requested)+len(extra))
+	for _, l := range requested {
+		if _, dup := seen[l]; dup {
+			continue
+		}
+		seen[l] = struct{}{}
+		out = append(out, l)
+	}
+	for _, l := range extra {
+		if _, dup := seen[l]; dup {
+			continue
+		}
+		seen[l] = struct{}{}
+		out = append(out, l)
+	}
+	return out
 }
 
 // bdLinkType maps a LinkType to bd's --type value, and whether to pass --type

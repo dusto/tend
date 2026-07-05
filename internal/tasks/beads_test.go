@@ -119,6 +119,39 @@ func TestBeadsListFilter(t *testing.T) {
 	}
 }
 
+func TestBeadsListAppliesSourceLabels(t *testing.T) {
+	// A source scoped to a label subset filters every List to that subset, so
+	// one planning repo can back several code repos that each see only their slice.
+	f := &fakeBd{responses: map[string]string{"list": `[{"id":"p-a","title":"x","status":"open"}]`}}
+	b := NewBeads("tend", "ws1", "/planning", "repo:tend", "team:core")
+	b.run = f.run
+	if _, err := b.List(context.Background(), Filter{Status: StatusOpen}); err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if args := lastCall(t, f); !hasArgs(args, "list", "--json", "--status", "open", "-l", "repo:tend,team:core") {
+		t.Errorf("list args = %v", args)
+	}
+}
+
+func TestBeadsCreateAppliesSourceLabels(t *testing.T) {
+	// Writing through a filtered source tags the task with the source's labels
+	// (unioned with any requested), so it lands in that source's view.
+	f := &fakeBd{responses: map[string]string{"create": `{"id":"p-a","title":"x","status":"open"}`}}
+	b := NewBeads("tend", "ws1", "/planning", "repo:tend")
+	b.run = f.run
+	tk, err := b.Create(context.Background(), CreateParams{Title: "x", Labels: []string{"bug", "repo:tend"}})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	// Source label is present, requested labels kept, no duplicate of repo:tend.
+	if got := lastCall(t, f); !hasArgs(got, "-l", "bug,repo:tend") {
+		t.Errorf("create args = %v", got)
+	}
+	if !slices.Equal(tk.Labels, []string{"bug", "repo:tend"}) {
+		t.Errorf("task labels = %v, want [bug repo:tend]", tk.Labels)
+	}
+}
+
 func TestBeadsClaim(t *testing.T) {
 	b, f := newBeadsFake(map[string]string{"update": ""})
 	if err := b.Claim(context.Background(), b.ref("ws1-a"), "alice"); err != nil {
