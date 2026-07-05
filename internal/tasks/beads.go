@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -117,7 +118,7 @@ func (b *Beads) Show(ctx context.Context, ref api.TaskRef) (Task, error) {
 	if err != nil {
 		return Task{}, err
 	}
-	if len(issues) == 0 {
+	if len(issues) == 0 || !b.inScope(issues[0].Labels) {
 		return Task{}, fmt.Errorf("beads: no such task %q", ref.ID)
 	}
 	return b.toTask(issues[0]), nil
@@ -153,6 +154,9 @@ func (b *Beads) Claim(ctx context.Context, ref api.TaskRef, assignee string) err
 	if err := b.checkRef(ref); err != nil {
 		return err
 	}
+	if err := b.ensureInScope(ctx, ref.ID); err != nil {
+		return err
+	}
 	if _, err := b.run(ctx, "update", ref.ID, "--assignee", assignee, "--status", StatusInProgress); err != nil {
 		return err
 	}
@@ -163,6 +167,9 @@ func (b *Beads) Claim(ctx context.Context, ref api.TaskRef, assignee string) err
 // Comment appends a comment to the issue.
 func (b *Beads) Comment(ctx context.Context, ref api.TaskRef, c Comment) error {
 	if err := b.checkRef(ref); err != nil {
+		return err
+	}
+	if err := b.ensureInScope(ctx, ref.ID); err != nil {
 		return err
 	}
 	args := []string{"comment", ref.ID, c.Text}
@@ -181,6 +188,9 @@ func (b *Beads) Close(ctx context.Context, ref api.TaskRef) error {
 	if err := b.checkRef(ref); err != nil {
 		return err
 	}
+	if err := b.ensureInScope(ctx, ref.ID); err != nil {
+		return err
+	}
 	if _, err := b.run(ctx, "close", ref.ID); err != nil {
 		return err
 	}
@@ -194,6 +204,12 @@ func (b *Beads) Link(ctx context.Context, from, to api.TaskRef, kind LinkType) e
 		return err
 	}
 	if err := b.checkRef(to); err != nil {
+		return err
+	}
+	if err := b.ensureInScope(ctx, from.ID); err != nil {
+		return err
+	}
+	if err := b.ensureInScope(ctx, to.ID); err != nil {
 		return err
 	}
 	args := []string{"link", from.ID, to.ID}
@@ -244,6 +260,39 @@ func (b *Beads) ref(id string) api.TaskRef {
 func (b *Beads) checkRef(ref api.TaskRef) error {
 	if ref.Provider != b.name || ref.WorkspaceID != b.ws {
 		return fmt.Errorf("tasks: ref %s/%s does not belong to %s/%s", ref.Provider, ref.WorkspaceID, b.name, b.ws)
+	}
+	return nil
+}
+
+// inScope reports whether labels carry every label this source is scoped to. An
+// unscoped source (no labels) admits everything in its dir.
+func (b *Beads) inScope(labels []string) bool {
+	for _, want := range b.labels {
+		if !slices.Contains(labels, want) {
+			return false
+		}
+	}
+	return true
+}
+
+// ensureInScope rejects a by-id operation on a task outside this source's label
+// scope. Show/mutations address tasks by id, so without this a filtered source
+// sharing a beads dir with another could read or mutate that other source's
+// tasks; the task is reported as absent rather than leaking its existence.
+func (b *Beads) ensureInScope(ctx context.Context, id string) error {
+	if len(b.labels) == 0 {
+		return nil
+	}
+	out, err := b.run(ctx, "show", id, "--json")
+	if err != nil {
+		return err
+	}
+	issues, err := decodeIssues(out)
+	if err != nil {
+		return err
+	}
+	if len(issues) == 0 || !b.inScope(issues[0].Labels) {
+		return fmt.Errorf("beads: no such task %q", id)
 	}
 	return nil
 }
