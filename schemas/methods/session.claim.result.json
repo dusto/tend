@@ -56,6 +56,9 @@
             "$ref": "#/$defs/SessionThoughtLevel"
           },
           "type": "array"
+        },
+        "resource_usage": {
+          "$ref": "#/$defs/SessionResourceUsage"
         }
       },
       "additionalProperties": false,
@@ -122,6 +125,27 @@
       "required": [
         "kind",
         "id"
+      ]
+    },
+    "SessionResourceUsage": {
+      "properties": {
+        "cpu_percent": {
+          "type": "number"
+        },
+        "rss_bytes": {
+          "type": "integer"
+        },
+        "sampled_at": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "cpu_percent",
+        "rss_bytes",
+        "sampled_at"
       ]
     },
     "SessionThoughtLevel": {

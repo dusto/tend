@@ -57,6 +57,7 @@ func info(s *session.Session, caller api.ClientID) api.SessionInfo {
 	out.CurrentModeID, out.AvailableModes = s.Modes()
 	out.CurrentModelID, out.AvailableModels = s.Models()
 	out.CurrentThoughtLevelID, out.AvailableThoughtLevels = s.ThoughtLevels()
+	out.ResourceUsage = s.ResourceUsage()
 	return out
 }
 

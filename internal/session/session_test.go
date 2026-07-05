@@ -12,6 +12,28 @@ func newSession(t *testing.T) *Session {
 	return r.Create("s1", "codex", "ws1", api.TaskRef{Provider: "beads", ID: "t1"}, "/repo")
 }
 
+func TestResourceUsageRoundTrip(t *testing.T) {
+	s := newSession(t)
+	if s.ResourceUsage() != nil {
+		t.Error("new session should have no resource usage")
+	}
+	s.SetResourceUsage(&api.SessionResourceUsage{CPUPercent: 12.5, RSSBytes: 4096})
+	got := s.ResourceUsage()
+	if got == nil || got.CPUPercent != 12.5 || got.RSSBytes != 4096 {
+		t.Fatalf("usage = %+v, want cpu=12.5 rss=4096", got)
+	}
+	// ResourceUsage returns a copy: mutating it must not affect stored state.
+	got.RSSBytes = 0
+	if s.ResourceUsage().RSSBytes != 4096 {
+		t.Error("ResourceUsage must return a copy, not the stored pointer")
+	}
+	// A nil clears it (the process went away).
+	s.SetResourceUsage(nil)
+	if s.ResourceUsage() != nil {
+		t.Error("SetResourceUsage(nil) should clear the sample")
+	}
+}
+
 func TestCreateInitialState(t *testing.T) {
 	s := newSession(t)
 	if s.Status() != api.StatusIdle {

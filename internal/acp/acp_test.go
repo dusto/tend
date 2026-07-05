@@ -142,6 +142,38 @@ func TestCloseReapsProcess(t *testing.T) {
 	_ = c.Close() // idempotent
 }
 
+func TestClientPID(t *testing.T) {
+	// A spawned process exposes its OS pid; an in-process test client has none.
+	c, err := Spawn(fakeCommand(t, "hang"), nil)
+	if err != nil {
+		t.Fatalf("Spawn: %v", err)
+	}
+	t.Cleanup(func() { _ = c.Close() })
+	if c.PID() <= 0 {
+		t.Errorf("spawned client PID = %d, want > 0", c.PID())
+	}
+	// Once the process exits/closes, PID reports 0 so a caller never samples a
+	// stale pid the OS may have reused.
+	if err := c.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	if pid := c.PID(); pid != 0 {
+		t.Errorf("PID after Close = %d, want 0", pid)
+	}
+
+	inproc, _ := peerClient(t, nil)
+	if inproc.PID() != 0 {
+		t.Errorf("in-process client PID = %d, want 0", inproc.PID())
+	}
+}
+
+func TestManagerPIDUnknownSession(t *testing.T) {
+	m := NewManager(nil)
+	if pid, ok := m.PID("nope"); ok || pid != 0 {
+		t.Errorf("PID of unknown session = %d,%v, want 0,false", pid, ok)
+	}
+}
+
 func TestSpawnBadCommand(t *testing.T) {
 	if _, err := Spawn(Command{Path: "/nonexistent/acp-binary-xyz"}, nil); err == nil {
 		t.Fatal("Spawn of a missing binary should fail")

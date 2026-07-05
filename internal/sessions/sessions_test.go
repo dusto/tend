@@ -58,6 +58,30 @@ func TestListReportsRichFieldsOrderedByID(t *testing.T) {
 	}
 }
 
+func TestListReportsResourceUsage(t *testing.T) {
+	svc, sess, _, _ := fixture(t)
+	s := sess.Create("s1", "codex", "ws1", ref("ws1", "t1"), "/repo")
+	s.SetResourceUsage(&api.SessionResourceUsage{CPUPercent: 7.5, RSSBytes: 65536})
+
+	res := svc.List("ed", api.SessionListParams{})
+	if len(res.Sessions) != 1 || res.Sessions[0].ResourceUsage == nil {
+		t.Fatalf("sessions = %+v, want one with resource usage", res.Sessions)
+	}
+	ru := res.Sessions[0].ResourceUsage
+	if ru.CPUPercent != 7.5 || ru.RSSBytes != 65536 {
+		t.Errorf("resource usage = %+v, want cpu=7.5 rss=65536", ru)
+	}
+}
+
+func TestListOmitsResourceUsageWhenUnsampled(t *testing.T) {
+	svc, sess, _, _ := fixture(t)
+	sess.Create("s1", "codex", "ws1", ref("ws1", "t1"), "/repo")
+	res := svc.List("ed", api.SessionListParams{})
+	if res.Sessions[0].ResourceUsage != nil {
+		t.Errorf("unsampled session should have nil resource usage, got %+v", res.Sessions[0].ResourceUsage)
+	}
+}
+
 func TestListTasklessSession(t *testing.T) {
 	svc, sess, _, _ := fixture(t)
 	// A task-less session: created with a workspace but no task.

@@ -190,6 +190,20 @@ func NewManager(pool *Pool) *Manager {
 	return &Manager{pool: pool, sessions: make(map[api.SessionID]*Session)}
 }
 
+// PID returns the OS process id of the process a session is pinned to, and
+// whether the session is known and has a live process id. It lets the daemon
+// sample per-session resource usage without exposing the process itself.
+func (m *Manager) PID(id api.SessionID) (int, bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	s, ok := m.sessions[id]
+	if !ok || s.client == nil {
+		return 0, false
+	}
+	pid := s.client.PID()
+	return pid, pid != 0
+}
+
 // Open creates a session on a process for key: it takes a process from the pool
 // (reusing an idle one or spawning), runs session/new on it, pins the session to
 // that process, and registers it so the process is not evicted while it hosts
