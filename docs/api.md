@@ -42,6 +42,8 @@ Schemas live under `schemas/` (`methods/<name>.params.json` / `.result.json`, `e
   - Params: `ProviderStartParams` · Result: `ProviderStartResult`
 - **`provider.stop`** — Stop a provider for a workspace: terminate its pooled processes; emits provider_stopped per process.
   - Params: `ProviderStopParams` · Result: `ProviderStopResult`
+- **`provider.health`** — Report per-provider health for a workspace: command availability on the daemon's PATH and process state (disabled/never_started/running/stopped).
+  - Params: `ProviderHealthParams` · Result: `ProviderHealthResult`
 - **`slash.list`** — List a session's merged slash-command set: the agent's advertised commands plus the daemon/harness commands.
   - Params: `SlashListParams` · Result: `SlashListResult`
 - **`slash.complete`** — Complete a daemon command's argument against live state (e.g. task ids); provider/unknown commands yield no candidates.

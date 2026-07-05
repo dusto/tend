@@ -290,6 +290,16 @@ func (p *Pool) RunningFor(key Key) int {
 	return n
 }
 
+// Seen reports whether the pool has ever held a process pool for key — that is,
+// whether the daemon has tried to run the provider for the workspace (even if
+// none is live now). It distinguishes a provider that stopped from one that was
+// never started, and never creates a pool as a side effect.
+func (p *Pool) Seen(key Key) bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.pools[key] != nil
+}
+
 // Start warms key: it ensures the pool holds at least one process for it,
 // spawning one (which emits provider_started) when none is live. It is a no-op
 // when a process — busy or idle — already exists. Use it to pre-spawn a provider

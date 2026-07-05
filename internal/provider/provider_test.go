@@ -14,15 +14,20 @@ import (
 // per key. startErr, when set, makes Start fail.
 type fakePool struct {
 	running     map[acp.Key]int
+	seen        map[acp.Key]bool // keys the pool has ever held (stopped vs never-started)
 	started     []acp.Key
 	startedRoot string // worktree root carried on the most recent Start ctx
 	stopped     []acp.Key
 	startErr    error
 }
 
-func newFakePool() *fakePool { return &fakePool{running: map[acp.Key]int{}} }
+func newFakePool() *fakePool {
+	return &fakePool{running: map[acp.Key]int{}, seen: map[acp.Key]bool{}}
+}
 
 func (p *fakePool) RunningFor(key acp.Key) int { return p.running[key] }
+
+func (p *fakePool) Seen(key acp.Key) bool { return p.seen[key] }
 
 func (p *fakePool) Start(ctx context.Context, key acp.Key) error {
 	if p.startErr != nil {
@@ -85,6 +90,66 @@ func TestListRequiresWorkspace(t *testing.T) {
 	svc := NewService(testConfig(), newFakePool())
 	if _, err := svc.List(context.Background(), api.ProviderListParams{}); codeOf(t, err) != rpc.CodeInvalidParams {
 		t.Fatalf("List without workspace: got %v, want invalid params", err)
+	}
+}
+
+func TestHealthReportsCommandAndState(t *testing.T) {
+	codex := acp.Key{Workspace: "ws1", Provider: "codex"}
+	claude := acp.Key{Workspace: "ws1", Provider: "claude"}
+	pool := newFakePool()
+	pool.running[codex] = 1  // running
+	pool.seen[claude] = true // seen but no live process -> stopped
+	svc := NewService(testConfig(), pool)
+	// Only codex-acp resolves on PATH.
+	svc.lookPath = func(cmd string) (string, error) {
+		if cmd == "codex-acp" {
+			return "/usr/bin/codex-acp", nil
+		}
+		return "", errors.New("not found")
+	}
+
+	res, err := svc.Health(context.Background(), api.ProviderHealthParams{WorkspaceID: "ws1"})
+	if err != nil {
+		t.Fatalf("Health: %v", err)
+	}
+	if len(res.Providers) != 3 {
+		t.Fatalf("got %d providers, want 3", len(res.Providers))
+	}
+
+	codexH := res.Providers[0]
+	if codexH.State != api.ProviderStateRunning || !codexH.CommandFound || codexH.CommandPath != "/usr/bin/codex-acp" || codexH.Running != 1 {
+		t.Errorf("codex health = %+v, want running/found/path/running=1", codexH)
+	}
+	claudeH := res.Providers[1]
+	if claudeH.State != api.ProviderStateStopped || claudeH.CommandFound || claudeH.CommandPath != "" {
+		t.Errorf("claude health = %+v, want stopped/not-found", claudeH)
+	}
+	// kiro is disabled: disabled wins over never_started, and it is never live.
+	kiroH := res.Providers[2]
+	if kiroH.State != api.ProviderStateDisabled || kiroH.Enabled {
+		t.Errorf("kiro health = %+v, want disabled", kiroH)
+	}
+}
+
+func TestHealthNeverStartedVsStopped(t *testing.T) {
+	// An enabled provider the pool has never seen is never_started, not stopped.
+	pool := newFakePool()
+	svc := NewService(testConfig(), pool)
+	svc.lookPath = func(string) (string, error) { return "", errors.New("nope") }
+
+	res, err := svc.Health(context.Background(), api.ProviderHealthParams{WorkspaceID: "ws1"})
+	if err != nil {
+		t.Fatalf("Health: %v", err)
+	}
+	if got := res.Providers[0].State; got != api.ProviderStateNeverStarted {
+		t.Errorf("codex state = %q, want never_started", got)
+	}
+}
+
+func TestHealthRequiresWorkspace(t *testing.T) {
+	svc := NewService(testConfig(), newFakePool())
+	if _, err := svc.Health(context.Background(), api.ProviderHealthParams{}); codeOf(t, err) != rpc.CodeInvalidParams {
+		t.Fatalf("Health without workspace: got %v, want invalid params", err)
 	}
 }
 
