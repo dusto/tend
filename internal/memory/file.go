@@ -48,7 +48,7 @@ func NewFileProvider(ws api.WorkspaceID, dir string) *FileProvider {
 
 // Search returns memories whose title, tags, or body match the query, ranked by
 // match strength (title/tag matches weigh more than body), then most recent.
-func (p *FileProvider) Search(_ context.Context, query string, limit int) ([]api.MemoryHit, error) {
+func (p *FileProvider) Search(_ context.Context, query, kind string, limit int) ([]api.MemoryHit, error) {
 	if limit <= 0 {
 		limit = defaultLimit
 	}
@@ -68,6 +68,9 @@ func (p *FileProvider) Search(_ context.Context, query string, limit int) ([]api
 	var hits []scored
 	for _, id := range order {
 		e := entries[id]
+		if kind != "" && e.Kind != kind {
+			continue
+		}
 		if s := score(e, terms); s > 0 {
 			hits = append(hits, scored{e: e, score: s})
 		}
@@ -85,6 +88,7 @@ func (p *FileProvider) Search(_ context.Context, query string, limit int) ([]api
 	for _, h := range hits {
 		out = append(out, api.MemoryHit{
 			ID:      h.e.ID,
+			Kind:    h.e.Kind,
 			Title:   h.e.Title,
 			Tags:    h.e.Tags,
 			Task:    h.e.Task,
@@ -187,6 +191,7 @@ func (p *FileProvider) parseFile(path string) (api.MemoryEntry, error) {
 	e := api.MemoryEntry{
 		ID:          api.MemoryID(firstNonEmpty(meta.ID, baseName(path))),
 		WorkspaceID: p.ws,
+		Kind:        firstNonEmpty(meta.Kind, api.MemoryKindNote),
 		Title:       meta.Title,
 		Tags:        meta.Tags,
 		Task:        p.taskRef(meta.Task),
@@ -214,6 +219,7 @@ func (p *FileProvider) taskRef(s string) *api.TaskRef {
 // ignored, so files can carry extra fields.
 type frontmatter struct {
 	ID      string   `yaml:"id"`
+	Kind    string   `yaml:"kind"`
 	Title   string   `yaml:"title"`
 	Tags    []string `yaml:"tags"`
 	Task    string   `yaml:"task"`

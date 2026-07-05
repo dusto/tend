@@ -9,6 +9,9 @@
         "workspace_id": {
           "type": "string"
         },
+        "kind": {
+          "type": "string"
+        },
         "task": {
           "$ref": "#/$defs/TaskRef"
         },

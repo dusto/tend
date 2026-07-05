@@ -2,12 +2,26 @@ package api
 
 import "time"
 
-// MemoryEntry is one stored memory note: a task-bound, agent-authored note the
-// daemon can search and retrieve later. The backend is pluggable; the default
-// stores each entry as a markdown file with YAML frontmatter.
+// Memory kinds (MemoryEntry.Kind). Memory has a type dimension: an episodic note
+// the agent authored, versus standing steering (rules/standards/instructions)
+// that guides the agent. They are retrieved differently — notes by search,
+// steering additionally by activation rules — so the kind is first-class.
+const (
+	// MemoryKindNote is an episodic, agent-authored working note (the default).
+	MemoryKindNote = "note"
+	// MemoryKindSteering is standing guidance: rules, standards, or instructions,
+	// including memory imported from other agents' instruction files.
+	MemoryKindSteering = "steering"
+)
+
+// MemoryEntry is one stored memory: a task-bound, agent-authored note, or a piece
+// of standing steering (see Kind). The backend is pluggable; the default stores
+// each entry as a markdown file with YAML frontmatter.
 type MemoryEntry struct {
 	ID          MemoryID    `json:"id"`
 	WorkspaceID WorkspaceID `json:"workspace_id"`
+	// Kind is the memory type (note or steering); empty is treated as note.
+	Kind string `json:"kind,omitempty"`
 	// Task is the task the note was written under, or nil for a workspace-level
 	// note.
 	Task  *TaskRef `json:"task,omitempty"`
@@ -22,6 +36,7 @@ type MemoryEntry struct {
 // the full body, so a search stays concise. Fetch the full text with memory.get.
 type MemoryHit struct {
 	ID    MemoryID `json:"id"`
+	Kind  string   `json:"kind,omitempty"`
 	Title string   `json:"title,omitempty"`
 	Tags  []string `json:"tags,omitempty"`
 	Task  *TaskRef `json:"task,omitempty"`
@@ -35,6 +50,9 @@ type MemorySearchParams struct {
 	// Query is the search text; its terms are matched against each memory's title,
 	// tags, and body.
 	Query string `json:"query"`
+	// Kind, when set, restricts the search to memories of that kind (note or
+	// steering); empty searches all kinds.
+	Kind string `json:"kind,omitempty"`
 	// Limit caps the number of hits; 0 uses a sensible default.
 	Limit int `json:"limit,omitempty"`
 }

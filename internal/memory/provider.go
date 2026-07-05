@@ -13,8 +13,9 @@ import (
 // external memory engine can replace it without touching the wire contract.
 type Provider interface {
 	// Search returns the memories matching query, most relevant first, capped at
-	// limit (<= 0 uses a default). Hits carry ids + snippets, not full bodies.
-	Search(ctx context.Context, query string, limit int) ([]api.MemoryHit, error)
+	// limit (<= 0 uses a default). A non-empty kind restricts results to that
+	// memory kind. Hits carry ids + snippets, not full bodies.
+	Search(ctx context.Context, query, kind string, limit int) ([]api.MemoryHit, error)
 	// Get returns one memory's full entry by id.
 	Get(ctx context.Context, id api.MemoryID) (api.MemoryEntry, error)
 }

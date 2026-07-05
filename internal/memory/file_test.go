@@ -29,7 +29,7 @@ func TestFileProviderSearchRanksTitleOverBody(t *testing.T) {
 	writeMemory(t, dir, "a.md", "---\nid: a\ntitle: Deploy runbook\n---\nunrelated body text")
 	writeMemory(t, dir, "b.md", "---\nid: b\ntitle: Misc notes\n---\nthe deploy happens after tests")
 
-	hits, err := p.Search(context.Background(), "deploy", 0)
+	hits, err := p.Search(context.Background(), "deploy", "", 0)
 	if err != nil {
 		t.Fatalf("Search: %v", err)
 	}
@@ -46,7 +46,7 @@ func TestFileProviderSearchIsConciseWithSnippet(t *testing.T) {
 	p, dir := newProvider(t)
 	writeMemory(t, dir, "run.md", "---\nid: run\ntitle: Release steps\ntags: [ops]\n---\nRun make release then push the tags to origin.")
 
-	hits, err := p.Search(context.Background(), "release", 0)
+	hits, err := p.Search(context.Background(), "release", "", 0)
 	if err != nil || len(hits) != 1 {
 		t.Fatalf("hits = %+v, err = %v", hits, err)
 	}
@@ -97,7 +97,7 @@ func TestFileProviderGetNotFound(t *testing.T) {
 
 func TestFileProviderMissingDirIsEmpty(t *testing.T) {
 	p := NewFileProvider("ws1", filepath.Join(t.TempDir(), "does-not-exist"))
-	hits, err := p.Search(context.Background(), "anything", 0)
+	hits, err := p.Search(context.Background(), "anything", "", 0)
 	if err != nil || len(hits) != 0 {
 		t.Errorf("search of missing dir = %+v, %v; want empty, nil", hits, err)
 	}
@@ -109,12 +109,12 @@ func TestFileProviderMissingDirIsEmpty(t *testing.T) {
 func TestFileProviderReloadsOnChange(t *testing.T) {
 	p, dir := newProvider(t)
 	writeMemory(t, dir, "a.md", "---\nid: a\ntitle: alpha\n---\nbody")
-	if hits, _ := p.Search(context.Background(), "alpha", 0); len(hits) != 1 {
+	if hits, _ := p.Search(context.Background(), "alpha", "", 0); len(hits) != 1 {
 		t.Fatalf("first search hits = %d, want 1", len(hits))
 	}
 	// A new file must be picked up on the next search (index refresh, not a grep).
 	writeMemory(t, dir, "b.md", "---\nid: b\ntitle: alpha two\n---\nbody")
-	if hits, _ := p.Search(context.Background(), "alpha", 0); len(hits) != 2 {
+	if hits, _ := p.Search(context.Background(), "alpha", "", 0); len(hits) != 2 {
 		t.Fatalf("after add, hits = %d, want 2", len(hits))
 	}
 }
@@ -131,7 +131,7 @@ func TestFileProviderNoFrontmatter(t *testing.T) {
 	if e.Text != "just some notes about caching" {
 		t.Errorf("body = %q", e.Text)
 	}
-	if hits, _ := p.Search(context.Background(), "caching", 0); len(hits) != 1 {
+	if hits, _ := p.Search(context.Background(), "caching", "", 0); len(hits) != 1 {
 		t.Errorf("search body-only = %d hits, want 1", len(hits))
 	}
 }
@@ -141,8 +141,33 @@ func TestFileProviderSearchLimit(t *testing.T) {
 	for _, id := range []string{"a", "b", "c"} {
 		writeMemory(t, dir, id+".md", "---\nid: "+id+"\ntitle: shared term\n---\nbody")
 	}
-	if hits, _ := p.Search(context.Background(), "shared", 2); len(hits) != 2 {
+	if hits, _ := p.Search(context.Background(), "shared", "", 2); len(hits) != 2 {
 		t.Errorf("limited search = %d hits, want 2", len(hits))
+	}
+}
+
+func TestFileProviderKindDefaultsToNote(t *testing.T) {
+	p, dir := newProvider(t)
+	writeMemory(t, dir, "n.md", "---\nid: n\ntitle: plain\n---\nbody")
+	e, _ := p.Get(context.Background(), "n")
+	if e.Kind != api.MemoryKindNote {
+		t.Errorf("kind = %q, want note (default)", e.Kind)
+	}
+}
+
+func TestFileProviderSearchFiltersByKind(t *testing.T) {
+	p, dir := newProvider(t)
+	writeMemory(t, dir, "note.md", "---\nid: note\ntitle: caching note\n---\nbody")
+	writeMemory(t, dir, "rule.md", "---\nid: rule\nkind: steering\ntitle: caching rule\n---\nbody")
+
+	// Unfiltered: both match.
+	if hits, _ := p.Search(context.Background(), "caching", "", 0); len(hits) != 2 {
+		t.Fatalf("unfiltered hits = %d, want 2", len(hits))
+	}
+	// kind=steering returns only the steering entry, carrying its kind.
+	hits, _ := p.Search(context.Background(), "caching", api.MemoryKindSteering, 0)
+	if len(hits) != 1 || hits[0].ID != "rule" || hits[0].Kind != api.MemoryKindSteering {
+		t.Errorf("steering-filtered hits = %+v, want only rule", hits)
 	}
 }
 

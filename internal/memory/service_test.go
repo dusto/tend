@@ -15,7 +15,7 @@ type fakeProvider struct {
 	entries map[api.MemoryID]api.MemoryEntry
 }
 
-func (f *fakeProvider) Search(_ context.Context, _ string, _ int) ([]api.MemoryHit, error) {
+func (f *fakeProvider) Search(_ context.Context, _, _ string, _ int) ([]api.MemoryHit, error) {
 	return f.hits, nil
 }
 

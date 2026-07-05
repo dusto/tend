@@ -56,7 +56,7 @@ func (s *Service) search(ctx context.Context, p api.MemorySearchParams) (api.Mem
 	if p.Query == "" {
 		return api.MemorySearchResult{}, invalidParams("query is required")
 	}
-	hits, err := s.provider(p.WorkspaceID).Search(ctx, p.Query, p.Limit)
+	hits, err := s.provider(p.WorkspaceID).Search(ctx, p.Query, p.Kind, p.Limit)
 	if err != nil {
 		return api.MemorySearchResult{}, internalErr(err)
 	}
