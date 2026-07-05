@@ -54,7 +54,10 @@ func run() error {
 		slog.Info("tendd: no config file; using built-in defaults", "path", cfgPath)
 	}
 
-	srv, err := daemon.New(ln, filepath.Join(filepath.Dir(path), "events.log"), daemon.WithACPConfig(cfg))
+	srv, err := daemon.New(ln, filepath.Join(filepath.Dir(path), "events.log"),
+		daemon.WithACPConfig(cfg),
+		daemon.WithTaskFactory(cfg.Tasks.Factory()),
+	)
 	if err != nil {
 		_ = ln.Close()
 		return err

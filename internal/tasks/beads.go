@@ -33,9 +33,14 @@ type Beads struct {
 	subs map[chan Event]struct{}
 }
 
-// NewBeads returns a beads-backed Provider for workspace ws, running bd in dir.
-func NewBeads(ws api.WorkspaceID, dir string) *Beads {
-	b := &Beads{name: "beads", ws: ws, dir: dir, bin: "bd", subs: make(map[chan Event]struct{})}
+// NewBeads returns a beads-backed Provider named name for workspace ws, running
+// bd in dir. name is the source identity carried in TaskRef.Provider (so several
+// beads backlogs are distinguishable); an empty name defaults to "beads".
+func NewBeads(name string, ws api.WorkspaceID, dir string) *Beads {
+	if name == "" {
+		name = "beads"
+	}
+	b := &Beads{name: name, ws: ws, dir: dir, bin: "bd", subs: make(map[chan Event]struct{})}
 	b.run = b.exec
 	return b
 }

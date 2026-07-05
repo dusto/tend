@@ -31,7 +31,7 @@ func (f *fakeBd) run(_ context.Context, args ...string) ([]byte, error) {
 
 func newBeadsFake(responses map[string]string) (*Beads, *fakeBd) {
 	f := &fakeBd{responses: responses}
-	b := NewBeads("ws1", "/repo")
+	b := NewBeads("beads", "ws1", "/repo")
 	b.run = f.run
 	return b, f
 }
@@ -219,7 +219,7 @@ func TestBeadsSubprocess(t *testing.T) {
 		t.Fatalf("write fake bd: %v", err)
 	}
 
-	b := NewBeads("ws1", dir)
+	b := NewBeads("beads", "ws1", dir)
 	b.bin = bin
 
 	tk, err := b.Create(context.Background(), CreateParams{Title: "t"})

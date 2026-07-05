@@ -131,7 +131,7 @@ func TestSmokeTaskViaFakeBd(t *testing.T) {
 	}
 	// A beads-backed task provider whose bd is this test binary in fake-bd mode.
 	factory := func(ws api.WorkspaceID) tasks.Provider {
-		b := tasks.NewBeads(ws, t.TempDir())
+		b := tasks.NewBeads("beads", ws, t.TempDir())
 		b.SetExec(exe, []string{EnvFakeBd + "=1"})
 		return b
 	}

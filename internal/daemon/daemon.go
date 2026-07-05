@@ -140,8 +140,9 @@ func New(ln net.Listener, logPath string, opts ...Option) (*Server, error) {
 	s.files = files.NewService(s.sessions, editors, s.gate, files.Options{})
 	s.lsp = lsp.NewService(s.sessions, editors)
 	s.sessSvc = sessions.NewService(s.sessions, s.binder)
-	// Task provider per workspace. The in-memory fake stands in until the beads
-	// adapter is wired; the task.* contract and event bridge are independent of it.
+	// Task provider per workspace. The default factory is the in-memory fake (for
+	// tests and zero-config runs); tendd installs the config-resolved factory. The
+	// task.* contract and event bridge are independent of the backend.
 	s.tasks = tasks.NewService(o.taskFactory, s.store)
 	s.ptyMgr = pty.NewManager()
 	s.panes = pty.NewService(s.ptyMgr, s.sessions, s.gate, s.store, "")

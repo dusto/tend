@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 
 	"github.com/BurntSushi/toml"
+
+	"github.com/dusto/tend/internal/tasks"
 )
 
 // CwdMode selects the working directory an ACP provider process runs in.
@@ -20,9 +22,11 @@ const (
 	CwdInherit CwdMode = "inherit"
 )
 
-// Config is the parsed TEND configuration. It models the ACP provider section.
+// Config is the parsed TEND configuration file. It aggregates the daemon's
+// configurable sections: the ACP providers and the task sources.
 type Config struct {
-	ACP Settings `toml:"acp"`
+	ACP   Settings            `toml:"acp"`
+	Tasks tasks.SourcesConfig `toml:"tasks"`
 }
 
 // Settings holds the ACP provider definitions.
@@ -125,7 +129,7 @@ func (c *Config) validate() error {
 			return fmt.Errorf("config: provider %q: invalid cwd_mode %q", p.ID, p.CwdMode)
 		}
 	}
-	return nil
+	return c.Tasks.Validate()
 }
 
 // EnabledProviders returns the providers with enabled = true, in definition
