@@ -128,9 +128,12 @@ func Register(m *dispatch.Mux, s *Service) error {
 
 func (s *Service) create(ctx context.Context, p api.TaskCreateParams) (api.Task, error) {
 	t, err := s.provider(p.WorkspaceID).Create(ctx, CreateParams{
-		Title:       p.Title,
-		Description: p.Description,
-		Labels:      p.Labels,
+		Title:              p.Title,
+		Description:        p.Description,
+		AcceptanceCriteria: p.AcceptanceCriteria,
+		Priority:           p.Priority,
+		Design:             p.Design,
+		Labels:             p.Labels,
 	})
 	return result(t, err)
 }
@@ -234,12 +237,15 @@ func invalidParams(err error) error {
 
 func toAPITask(t Task) api.Task {
 	out := api.Task{
-		Ref:         t.Ref,
-		Title:       t.Title,
-		Status:      t.Status,
-		Description: t.Description,
-		Assignee:    t.Assignee,
-		Labels:      t.Labels,
+		Ref:                t.Ref,
+		Title:              t.Title,
+		Status:             t.Status,
+		Description:        t.Description,
+		AcceptanceCriteria: t.AcceptanceCriteria,
+		Priority:           t.Priority,
+		Design:             t.Design,
+		Assignee:           t.Assignee,
+		Labels:             t.Labels,
 	}
 	for _, c := range t.Comments {
 		out.Comments = append(out.Comments, api.TaskComment{Author: c.Author, Text: c.Text, At: c.At})

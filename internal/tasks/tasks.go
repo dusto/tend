@@ -20,13 +20,16 @@ const (
 
 // Task is a provider-agnostic view of one task.
 type Task struct {
-	Ref         api.TaskRef
-	Title       string
-	Status      string
-	Description string
-	Assignee    string
-	Labels      []string
-	Comments    []Comment
+	Ref                api.TaskRef
+	Title              string
+	Status             string
+	Description        string
+	AcceptanceCriteria string
+	Priority           string
+	Design             string
+	Assignee           string
+	Labels             []string
+	Comments           []Comment
 }
 
 // Comment is a note attached to a task.
@@ -36,11 +39,15 @@ type Comment struct {
 	At     time.Time
 }
 
-// CreateParams describes a task to create.
+// CreateParams describes a task to create. Fields beyond Title are optional; a
+// provider that does not support one ignores it rather than failing.
 type CreateParams struct {
-	Title       string
-	Description string
-	Labels      []string
+	Title              string
+	Description        string
+	AcceptanceCriteria string
+	Priority           string
+	Design             string
+	Labels             []string
 }
 
 // Filter selects tasks for List. A zero Filter matches everything.

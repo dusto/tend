@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -85,6 +86,15 @@ func (b *Beads) Create(ctx context.Context, p CreateParams) (Task, error) {
 	args := []string{"create", p.Title, "--json"}
 	if p.Description != "" {
 		args = append(args, "-d", p.Description)
+	}
+	if p.AcceptanceCriteria != "" {
+		args = append(args, "--acceptance", p.AcceptanceCriteria)
+	}
+	if p.Priority != "" {
+		args = append(args, "-p", p.Priority)
+	}
+	if p.Design != "" {
+		args = append(args, "--design", p.Design)
 	}
 	if len(labels) > 0 {
 		args = append(args, "-l", strings.Join(labels, ","))
@@ -299,12 +309,17 @@ func (b *Beads) ensureInScope(ctx context.Context, id string) error {
 
 func (b *Beads) toTask(i bdIssue) Task {
 	t := Task{
-		Ref:         b.ref(i.ID),
-		Title:       i.Title,
-		Status:      i.Status,
-		Description: i.Description,
-		Assignee:    i.Assignee,
-		Labels:      i.Labels,
+		Ref:                b.ref(i.ID),
+		Title:              i.Title,
+		Status:             i.Status,
+		Description:        i.Description,
+		AcceptanceCriteria: i.AcceptanceCriteria,
+		Design:             i.Design,
+		Assignee:           i.Assignee,
+		Labels:             i.Labels,
+	}
+	if i.Priority != nil {
+		t.Priority = strconv.Itoa(*i.Priority)
 	}
 	for _, c := range i.Comments {
 		t.Comments = append(t.Comments, Comment{Author: c.Author, Text: c.Text, At: c.CreatedAt})
@@ -352,13 +367,16 @@ func bdLinkType(k LinkType) (string, bool) {
 
 // bdIssue is the subset of bd's JSON issue the adapter reads.
 type bdIssue struct {
-	ID          string      `json:"id"`
-	Title       string      `json:"title"`
-	Description string      `json:"description"`
-	Status      string      `json:"status"`
-	Assignee    string      `json:"assignee"`
-	Labels      []string    `json:"labels"`
-	Comments    []bdComment `json:"comments"`
+	ID                 string      `json:"id"`
+	Title              string      `json:"title"`
+	Description        string      `json:"description"`
+	AcceptanceCriteria string      `json:"acceptance_criteria"`
+	Priority           *int        `json:"priority"`
+	Design             string      `json:"design"`
+	Status             string      `json:"status"`
+	Assignee           string      `json:"assignee"`
+	Labels             []string    `json:"labels"`
+	Comments           []bdComment `json:"comments"`
 }
 
 type bdComment struct {

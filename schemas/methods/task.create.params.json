@@ -10,6 +10,15 @@
     "description": {
       "type": "string"
     },
+    "acceptance_criteria": {
+      "type": "string"
+    },
+    "priority": {
+      "type": "string"
+    },
+    "design": {
+      "type": "string"
+    },
     "labels": {
       "items": {
         "type": "string"
