@@ -86,6 +86,44 @@ command = "x-cli"`))
 	}
 }
 
+func TestParseTasksSection(t *testing.T) {
+	cfg, err := Parse([]byte(`[[acp.providers]]
+id = "x"
+command = "x-cli"
+
+[[tasks.sources]]
+name = "tend"
+type = "beads"
+dir = "/planning"
+
+[[tasks.rules]]
+repos = ["/w/tend", "/w/tend.nvim"]
+use = "tend"`))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if len(cfg.Tasks.Sources) != 1 || cfg.Tasks.Sources[0].Name != "tend" || cfg.Tasks.Sources[0].Dir != "/planning" {
+		t.Fatalf("parsed tasks sources = %+v, want one named tend dir=/planning", cfg.Tasks.Sources)
+	}
+	if len(cfg.Tasks.Rules) != 1 || cfg.Tasks.Rules[0].Use != "tend" || len(cfg.Tasks.Rules[0].Repos) != 2 {
+		t.Fatalf("parsed tasks rule = %+v, want use=tend with two repos", cfg.Tasks.Rules)
+	}
+}
+
+func TestParseTasksSectionInvalid(t *testing.T) {
+	// An invalid task-source section fails the whole config load, loudly.
+	_, err := Parse([]byte(`[[acp.providers]]
+id = "x"
+command = "x-cli"
+
+[[tasks.rules]]
+repos = ["/w/tend"]
+use = "ghost"`))
+	if err == nil {
+		t.Fatal("expected error for a rule referencing an undefined source")
+	}
+}
+
 func TestParseValidationErrors(t *testing.T) {
 	cases := map[string]string{
 		"missing id": `[[acp.providers]]

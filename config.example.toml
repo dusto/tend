@@ -28,3 +28,36 @@ id = "codex"
 command = "codex-acp"
 cwd_mode = "workspace"
 enabled = false
+
+# Task sources map a workspace to its backlog.
+#
+# Define each backlog once as a named source, then map repositories to it. A
+# workspace resolves to the source of the first rule whose repos/under matches
+# its repo root; with no match it uses its OWN in-tree source (a .beads dir in
+# the repo root, when present); with neither it has no source (task.* is an
+# empty queue and writes report that none is configured — beads is never forced
+# on a repo).
+#
+# Matching is by robust path identity, not repo-name keywords:
+#   repos = exact repository roots (arbitrary names, grouped by identity)
+#   under = parent directories; any repository beneath one applies
+# An exact `repos` match takes precedence over an `under` prefix match.
+#
+# `name` is the source identity; it is carried in a task's ref so several
+# backlogs stay distinguishable. A source of type "beads" runs `bd` in `dir`.
+
+# [[tasks.sources]]
+# name = "tend"
+# type = "beads"
+# dir  = "/home/you/work/tend-workspace/tend-planning"
+
+# [[tasks.rules]]
+# repos = [
+#   "/home/you/work/tend-workspace/tend",
+#   "/home/you/work/tend-workspace/tend.nvim",
+# ]
+# use = "tend"
+
+# [[tasks.rules]]
+# under = ["/home/you/work/acme"]     # every repo under here shares one backlog
+# use   = "acme"
