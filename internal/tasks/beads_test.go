@@ -77,6 +77,30 @@ func TestBeadsCreate(t *testing.T) {
 	}
 }
 
+func TestBeadsCreateRichFields(t *testing.T) {
+	b, f := newBeadsFake(map[string]string{
+		"create": `{"id":"ws1-abc","title":"fix","status":"open","acceptance_criteria":"done when green","priority":1,"design":"the plan"}`,
+	})
+	tk, err := b.Create(context.Background(), CreateParams{
+		Title:              "fix",
+		AcceptanceCriteria: "done when green",
+		Priority:           "1",
+		Design:             "the plan",
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	// The authoring fields are passed as bd flags.
+	args := lastCall(t, f)
+	if !hasArgs(args, "--acceptance", "done when green", "-p", "1", "--design", "the plan") {
+		t.Errorf("create args = %v", args)
+	}
+	// And parsed back from bd's JSON (priority is numeric in bd's output).
+	if tk.AcceptanceCriteria != "done when green" || tk.Priority != "1" || tk.Design != "the plan" {
+		t.Errorf("task = %+v", tk)
+	}
+}
+
 func TestBeadsShow(t *testing.T) {
 	b, f := newBeadsFake(map[string]string{
 		"show": `[{"id":"ws1-abc","title":"fix","status":"in_progress","description":"d","assignee":"alice","labels":["m0"],"comments":[{"author":"bob","text":"hi","created_at":"2026-06-07T00:00:00Z"}]}]`,

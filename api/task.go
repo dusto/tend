@@ -4,13 +4,19 @@ import "time"
 
 // Task is the wire view of a provider task.
 type Task struct {
-	Ref         TaskRef       `json:"ref"`
-	Title       string        `json:"title"`
-	Status      string        `json:"status"`
-	Description string        `json:"description,omitempty"`
-	Assignee    string        `json:"assignee,omitempty"`
-	Labels      []string      `json:"labels,omitempty"`
-	Comments    []TaskComment `json:"comments,omitempty"`
+	Ref         TaskRef `json:"ref"`
+	Title       string  `json:"title"`
+	Status      string  `json:"status"`
+	Description string  `json:"description,omitempty"`
+	// AcceptanceCriteria states when the task is done.
+	AcceptanceCriteria string `json:"acceptance_criteria,omitempty"`
+	// Priority is a provider-defined priority (e.g. beads "0"–"4", 0 highest).
+	Priority string `json:"priority,omitempty"`
+	// Design carries design or context notes for the task.
+	Design   string        `json:"design,omitempty"`
+	Assignee string        `json:"assignee,omitempty"`
+	Labels   []string      `json:"labels,omitempty"`
+	Comments []TaskComment `json:"comments,omitempty"`
 }
 
 // TaskComment is a note attached to a task.
@@ -20,12 +26,17 @@ type TaskComment struct {
 	At     time.Time `json:"at"`
 }
 
-// TaskCreateParams creates a task in a workspace's provider.
+// TaskCreateParams creates a task in a workspace's provider. Fields beyond title
+// are optional; a provider that does not support one ignores it rather than
+// failing.
 type TaskCreateParams struct {
-	WorkspaceID WorkspaceID `json:"workspace_id"`
-	Title       string      `json:"title"`
-	Description string      `json:"description,omitempty"`
-	Labels      []string    `json:"labels,omitempty"`
+	WorkspaceID        WorkspaceID `json:"workspace_id"`
+	Title              string      `json:"title"`
+	Description        string      `json:"description,omitempty"`
+	AcceptanceCriteria string      `json:"acceptance_criteria,omitempty"`
+	Priority           string      `json:"priority,omitempty"`
+	Design             string      `json:"design,omitempty"`
+	Labels             []string    `json:"labels,omitempty"`
 }
 
 // TaskShowParams fetches one task.

@@ -53,11 +53,14 @@ func (f *Fake) Create(_ context.Context, p CreateParams) (Task, error) {
 	f.seq++
 	id := fmt.Sprintf("t%d", f.seq)
 	t := &Task{
-		Ref:         f.ref(id),
-		Title:       p.Title,
-		Status:      StatusOpen,
-		Description: p.Description,
-		Labels:      append([]string(nil), p.Labels...),
+		Ref:                f.ref(id),
+		Title:              p.Title,
+		Status:             StatusOpen,
+		Description:        p.Description,
+		AcceptanceCriteria: p.AcceptanceCriteria,
+		Priority:           p.Priority,
+		Design:             p.Design,
+		Labels:             append([]string(nil), p.Labels...),
 	}
 	f.tasks[id] = t
 	f.publish(Event{Ref: t.Ref, Kind: EventCreated})

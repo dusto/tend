@@ -84,6 +84,34 @@ func TestServiceCreateShowList(t *testing.T) {
 	}
 }
 
+func TestServiceCreateShowRichFields(t *testing.T) {
+	s, _ := newService(t)
+	ctx := context.Background()
+
+	created, err := s.create(ctx, api.TaskCreateParams{
+		WorkspaceID:        "ws1",
+		Title:              "fix",
+		AcceptanceCriteria: "given X, when Y, then Z",
+		Priority:           "1",
+		Design:             "sketch of the approach",
+	})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	// The create path echoes the authoring fields back.
+	if created.AcceptanceCriteria != "given X, when Y, then Z" || created.Priority != "1" || created.Design != "sketch of the approach" {
+		t.Fatalf("created = %+v", created)
+	}
+	// And they round-trip through show.
+	got, err := s.show(ctx, api.TaskShowParams{Ref: created.Ref})
+	if err != nil {
+		t.Fatalf("show: %v", err)
+	}
+	if got.AcceptanceCriteria != created.AcceptanceCriteria || got.Priority != created.Priority || got.Design != created.Design {
+		t.Fatalf("show = %+v, want rich fields preserved", got)
+	}
+}
+
 func TestServiceClaimCommentClose(t *testing.T) {
 	s, _ := newService(t)
 	ctx := context.Background()
