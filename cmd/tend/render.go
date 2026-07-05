@@ -57,11 +57,17 @@ func repoName(s api.SessionInfo) string {
 	return filepath.Base(s.WorktreeRoot)
 }
 
+// taskRef renders a session's task as provider:id. ps is global across
+// workspaces and providers, so a bare id could collide across task sources; the
+// provider qualifies it (the REPO column carries the workspace).
 func taskRef(s api.SessionInfo) string {
 	if s.Task == nil || s.Task.ID == "" {
 		return "-"
 	}
-	return s.Task.ID
+	if s.Task.Provider == "" {
+		return s.Task.ID
+	}
+	return s.Task.Provider + ":" + s.Task.ID
 }
 
 func cpu(s api.SessionInfo) string {

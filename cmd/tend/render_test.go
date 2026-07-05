@@ -37,9 +37,9 @@ func TestRenderTableColumnsAndDegradation(t *testing.T) {
 	if len(lines) != 3 { // header + 2 rows
 		t.Fatalf("got %d lines, want 3:\n%s", len(lines), out)
 	}
-	// s1: real stats.
-	if !strings.Contains(out, "tend") || !strings.Contains(out, "12.3") || !strings.Contains(out, "5.0M") {
-		t.Errorf("s1 row missing repo/cpu/rss:\n%s", out)
+	// s1: real stats, and the task shows qualified by provider (provider:id).
+	if !strings.Contains(out, "tend") || !strings.Contains(out, "beads:t1") || !strings.Contains(out, "12.3") || !strings.Contains(out, "5.0M") {
+		t.Errorf("s1 row missing repo/task/cpu/rss:\n%s", out)
 	}
 	// s2: absent task and stats render as "-", never a fabricated 0.
 	s2 := lines[2]
