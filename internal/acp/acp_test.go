@@ -152,6 +152,14 @@ func TestClientPID(t *testing.T) {
 	if c.PID() <= 0 {
 		t.Errorf("spawned client PID = %d, want > 0", c.PID())
 	}
+	// Once the process exits/closes, PID reports 0 so a caller never samples a
+	// stale pid the OS may have reused.
+	if err := c.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	if pid := c.PID(); pid != 0 {
+		t.Errorf("PID after Close = %d, want 0", pid)
+	}
 
 	inproc, _ := peerClient(t, nil)
 	if inproc.PID() != 0 {

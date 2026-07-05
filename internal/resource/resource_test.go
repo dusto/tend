@@ -116,6 +116,29 @@ func TestMonitorTickSamplesAndSinks(t *testing.T) {
 	}
 }
 
+func TestMonitorClearsDeadSession(t *testing.T) {
+	// A session sampled one tick, then gone (no live pid) the next, must have its
+	// stale usage cleared so session.list never reports a dead process.
+	f := &fakeProc{ticks: []uint64{0}, rss: 4096}
+	got := map[api.SessionID]*api.SessionResourceUsage{}
+	live := map[api.SessionID]int{"s1": 11}
+	m := &Monitor{
+		sampler: newSampler(f.read, func() time.Time { return time.Unix(1, 0) }),
+		pids:    func() map[api.SessionID]int { return live },
+		sink:    func(id api.SessionID, u *api.SessionResourceUsage) { got[id] = u },
+	}
+	m.tick()
+	if got["s1"] == nil {
+		t.Fatal("s1 should have a sample after the first tick")
+	}
+	// The session's process is gone: it drops out of the live set.
+	live = map[api.SessionID]int{}
+	m.tick()
+	if got["s1"] != nil {
+		t.Errorf("dead session usage = %+v, want cleared to nil", got["s1"])
+	}
+}
+
 func TestMonitorTickClearsUnavailable(t *testing.T) {
 	f := &fakeProc{err: errors.New("gone")}
 	got := map[api.SessionID]*api.SessionResourceUsage{"s1": {RSSBytes: 1}}
