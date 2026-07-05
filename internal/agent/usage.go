@@ -11,12 +11,12 @@ import (
 // estimate is deliberately coarse and always flagged Approximate.
 const charsPerToken = 4
 
-// measurePromptUsage measures the prompt input a turn sends. Only text blocks
-// contribute to the byte/char/token counts; resource links and image/audio blobs
-// are counted as attachments, since their content is not sent as prompt text
-// (the agent resolves links itself, and blobs are not text the estimate can
-// tokenize). It mirrors promptBlocks: an empty Content sends a single text block
-// from Text.
+// measurePromptUsage measures the prompt input composed for a turn. Only text
+// blocks contribute to the byte/char/token counts; resource links and image/audio
+// blobs are counted as attachments, since their content is not composed as prompt
+// text (the agent resolves links itself, and blobs are not text the estimate can
+// tokenize). It mirrors promptBlocks: an empty Content composes a single text
+// block from Text.
 func measurePromptUsage(id api.SessionID, p api.AgentPromptParams) api.AgentPromptUsage {
 	u := api.AgentPromptUsage{SessionID: id, Approximate: true}
 	if len(p.Content) == 0 {

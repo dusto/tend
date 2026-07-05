@@ -280,9 +280,9 @@ func (s *Service) Prompt(ctx context.Context, p api.AgentPromptParams) (api.Agen
 	defer s.clearInflight(p.SessionID)
 	defer cancel()
 
-	// Report the size of the prompt input we are about to send. It is the only
-	// context the daemon authoritatively knows: the agent owns its system prompt
-	// and history.
+	// Report the size of the prompt input composed for this turn, before the send
+	// (so it is reported even if the send fails). It is the only context the
+	// daemon authoritatively knows: the agent owns its system prompt and history.
 	s.norm.PublishPromptUsage(measurePromptUsage(p.SessionID, p))
 
 	params := acp.PromptParams{Prompt: prompt}

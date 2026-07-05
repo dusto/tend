@@ -75,7 +75,7 @@ var EventDefs = []EventDef{
 	{Type: "tool_call", Scope: ScopeSession, Payload: ToolCall{}, Summary: "An agent tool call started."},
 	{Type: "tool_call_update", Scope: ScopeSession, Payload: ToolCallUpdate{}, Summary: "Progress update for a tool call."},
 	{Type: "turn_end", Scope: ScopeSession, Payload: TurnEnd{}, Summary: "The agent's turn ended."},
-	{Type: "agent_prompt_usage", Scope: ScopeSession, Payload: AgentPromptUsage{}, Summary: "The size of the prompt input the daemon composed and sent for a turn: bytes and an approximate, model-agnostic token estimate. Measures only client-side prompt content, not the agent-owned system prompt/history."},
+	{Type: "agent_prompt_usage", Scope: ScopeSession, Payload: AgentPromptUsage{}, Summary: "The size of the prompt input the daemon composed for a turn: bytes and an approximate, model-agnostic token estimate. Measures only client-side prompt content, not the agent-owned system prompt/history."},
 	{Type: "approval_requested", Scope: ScopeSession, Payload: ApprovalRequested{}, Summary: "A mutating action is awaiting approval."},
 	{Type: "approval_resolved", Scope: ScopeSession, Payload: ApprovalResolved{}, Summary: "A pending approval was resolved."},
 	{Type: "agent_error", Scope: ScopeSession, Payload: AgentError{}, Summary: "A session's turn failed (e.g. its provider process exited mid-turn)."},
@@ -131,15 +131,16 @@ type TurnEnd struct {
 	SessionID SessionID `json:"session_id"`
 }
 
-// AgentPromptUsage reports the size of the prompt input the daemon composed and
-// sent for one turn. It measures only client-side prompt content: thick ACP
-// agents own their system prompt, tool definitions, and history, which the
-// daemon cannot see or measure. Only text blocks contribute to the byte and
-// token counts; other blocks (resource links, images, audio) are counted as
-// attachments, since their content is not sent as prompt text.
+// AgentPromptUsage reports the size of the prompt input the daemon composed for
+// one turn (measured as the turn starts, before the provider send, so it is
+// reported even if the send then fails). It measures only client-side prompt
+// content: thick ACP agents own their system prompt, tool definitions, and
+// history, which the daemon cannot see or measure. Only text blocks contribute
+// to the byte and token counts; other blocks (resource links, images, audio) are
+// counted as attachments, since their content is not composed as prompt text.
 type AgentPromptUsage struct {
 	SessionID SessionID `json:"session_id"`
-	// TextBytes is the UTF-8 byte length of the text prompt content sent.
+	// TextBytes is the UTF-8 byte length of the text prompt content composed.
 	TextBytes int `json:"text_bytes"`
 	// TextChars is the rune count of that text.
 	TextChars int `json:"text_chars"`

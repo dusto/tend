@@ -113,8 +113,8 @@ func (n *Normalizer) PublishTurnEnd(sessionID string) {
 }
 
 // PublishPromptUsage emits agent_prompt_usage for a session: the size of the
-// prompt input the daemon composed and sent for the turn. The caller running the
-// turn invokes it once per turn, before the prompt is sent.
+// prompt input the daemon composed for the turn. The caller running the turn
+// invokes it once per turn, as the turn starts (before the provider send).
 func (n *Normalizer) PublishPromptUsage(usage api.AgentPromptUsage) {
 	n.publish(sessionEvent(string(usage.SessionID), "agent_prompt_usage", usage))
 }
