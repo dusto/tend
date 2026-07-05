@@ -112,6 +112,13 @@ func (n *Normalizer) PublishTurnEnd(sessionID string) {
 	n.publish(sessionEvent(sessionID, "turn_end", api.TurnEnd{SessionID: api.SessionID(sessionID)}))
 }
 
+// PublishPromptUsage emits agent_prompt_usage for a session: the size of the
+// prompt input the daemon composed for the turn. The caller running the turn
+// invokes it once per turn, as the turn starts (before the provider send).
+func (n *Normalizer) PublishPromptUsage(usage api.AgentPromptUsage) {
+	n.publish(sessionEvent(string(usage.SessionID), "agent_prompt_usage", usage))
+}
+
 func (n *Normalizer) handleUpdate(params json.RawMessage) {
 	var env struct {
 		SessionID string          `json:"sessionId"`

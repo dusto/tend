@@ -88,10 +88,12 @@ func TestSmokeAgentTurnStreamsEvents(t *testing.T) {
 		t.Errorf("stop reason = %q", prompt.StopReason)
 	}
 
-	if !c.WaitEventCount(started.StreamID, 5, 3*time.Second) {
+	if !c.WaitEventCount(started.StreamID, 6, 3*time.Second) {
 		t.Fatalf("did not receive the turn's events; got %v", c.EventTypes(started.StreamID))
 	}
-	want := []string{"agent_message_chunk", "agent_message_chunk", "tool_call", "tool_call_update", "turn_end"}
+	// The turn opens with agent_prompt_usage (the prompt input we sent) before the
+	// agent's streamed output.
+	want := []string{"agent_prompt_usage", "agent_message_chunk", "agent_message_chunk", "tool_call", "tool_call_update", "turn_end"}
 	got := c.EventTypes(started.StreamID)
 	if len(got) < len(want) {
 		t.Fatalf("event types = %v, want %v", got, want)
