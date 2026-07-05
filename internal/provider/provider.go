@@ -8,6 +8,7 @@ package provider
 
 import (
 	"context"
+	"os/exec"
 
 	"github.com/dusto/tend/api"
 	"github.com/dusto/tend/internal/acp"
@@ -17,9 +18,10 @@ import (
 
 // Method names, matching the api contract.
 const (
-	MethodList  = "provider.list"
-	MethodStart = "provider.start"
-	MethodStop  = "provider.stop"
+	MethodList   = "provider.list"
+	MethodStart  = "provider.start"
+	MethodStop   = "provider.stop"
+	MethodHealth = "provider.health"
 )
 
 // Pool is the slice of the process pool the service drives. *acp.Pool satisfies
@@ -29,6 +31,9 @@ type Pool interface {
 	RunningFor(key acp.Key) int
 	Start(ctx context.Context, key acp.Key) error
 	StopKey(key acp.Key) int
+	// Seen reports whether the daemon has ever tried to run the provider for the
+	// key's workspace, distinguishing a stopped provider from a never-started one.
+	Seen(key acp.Key) bool
 }
 
 // Service backs the provider.* methods over the provider config and the process
@@ -36,11 +41,14 @@ type Pool interface {
 type Service struct {
 	cfg  *acp.Config
 	pool Pool
+	// lookPath resolves a command on the daemon's PATH; a field so health checks
+	// are testable without real executables. Defaults to exec.LookPath.
+	lookPath func(string) (string, error)
 }
 
 // NewService returns a Service reading cfg and driving pool.
 func NewService(cfg *acp.Config, pool Pool) *Service {
-	return &Service{cfg: cfg, pool: pool}
+	return &Service{cfg: cfg, pool: pool, lookPath: exec.LookPath}
 }
 
 // Register installs the provider.* methods on m, backed by s.
@@ -51,7 +59,53 @@ func Register(m *dispatch.Mux, s *Service) error {
 	if err := dispatch.Handle(m, MethodStart, s.Start); err != nil {
 		return err
 	}
-	return dispatch.Handle(m, MethodStop, s.Stop)
+	if err := dispatch.Handle(m, MethodStop, s.Stop); err != nil {
+		return err
+	}
+	return dispatch.Handle(m, MethodHealth, s.Health)
+}
+
+// Health reports each configured provider's command availability and process
+// state for the workspace. It is cheap and on-demand: command availability is a
+// PATH lookup and process state comes from the pool, so a provider that was
+// never started degrades cleanly rather than being probed.
+func (s *Service) Health(_ context.Context, p api.ProviderHealthParams) (api.ProviderHealthResult, error) {
+	if p.WorkspaceID == "" {
+		return api.ProviderHealthResult{}, invalidParams("workspace_id is required")
+	}
+	provs := s.cfg.ACP.Providers
+	out := make([]api.ProviderHealth, 0, len(provs))
+	for _, prov := range provs {
+		key := s.key(p.WorkspaceID, api.ProviderID(prov.ID))
+		running := s.pool.RunningFor(key)
+		path, err := s.lookPath(prov.Command)
+		out = append(out, api.ProviderHealth{
+			ProviderID:   api.ProviderID(prov.ID),
+			Command:      prov.Command,
+			Enabled:      prov.Enabled,
+			CommandFound: err == nil,
+			CommandPath:  path,
+			State:        s.state(prov.Enabled, running, key),
+			Running:      running,
+		})
+	}
+	return api.ProviderHealthResult{Providers: out}, nil
+}
+
+// state derives a provider's process state for a workspace. A disabled provider
+// cannot run; otherwise it is running when a process is live, stopped when the
+// pool has seen it before, and never_started when it has not.
+func (s *Service) state(enabled bool, running int, key acp.Key) string {
+	switch {
+	case !enabled:
+		return api.ProviderStateDisabled
+	case running > 0:
+		return api.ProviderStateRunning
+	case s.pool.Seen(key):
+		return api.ProviderStateStopped
+	default:
+		return api.ProviderStateNeverStarted
+	}
 }
 
 // List returns the configured providers in definition order, each with its

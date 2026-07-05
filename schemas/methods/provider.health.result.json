@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$defs": {
+    "ProviderHealth": {
+      "properties": {
+        "provider_id": {
+          "type": "string"
+        },
+        "command": {
+          "type": "string"
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "command_found": {
+          "type": "boolean"
+        },
+        "command_path": {
+          "type": "string"
+        },
+        "state": {
+          "type": "string"
+        },
+        "running": {
+          "type": "integer"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "provider_id",
+        "command",
+        "enabled",
+        "command_found",
+        "state",
+        "running"
+      ]
+    }
+  },
+  "properties": {
+    "providers": {
+      "items": {
+        "$ref": "#/$defs/ProviderHealth"
+      },
+      "type": "array"
+    }
+  },
+  "additionalProperties": false,
+  "type": "object",
+  "required": [
+    "providers"
+  ]
+}

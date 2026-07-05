@@ -56,3 +56,49 @@ type ProviderStopResult struct {
 	ProviderID ProviderID `json:"provider_id"`
 	Stopped    int        `json:"stopped"`
 }
+
+// Provider process states (ProviderHealth.State).
+const (
+	// ProviderStateDisabled is a configured provider that cannot be started.
+	ProviderStateDisabled = "disabled"
+	// ProviderStateNeverStarted is an enabled provider the daemon has not tried
+	// to run for the workspace.
+	ProviderStateNeverStarted = "never_started"
+	// ProviderStateRunning is a provider with at least one live process.
+	ProviderStateRunning = "running"
+	// ProviderStateStopped is an enabled provider run before but with no live
+	// process now (exited, crashed, or was stopped).
+	ProviderStateStopped = "stopped"
+)
+
+// ProviderHealth is the daemon-reported health of one configured provider for a
+// workspace: whether its command is executable and the state of its pooled
+// processes. The daemon owns provider processes, so health is reported here
+// rather than probed by a client.
+type ProviderHealth struct {
+	ProviderID ProviderID `json:"provider_id"`
+	Command    string     `json:"command"`
+	Enabled    bool       `json:"enabled"`
+	// CommandFound reports whether Command resolves to an executable on the
+	// daemon's PATH.
+	CommandFound bool `json:"command_found"`
+	// CommandPath is the resolved path of Command, or "" when it is not found.
+	CommandPath string `json:"command_path,omitempty"`
+	// State is the process state for the workspace: one of the ProviderState*
+	// values (disabled, never_started, running, stopped).
+	State string `json:"state"`
+	// Running is the number of live pooled processes for the workspace.
+	Running int `json:"running"`
+}
+
+// ProviderHealthParams requests provider health for a workspace. WorkspaceID is
+// required: process state is per workspace.
+type ProviderHealthParams struct {
+	WorkspaceID WorkspaceID `json:"workspace_id"`
+}
+
+// ProviderHealthResult is the health of each configured provider in definition
+// order.
+type ProviderHealthResult struct {
+	Providers []ProviderHealth `json:"providers"`
+}
