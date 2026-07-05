@@ -7,6 +7,7 @@ require (
 	github.com/creack/pty v1.1.24
 	github.com/invopop/jsonschema v0.14.0
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.2
+	github.com/urfave/cli/v3 v3.10.1
 )
 
 require (
