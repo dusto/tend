@@ -26,6 +26,7 @@ import (
 	"github.com/dusto/tend/internal/lsp"
 	"github.com/dusto/tend/internal/provider"
 	"github.com/dusto/tend/internal/pty"
+	"github.com/dusto/tend/internal/resource"
 	"github.com/dusto/tend/internal/rpc"
 	"github.com/dusto/tend/internal/session"
 	"github.com/dusto/tend/internal/sessions"
@@ -43,6 +44,11 @@ const maxProcsPerProvider = 8
 // considered expired. Enforcing the deadline is layered on separately.
 const approvalTTL = 5 * time.Minute
 
+// resourceSampleInterval is how often the daemon samples each session's
+// agent-process CPU/RSS. It is a coarse, off-hot-path cadence: the estimate is
+// approximate and a client reads the latest sample, never triggers one.
+const resourceSampleInterval = 3 * time.Second
+
 // Server accepts connections on a listener and serves each over JSON-RPC. It is
 // safe for concurrent use; Shutdown is idempotent.
 type Server struct {
@@ -56,9 +62,12 @@ type Server struct {
 	// and outlive any single client.
 	sessions *session.Registry
 	pool     *acp.Pool
+	acpMgr   *acp.Manager
 	agent    *agent.Service
 	provider *provider.Service
 	slash    *slash.Service
+	// resources periodically samples per-session agent CPU/RSS onto session state.
+	resources *resource.Monitor
 	// clients tracks connected-client identity/capabilities daemon-wide.
 	clients *client.Registry
 	// binder owns editor-binding decisions across sessions; gate is the shared
@@ -158,8 +167,13 @@ func New(ln net.Listener, logPath string, opts ...Option) (*Server, error) {
 	// back the current model/mode/thought-level so session.list stays accurate.
 	norm.SetConfigSink(s.sessions)
 	s.pool = acp.NewPool(spawnProvider(o.acp, norm), s.store, acp.Options{Max: maxProcsPerProvider})
-	s.agent = agent.NewService(s.sessions, acp.NewManager(s.pool), norm)
+	s.acpMgr = acp.NewManager(s.pool)
+	s.agent = agent.NewService(s.sessions, s.acpMgr, norm)
 	s.provider = provider.NewService(o.acp, s.pool)
+	// Periodically sample each session's agent-process CPU/RSS off the hot path,
+	// storing the latest on the session for session.list to report.
+	s.resources = resource.NewMonitor(resourceSampleInterval, s.sessionPIDs, s.setSessionResource)
+	s.resources.Start()
 	// The agent's advertised commands (available_commands_update) are aggregated
 	// with the daemon commands by the slash service, which emits the merged event;
 	// it runs daemon task commands through s.tasks and forwards the rest to the
@@ -168,11 +182,33 @@ func New(ln net.Listener, logPath string, opts ...Option) (*Server, error) {
 	norm.SetCommandSink(s.slash)
 
 	if _, _, err := s.newMux(); err != nil {
+		s.resources.Close()
 		_ = log.Close()
 		_ = s.pool.Close()
 		return nil, err
 	}
 	return s, nil
+}
+
+// sessionPIDs snapshots each live session's agent-process id for the resource
+// monitor. A session whose process is not yet (or no longer) live is omitted.
+func (s *Server) sessionPIDs() map[api.SessionID]int {
+	sessions := s.sessions.List()
+	pids := make(map[api.SessionID]int, len(sessions))
+	for _, sess := range sessions {
+		if pid, ok := s.acpMgr.PID(sess.ID); ok {
+			pids[sess.ID] = pid
+		}
+	}
+	return pids
+}
+
+// setSessionResource stores a session's latest resource sample; a session that
+// has since ended is ignored.
+func (s *Server) setSessionResource(id api.SessionID, u *api.SessionResourceUsage) {
+	if sess, ok := s.sessions.Get(id); ok {
+		sess.SetResourceUsage(u)
+	}
 }
 
 // spawnProvider returns the pool's SpawnFunc: it launches the configured provider
@@ -355,6 +391,7 @@ func (s *Server) Shutdown() {
 		_ = c.Close()
 	}
 	s.wg.Wait()
+	s.resources.Close()
 	_ = s.pool.Close()
 	s.tasks.Close()
 	s.ptyMgr.Shutdown()

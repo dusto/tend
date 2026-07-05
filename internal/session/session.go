@@ -49,6 +49,10 @@ type Session struct {
 	// providerCommands are the agent's advertised slash commands, captured from
 	// the ACP available_commands_update. Empty until the agent advertises any.
 	providerCommands []api.SlashCommand
+	// resourceUsage is the latest OS resource sample for the session's agent
+	// process, written by the daemon's periodic sampler. Nil until first sampled
+	// (or when the process is gone or the platform is unsupported).
+	resourceUsage *api.SessionResourceUsage
 	// Editor binding: owner is the client currently serving editor-local calls
 	// ("" when headless); expectedEditor is the editor identity auto-bind matches,
 	// recorded when the binding is claimed and retained across disconnects so the
@@ -215,6 +219,26 @@ func (s *Session) ProviderCommands() []api.SlashCommand {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.providerCommands
+}
+
+// SetResourceUsage records the latest resource sample for the session's agent
+// process. A nil usage clears it (the process is gone or unsampleable).
+func (s *Session) SetResourceUsage(u *api.SessionResourceUsage) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.resourceUsage = u
+}
+
+// ResourceUsage returns a copy of the latest resource sample, or nil when none
+// has been taken.
+func (s *Session) ResourceUsage() *api.SessionResourceUsage {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.resourceUsage == nil {
+		return nil
+	}
+	u := *s.resourceUsage
+	return &u
 }
 
 // Owner returns the session's editor-binding owner and whether one is bound.

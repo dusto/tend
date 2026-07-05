@@ -1,5 +1,7 @@
 package api
 
+import "time"
+
 // SessionStatus is an agent session's lifecycle state, as tracked by the daemon
 // and reflected to attached clients.
 type SessionStatus string
@@ -96,6 +98,24 @@ type SessionInfo struct {
 	// reasoning/thought level; both are empty when the provider offers no choice.
 	CurrentThoughtLevelID  string                `json:"current_thought_level_id,omitempty"`
 	AvailableThoughtLevels []SessionThoughtLevel `json:"available_thought_levels,omitempty"`
+	// ResourceUsage is the latest sample of the OS resources the session's agent
+	// process is using, or nil when the daemon has no sample (no live process yet,
+	// or the platform does not support sampling).
+	ResourceUsage *SessionResourceUsage `json:"resource_usage,omitempty"`
+}
+
+// SessionResourceUsage samples the OS resources the session's agent process is
+// using. It is approximate and best-effort: the daemon samples only the ACP
+// agent process it owns (not the agent-spawned children or pty panes). CPUPercent
+// is 0 on the first sample of a process, before an interval exists to rate over.
+type SessionResourceUsage struct {
+	// CPUPercent is the process CPU usage over the last sample interval, as a
+	// percentage of one core (may exceed 100 across threads).
+	CPUPercent float64 `json:"cpu_percent"`
+	// RSSBytes is the process resident set size in bytes.
+	RSSBytes int64 `json:"rss_bytes"`
+	// SampledAt is when the sample was taken.
+	SampledAt time.Time `json:"sampled_at"`
 }
 
 // SessionSetModeParams sets a session's active mode (reasoning/thought level).

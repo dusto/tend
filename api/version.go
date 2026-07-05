@@ -18,8 +18,9 @@ const (
 	// slash.invoke; 0.15.0 added agent.prompt content blocks (attach
 	// files/images/audio); 0.16.0 added session.set_thought_level (+ the
 	// thought-level fields on SessionInfo, captured from ACP configOptions);
-	// 0.17.0 added provider.health.
-	PluginToDaemonVersion = "0.17.0"
+	// 0.17.0 added provider.health; 0.18.0 added SessionInfo.resource_usage
+	// (per-session agent CPU/RSS).
+	PluginToDaemonVersion = "0.18.0"
 	// 0.2.0 added editor.open + editor.diff; 0.3.0 added editor.diagnostics.
 	DaemonToEditorVersion = "0.3.0"
 	// 0.2.0 added the agent_thought_chunk session event; 0.3.0 added the

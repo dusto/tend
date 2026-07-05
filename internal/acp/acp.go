@@ -112,6 +112,15 @@ func (c *Client) Notify(ctx context.Context, method string, params any) error {
 // Close was called).
 func (c *Client) Done() <-chan struct{} { return c.conn.Done() }
 
+// PID returns the OS process id of the provider process, or 0 for an in-process
+// client (tests) or before the process started.
+func (c *Client) PID() int {
+	if c.cmd == nil || c.cmd.Process == nil {
+		return 0
+	}
+	return c.cmd.Process.Pid
+}
+
 // Close tears the client down: it closes the transport (which closes the
 // process's stdin) and, for a spawned process, kills and reaps it. It is safe to
 // call more than once.
