@@ -24,6 +24,7 @@ import (
 	"github.com/dusto/tend/internal/files"
 	"github.com/dusto/tend/internal/handshake"
 	"github.com/dusto/tend/internal/lsp"
+	"github.com/dusto/tend/internal/memory"
 	"github.com/dusto/tend/internal/provider"
 	"github.com/dusto/tend/internal/pty"
 	"github.com/dusto/tend/internal/resource"
@@ -79,6 +80,7 @@ type Server struct {
 	lsp     *lsp.Service
 	sessSvc *sessions.Service
 	tasks   *tasks.Service
+	memory  *memory.Service
 	panes   *pty.Service
 	ptyMgr  *pty.Manager
 
@@ -153,6 +155,9 @@ func New(ln net.Listener, logPath string, opts ...Option) (*Server, error) {
 	// tests and zero-config runs); tendd installs the config-resolved factory. The
 	// task.* contract and event bridge are independent of the backend.
 	s.tasks = tasks.NewService(o.taskFactory, s.store)
+	// Memory tools: the default backend reads a workspace's in-tree markdown
+	// memory directory; a config-driven factory can replace it, like task sources.
+	s.memory = memory.NewService(memory.InRepoFactory)
 	s.ptyMgr = pty.NewManager()
 	s.panes = pty.NewService(s.ptyMgr, s.sessions, s.gate, s.store, "")
 
@@ -297,6 +302,9 @@ func (s *Server) newMux() (*dispatch.Mux, func(), error) {
 		return nil, nil, err
 	}
 	if err := slash.Register(mux, s.slash); err != nil {
+		return nil, nil, err
+	}
+	if err := memory.Register(mux, s.memory); err != nil {
 		return nil, nil, err
 	}
 	if err := tasks.Register(mux, s.tasks); err != nil {
