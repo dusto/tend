@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -137,6 +138,32 @@ func TestFactoryCanonicalizesRulePaths(t *testing.T) {
 	// WorkspaceID carries the resolved (real) path.
 	p := cfg.Factory()(api.WorkspaceID(filepath.Join(realRoot, ".git")))
 	beadsSource(t, p, "central", "/planning")
+}
+
+func TestFactoryMultipleSourcesShareDirDistinctLabels(t *testing.T) {
+	// One planning repo backs two code repos: two named sources over the same dir,
+	// each scoped to its own label. They must resolve independently and stay
+	// distinguishable by provider name.
+	cfg := SourcesConfig{
+		Sources: []SourceDef{
+			{Name: "tend", Type: SourceBeads, Dir: "/planning", Labels: []string{"repo:tend"}},
+			{Name: "nvim", Type: SourceBeads, Dir: "/planning", Labels: []string{"repo:nvim"}},
+		},
+		Rules: []MappingRule{
+			{Repos: []string{"/w/tend"}, Use: "tend"},
+			{Repos: []string{"/w/tend.nvim"}, Use: "nvim"},
+		},
+	}
+	factory := cfg.Factory()
+
+	tend := factory(api.WorkspaceID("/w/tend/.git")).(*Beads)
+	if tend.name != "tend" || tend.dir != "/planning" || !slices.Equal(tend.labels, []string{"repo:tend"}) {
+		t.Fatalf("tend source = %+v", tend)
+	}
+	nvim := factory(api.WorkspaceID("/w/tend.nvim/.git")).(*Beads)
+	if nvim.name != "nvim" || nvim.dir != "/planning" || !slices.Equal(nvim.labels, []string{"repo:nvim"}) {
+		t.Fatalf("nvim source = %+v", nvim)
+	}
 }
 
 func TestFactoryInRepoDefaultWhenDotBeadsPresent(t *testing.T) {

@@ -45,11 +45,17 @@ enabled = false
 #
 # `name` is the source identity; it is carried in a task's ref so several
 # backlogs stay distinguishable. A source of type "beads" runs `bd` in `dir`.
+#
+# `labels` optionally scopes a source to a subset of its backlog: only tasks
+# carrying all of them are listed, and new tasks are tagged with them. One
+# planning repo can thus back several code repos that each see only their slice —
+# define one source per label subset over the same `dir`.
 
 # [[tasks.sources]]
 # name = "tend"
 # type = "beads"
 # dir  = "/home/you/work/tend-workspace/tend-planning"
+# labels = ["repo:tend"]          # optional; omit to see the whole backlog
 
 # [[tasks.rules]]
 # repos = [

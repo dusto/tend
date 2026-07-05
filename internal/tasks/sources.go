@@ -37,6 +37,11 @@ type SourceDef struct {
 	// Dir is the beads working directory (a planning repo whose .beads holds the
 	// backlog).
 	Dir string `toml:"dir"`
+	// Labels optionally scopes the source to a subset of the backlog: only tasks
+	// carrying all of them are listed, and new tasks are tagged with them. This
+	// lets one planning repo back several code repos that each see their slice
+	// (e.g. labels = ["repo:tend"]).
+	Labels []string `toml:"labels"`
 }
 
 // MappingRule maps a set of repositories to a named source.
@@ -214,7 +219,7 @@ func detectInRepoSource(root string) (SourceDef, bool) {
 func newSource(ws api.WorkspaceID, def SourceDef) Provider {
 	switch def.Type {
 	case SourceBeads:
-		return NewBeads(def.Name, ws, def.Dir)
+		return NewBeads(def.Name, ws, def.Dir, def.Labels...)
 	default:
 		// Validate rejects unknown types; guard defensively.
 		return emptyProvider{ws: ws}

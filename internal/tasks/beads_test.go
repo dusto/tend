@@ -119,6 +119,89 @@ func TestBeadsListFilter(t *testing.T) {
 	}
 }
 
+func TestBeadsListAppliesSourceLabels(t *testing.T) {
+	// A source scoped to a label subset filters every List to that subset, so
+	// one planning repo can back several code repos that each see only their slice.
+	f := &fakeBd{responses: map[string]string{"list": `[{"id":"p-a","title":"x","status":"open"}]`}}
+	b := NewBeads("tend", "ws1", "/planning", "repo:tend", "team:core")
+	b.run = f.run
+	if _, err := b.List(context.Background(), Filter{Status: StatusOpen}); err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if args := lastCall(t, f); !hasArgs(args, "list", "--json", "--status", "open", "-l", "repo:tend,team:core") {
+		t.Errorf("list args = %v", args)
+	}
+}
+
+func TestBeadsCreateAppliesSourceLabels(t *testing.T) {
+	// Writing through a filtered source tags the task with the source's labels
+	// (unioned with any requested), so it lands in that source's view.
+	f := &fakeBd{responses: map[string]string{"create": `{"id":"p-a","title":"x","status":"open"}`}}
+	b := NewBeads("tend", "ws1", "/planning", "repo:tend")
+	b.run = f.run
+	tk, err := b.Create(context.Background(), CreateParams{Title: "x", Labels: []string{"bug", "repo:tend"}})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	// Source label is present, requested labels kept, no duplicate of repo:tend.
+	if got := lastCall(t, f); !hasArgs(got, "-l", "bug,repo:tend") {
+		t.Errorf("create args = %v", got)
+	}
+	if !slices.Equal(tk.Labels, []string{"bug", "repo:tend"}) {
+		t.Errorf("task labels = %v, want [bug repo:tend]", tk.Labels)
+	}
+}
+
+func TestBeadsScopeRejectsOutOfScopeByID(t *testing.T) {
+	// A filtered source must not read or mutate a task outside its labels even by
+	// bare id, since it may share a beads dir with another source.
+	f := &fakeBd{responses: map[string]string{
+		"show":    `[{"id":"p-nv","title":"x","status":"open","labels":["repo:nvim"]}]`,
+		"close":   "",
+		"update":  "",
+		"comment": "",
+	}}
+	b := NewBeads("tend", "ws1", "/planning", "repo:tend")
+	b.run = f.run
+	ref := b.ref("p-nv")
+
+	if _, err := b.Show(context.Background(), ref); err == nil {
+		t.Error("Show of an out-of-scope task should be rejected")
+	}
+	if err := b.Close(context.Background(), ref); err == nil {
+		t.Error("Close of an out-of-scope task should be rejected")
+	}
+	if err := b.Claim(context.Background(), ref, "alice"); err == nil {
+		t.Error("Claim of an out-of-scope task should be rejected")
+	}
+	if err := b.Comment(context.Background(), ref, Comment{Text: "x"}); err == nil {
+		t.Error("Comment on an out-of-scope task should be rejected")
+	}
+	// No mutation reached bd.
+	for _, c := range f.calls {
+		if c[0] == "close" || c[0] == "update" || c[0] == "comment" {
+			t.Errorf("mutation %q ran on an out-of-scope task", c[0])
+		}
+	}
+}
+
+func TestBeadsScopeAllowsInScopeByID(t *testing.T) {
+	f := &fakeBd{responses: map[string]string{
+		"show":  `[{"id":"p-td","title":"x","status":"open","labels":["repo:tend","bug"]}]`,
+		"close": "",
+	}}
+	b := NewBeads("tend", "ws1", "/planning", "repo:tend")
+	b.run = f.run
+	ref := b.ref("p-td")
+
+	if _, err := b.Show(context.Background(), ref); err != nil {
+		t.Fatalf("Show of an in-scope task: %v", err)
+	}
+	if err := b.Close(context.Background(), ref); err != nil {
+		t.Fatalf("Close of an in-scope task: %v", err)
+	}
+}
+
 func TestBeadsClaim(t *testing.T) {
 	b, f := newBeadsFake(map[string]string{"update": ""})
 	if err := b.Claim(context.Background(), b.ref("ws1-a"), "alice"); err != nil {
