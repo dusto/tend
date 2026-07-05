@@ -33,7 +33,7 @@ func startTurn(t *testing.T, sock string) (*Client, api.StreamID) {
 	mustCall(t, c, "events.subscribe", api.EventsSubscribeParams{StreamID: started.StreamID}, &api.EventsSubscribeResult{})
 	mustCall(t, c, "agent.prompt", api.AgentPromptParams{SessionID: started.SessionID, Text: "hi"}, &api.AgentPromptResult{})
 
-	if !c.WaitEventCount(started.StreamID, 5, 3*time.Second) {
+	if !c.WaitEventCount(started.StreamID, 6, 3*time.Second) {
 		t.Fatalf("turn events did not arrive; got %v", c.EventTypes(started.StreamID))
 	}
 	return c, started.StreamID
@@ -46,11 +46,11 @@ func TestReplayReconnectDedup(t *testing.T) {
 	sock := fakeDaemon(t)
 	first, stream := startTurn(t, sock)
 
-	// The first connection processed seqs 1..5.
+	// The first connection processed seqs 1..6 (agent_prompt_usage opens the turn).
 	dd := events.NewDeduper()
 	got := first.Events(stream)
-	if len(got) != 5 {
-		t.Fatalf("first delivery = %d events, want 5", len(got))
+	if len(got) != 6 {
+		t.Fatalf("first delivery = %d events, want 6", len(got))
 	}
 	for _, ev := range got {
 		if !dd.Fresh(ev) {
@@ -59,10 +59,10 @@ func TestReplayReconnectDedup(t *testing.T) {
 	}
 
 	// Reconnect with a cursor behind what was processed (last persisted = 2): the
-	// daemon replays (2, tail] = 3,4,5, which the Deduper drops as duplicates.
+	// daemon replays (2, tail] = 3,4,5,6, which the Deduper drops as duplicates.
 	reconnect := dial(t, sock)
 	mustCall(t, reconnect, "events.subscribe", api.EventsSubscribeParams{StreamID: stream, LastSeq: 2}, &api.EventsSubscribeResult{})
-	if !reconnect.WaitEventCount(stream, 3, 3*time.Second) {
+	if !reconnect.WaitEventCount(stream, 4, 3*time.Second) {
 		t.Fatalf("replay did not redeliver the tail; got %v", reconnect.EventTypes(stream))
 	}
 	replayed := reconnect.Events(stream)
@@ -113,15 +113,15 @@ func TestMultipleSessionsIndependent(t *testing.T) {
 	mustCall(t, c, "agent.prompt", api.AgentPromptParams{SessionID: a.SessionID, Text: "hi a"}, &api.AgentPromptResult{})
 	mustCall(t, c, "agent.prompt", api.AgentPromptParams{SessionID: b.SessionID, Text: "hi b"}, &api.AgentPromptResult{})
 
-	if !c.WaitEventCount(a.StreamID, 5, 3*time.Second) || !c.WaitEventCount(b.StreamID, 5, 3*time.Second) {
+	if !c.WaitEventCount(a.StreamID, 6, 3*time.Second) || !c.WaitEventCount(b.StreamID, 6, 3*time.Second) {
 		t.Fatalf("turns incomplete: a=%v b=%v", c.EventTypes(a.StreamID), c.EventTypes(b.StreamID))
 	}
-	// No leakage: each stream carries exactly its own turn (5 records), and every
+	// No leakage: each stream carries exactly its own turn (6 records), and every
 	// record's stream id matches.
 	for _, s := range []api.StreamID{a.StreamID, b.StreamID} {
 		evs := c.Events(s)
-		if len(evs) != 5 {
-			t.Errorf("stream %s = %d events, want 5 (leakage or loss)", s, len(evs))
+		if len(evs) != 6 {
+			t.Errorf("stream %s = %d events, want 6 (leakage or loss)", s, len(evs))
 		}
 		for _, ev := range evs {
 			if ev.StreamID != s {
@@ -145,17 +145,17 @@ func TestMultipleSessionsIndependent(t *testing.T) {
 	rc := dial(t, sock)
 	mustCall(t, rc, "events.subscribe", api.EventsSubscribeParams{StreamID: a.StreamID, LastSeq: 2}, &api.EventsSubscribeResult{})
 	mustCall(t, rc, "events.subscribe", api.EventsSubscribeParams{StreamID: b.StreamID, LastSeq: 0}, &api.EventsSubscribeResult{})
-	if !rc.WaitEventCount(a.StreamID, 3, 3*time.Second) || !rc.WaitEventCount(b.StreamID, 5, 3*time.Second) {
+	if !rc.WaitEventCount(a.StreamID, 4, 3*time.Second) || !rc.WaitEventCount(b.StreamID, 6, 3*time.Second) {
 		t.Fatalf("reconnect replay incomplete: a=%v b=%v", rc.EventTypes(a.StreamID), rc.EventTypes(b.StreamID))
 	}
-	// Independent cursors: a replays only (2, tail] = 3,4,5; b replays the whole 1..5.
+	// Independent cursors: a replays only (2, tail] = 3,4,5,6; b replays the whole 1..6.
 	for _, ev := range rc.Events(a.StreamID) {
 		if ev.Seq < 3 {
 			t.Errorf("stream a replayed seq %d, want only (2, tail]", ev.Seq)
 		}
 	}
-	if len(rc.Events(b.StreamID)) != 5 {
-		t.Errorf("stream b replay = %d, want 5", len(rc.Events(b.StreamID)))
+	if len(rc.Events(b.StreamID)) != 6 {
+		t.Errorf("stream b replay = %d, want 6", len(rc.Events(b.StreamID)))
 	}
 	// Per-stream dedup: every replayed record (same seqs as before, even across
 	// the two streams) is recognized as already-seen.

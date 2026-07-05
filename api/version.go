@@ -26,8 +26,9 @@ const (
 	// agent_mode_updated and agent_model_updated session events; 0.4.0 added the
 	// provider_started workspace event; 0.5.0 added the agent_plan session event;
 	// 0.6.0 added the slash_commands_updated session event; 0.7.0 added the
-	// agent_thought_level_updated session event.
-	DaemonToClientVersion = "0.7.0"
+	// agent_thought_level_updated session event; 0.8.0 added the
+	// agent_prompt_usage session event.
+	DaemonToClientVersion = "0.8.0"
 )
 
 // Versions reports the contract version of each method set.

@@ -266,13 +266,34 @@ func TestPromptCompletesTurn(t *testing.T) {
 	if s, _ := svc.sessions.Get("sess-1"); s.Status() != api.StatusIdle {
 		t.Errorf("status = %q, want idle", s.Status())
 	}
-	// A completed turn publishes turn_end on the session's stream.
+	// A turn publishes prompt usage (before the send) then turn_end (on completion).
 	evs, _, err := store.Read("session:sess-1", 0, 10)
 	if err != nil {
 		t.Fatalf("Read: %v", err)
 	}
-	if len(evs) != 1 || evs[0].Type != "turn_end" {
-		t.Fatalf("events = %+v, want one turn_end", evs)
+	if len(evs) != 2 || evs[0].Type != "agent_prompt_usage" || evs[1].Type != "turn_end" {
+		t.Fatalf("events = %+v, want agent_prompt_usage then turn_end", evs)
+	}
+}
+
+func TestPromptEmitsUsage(t *testing.T) {
+	mgr := &fakeManager{openID: "sess-1", promptResult: acp.PromptResult{StopReason: "end_turn"}}
+	svc, store := newService(t, mgr)
+	startSession(t, svc)
+
+	if _, err := svc.Prompt(context.Background(), api.AgentPromptParams{SessionID: "sess-1", Text: "hello"}); err != nil {
+		t.Fatalf("Prompt: %v", err)
+	}
+	evs, _, err := store.Read("session:sess-1", 0, 10)
+	if err != nil {
+		t.Fatalf("Read: %v", err)
+	}
+	var usage api.AgentPromptUsage
+	if err := json.Unmarshal(evs[0].Payload, &usage); err != nil {
+		t.Fatalf("unmarshal usage: %v", err)
+	}
+	if usage.SessionID != "sess-1" || usage.TextChars != 5 || usage.TokensApprox != 2 || !usage.Approximate {
+		t.Errorf("usage = %+v, want sess-1/5 chars/2 tokens/approximate", usage)
 	}
 }
 
@@ -382,9 +403,14 @@ func TestPromptFailureMarksError(t *testing.T) {
 	if s, _ := svc.sessions.Get("sess-1"); s.Status() != api.StatusError {
 		t.Errorf("status = %q, want error", s.Status())
 	}
-	// A failed turn does not publish turn_end.
-	if hw := store.HighWater("session:sess-1"); hw != 0 {
-		t.Errorf("high water = %d, want 0 (no turn_end on failure)", hw)
+	// The prompt input is still measured (we sent it before the turn failed), but
+	// a failed turn publishes no turn_end: only the usage event is on the stream.
+	evs, _, err := store.Read("session:sess-1", 0, 10)
+	if err != nil {
+		t.Fatalf("Read: %v", err)
+	}
+	if len(evs) != 1 || evs[0].Type != "agent_prompt_usage" {
+		t.Errorf("events = %+v, want only agent_prompt_usage (no turn_end on failure)", evs)
 	}
 }
 

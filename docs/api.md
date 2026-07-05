@@ -129,6 +129,8 @@ Schemas live under `schemas/` (`methods/<name>.params.json` / `.result.json`, `e
   - Payload: `AgentModelUpdated`
 - **`agent_plan`** (`session` stream) — The agent's tactical per-turn plan (its todo list): the full set of entries with their status, replacing any prior plan for the turn.
   - Payload: `AgentPlan`
+- **`agent_prompt_usage`** (`session` stream) — The size of the prompt input the daemon composed and sent for a turn: bytes and an approximate, model-agnostic token estimate. Measures only client-side prompt content, not the agent-owned system prompt/history.
+  - Payload: `AgentPromptUsage`
 - **`agent_thought_chunk`** (`session` stream) — A streamed chunk of the agent's reasoning (thinking), distinct from its message.
   - Payload: `AgentThoughtChunk`
 - **`agent_thought_level_updated`** (`session` stream) — A session's active reasoning/thought level changed.

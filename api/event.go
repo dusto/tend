@@ -75,6 +75,7 @@ var EventDefs = []EventDef{
 	{Type: "tool_call", Scope: ScopeSession, Payload: ToolCall{}, Summary: "An agent tool call started."},
 	{Type: "tool_call_update", Scope: ScopeSession, Payload: ToolCallUpdate{}, Summary: "Progress update for a tool call."},
 	{Type: "turn_end", Scope: ScopeSession, Payload: TurnEnd{}, Summary: "The agent's turn ended."},
+	{Type: "agent_prompt_usage", Scope: ScopeSession, Payload: AgentPromptUsage{}, Summary: "The size of the prompt input the daemon composed and sent for a turn: bytes and an approximate, model-agnostic token estimate. Measures only client-side prompt content, not the agent-owned system prompt/history."},
 	{Type: "approval_requested", Scope: ScopeSession, Payload: ApprovalRequested{}, Summary: "A mutating action is awaiting approval."},
 	{Type: "approval_resolved", Scope: ScopeSession, Payload: ApprovalResolved{}, Summary: "A pending approval was resolved."},
 	{Type: "agent_error", Scope: ScopeSession, Payload: AgentError{}, Summary: "A session's turn failed (e.g. its provider process exited mid-turn)."},
@@ -128,6 +129,31 @@ type ToolCallUpdate struct {
 // TurnEnd signals that the agent's turn has ended.
 type TurnEnd struct {
 	SessionID SessionID `json:"session_id"`
+}
+
+// AgentPromptUsage reports the size of the prompt input the daemon composed and
+// sent for one turn. It measures only client-side prompt content: thick ACP
+// agents own their system prompt, tool definitions, and history, which the
+// daemon cannot see or measure. Only text blocks contribute to the byte and
+// token counts; other blocks (resource links, images, audio) are counted as
+// attachments, since their content is not sent as prompt text.
+type AgentPromptUsage struct {
+	SessionID SessionID `json:"session_id"`
+	// TextBytes is the UTF-8 byte length of the text prompt content sent.
+	TextBytes int `json:"text_bytes"`
+	// TextChars is the rune count of that text.
+	TextChars int `json:"text_chars"`
+	// TokensApprox is an approximate, model-agnostic token estimate of the text
+	// (no per-model tokenizer). Approximate is always true to flag this.
+	TokensApprox int `json:"tokens_approx"`
+	// Blocks is the number of content blocks in the turn.
+	Blocks int `json:"blocks"`
+	// Attachments is the number of non-text blocks whose content is not counted
+	// toward the token estimate.
+	Attachments int `json:"attachments"`
+	// Approximate flags that TokensApprox is a heuristic, not a provider-reported
+	// count. It is always true.
+	Approximate bool `json:"approximate"`
 }
 
 // ApprovalRequested signals that a mutating action is awaiting approval.
