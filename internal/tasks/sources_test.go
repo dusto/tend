@@ -119,6 +119,26 @@ func TestFactoryExactRepoBeatsUnderPrefix(t *testing.T) {
 	beadsSource(t, p, "special", "/planning/special")
 }
 
+func TestFactoryCanonicalizesRulePaths(t *testing.T) {
+	// The workspace root is symlink-resolved (as WorkspaceID is), but the rule
+	// is configured through a symlink to the same repo; it must still match.
+	realRoot, err := filepath.EvalSymlinks(t.TempDir()) // as a WorkspaceID is
+	if err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(t.TempDir(), "linked")
+	if err := os.Symlink(realRoot, link); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	cfg := SourcesConfig{
+		Sources: []SourceDef{{Name: "central", Type: SourceBeads, Dir: "/planning"}},
+		Rules:   []MappingRule{{Repos: []string{link}, Use: "central"}},
+	}
+	// WorkspaceID carries the resolved (real) path.
+	p := cfg.Factory()(api.WorkspaceID(filepath.Join(realRoot, ".git")))
+	beadsSource(t, p, "central", "/planning")
+}
+
 func TestFactoryInRepoDefaultWhenDotBeadsPresent(t *testing.T) {
 	root := t.TempDir()
 	if err := os.Mkdir(filepath.Join(root, ".beads"), 0o755); err != nil {

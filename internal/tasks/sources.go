@@ -84,6 +84,14 @@ func (c SourcesConfig) Validate() error {
 	return nil
 }
 
+// resolvedRule is a MappingRule with its paths canonicalized, so they compare
+// against the workspace root in the same symlink-resolved form.
+type resolvedRule struct {
+	repos []string
+	under []string
+	use   string
+}
+
 // Factory returns the per-workspace task Factory these rules describe: a
 // workspace resolves to a rule's named source, else its own in-tree source, else
 // an empty provider (an empty queue whose writes report that none is configured).
@@ -92,9 +100,19 @@ func (c SourcesConfig) Factory() Factory {
 	for _, s := range c.Sources {
 		byName[s.Name] = s
 	}
+	// Canonicalize rule paths once: WorkspaceID is symlink-resolved, so config
+	// paths must be too or a symlinked repo/under would silently miss its rule.
+	rules := make([]resolvedRule, len(c.Rules))
+	for i := range c.Rules {
+		rules[i] = resolvedRule{
+			repos: canonicalizeAll(c.Rules[i].Repos),
+			under: canonicalizeAll(c.Rules[i].Under),
+			use:   c.Rules[i].Use,
+		}
+	}
 	return func(ws api.WorkspaceID) Provider {
 		root := repoRoot(ws)
-		if def, ok := c.resolve(root, byName); ok {
+		if def, ok := resolve(root, rules, byName); ok {
 			return newSource(ws, def)
 		}
 		if def, ok := detectInRepoSource(root); ok {
@@ -107,20 +125,42 @@ func (c SourcesConfig) Factory() Factory {
 // resolve returns the source a repo root maps to via the rules. Exact repos
 // matches take precedence over under-prefix matches; within a tier the first
 // rule wins.
-func (c SourcesConfig) resolve(root string, byName map[string]SourceDef) (SourceDef, bool) {
-	for i := range c.Rules {
-		r := &c.Rules[i]
-		if matchesAny(root, r.Repos, pathEqual) {
-			return byName[r.Use], true
+func resolve(root string, rules []resolvedRule, byName map[string]SourceDef) (SourceDef, bool) {
+	for i := range rules {
+		if matchesAny(root, rules[i].repos, pathEqual) {
+			return byName[rules[i].use], true
 		}
 	}
-	for i := range c.Rules {
-		r := &c.Rules[i]
-		if matchesAny(root, r.Under, pathUnder) {
-			return byName[r.Use], true
+	for i := range rules {
+		if matchesAny(root, rules[i].under, pathUnder) {
+			return byName[rules[i].use], true
 		}
 	}
 	return SourceDef{}, false
+}
+
+// canonicalizeAll resolves each path to the symlink-free, absolute form used for
+// workspace roots. A path that cannot be resolved (e.g. does not exist yet)
+// falls back to its absolute, cleaned form.
+func canonicalizeAll(paths []string) []string {
+	out := make([]string, len(paths))
+	for i, p := range paths {
+		out[i] = canonicalize(p)
+	}
+	return out
+}
+
+// canonicalize resolves p to its symlink-free absolute path, matching how a
+// WorkspaceID is derived; it falls back to the absolute cleaned path when p
+// cannot be resolved.
+func canonicalize(p string) string {
+	if resolved, err := filepath.EvalSymlinks(p); err == nil {
+		return resolved
+	}
+	if abs, err := filepath.Abs(p); err == nil {
+		return abs
+	}
+	return filepath.Clean(p)
 }
 
 // matchesAny reports whether root satisfies pred against any of candidates.
