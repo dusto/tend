@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
 	"slices"
 	"sort"
@@ -91,6 +92,7 @@ func (p *FileProvider) Search(_ context.Context, query, kind string, limit int) 
 		out = append(out, api.MemoryHit{
 			ID:      h.e.ID,
 			Kind:    h.e.Kind,
+			Apply:   h.e.Apply,
 			Title:   h.e.Title,
 			Tags:    h.e.Tags,
 			Task:    h.e.Task,
@@ -112,6 +114,46 @@ func (p *FileProvider) Get(_ context.Context, id api.MemoryID) (api.MemoryEntry,
 	return api.MemoryEntry{}, ErrNotFound
 }
 
+// Steering returns the steering entries that apply to path, in id order: always
+// entries always, glob entries when a glob matches path, manual entries never.
+// An empty path yields only always-steering.
+func (p *FileProvider) Steering(_ context.Context, path string) ([]api.MemoryEntry, error) {
+	entries, order, err := p.index()
+	if err != nil {
+		return nil, err
+	}
+	var out []api.MemoryEntry
+	for _, id := range order {
+		e := entries[id]
+		if e.Kind == api.MemoryKindSteering && steeringApplies(e, path) {
+			out = append(out, e)
+		}
+	}
+	return out, nil
+}
+
+// steeringApplies reports whether a steering entry activates for the context
+// path. An unknown apply mode is treated as always, matching the parse-time
+// default for steering.
+func steeringApplies(e api.MemoryEntry, path string) bool {
+	switch e.Apply {
+	case api.MemoryApplyManual:
+		return false
+	case api.MemoryApplyGlob:
+		if path == "" {
+			return false
+		}
+		for _, g := range e.Globs {
+			if globMatch(g, path) {
+				return true
+			}
+		}
+		return false
+	default: // always
+		return true
+	}
+}
+
 // Write creates or overwrites a memory file (an upsert keyed by id) and returns
 // the stored entry. It renders YAML frontmatter + the markdown body and writes
 // atomically (temp file + rename) so a concurrent Search/Get never reads a
@@ -122,10 +164,14 @@ func (p *FileProvider) Write(_ context.Context, in api.MemoryWriteParams) (api.M
 	if err != nil {
 		return api.MemoryEntry{}, err
 	}
+	kind := firstNonEmpty(in.Kind, api.MemoryKindNote)
+	apply, globs := normalizeSteering(kind, in.Apply, in.Globs)
 	e := api.MemoryEntry{
 		ID:          id,
 		WorkspaceID: p.ws,
-		Kind:        firstNonEmpty(in.Kind, api.MemoryKindNote),
+		Kind:        kind,
+		Apply:       apply,
+		Globs:       globs,
 		Title:       in.Title,
 		Tags:        in.Tags,
 		Task:        p.taskRef(taskString(in.Task)),
@@ -191,6 +237,12 @@ func renderMemory(e api.MemoryEntry) []byte {
 	if e.Kind != "" && e.Kind != api.MemoryKindNote {
 		out.Kind = e.Kind
 	}
+	// Activation is meaningful only for steering; the default (always) is left
+	// implicit so authored note/steering files stay clean.
+	if e.Kind == api.MemoryKindSteering && e.Apply != "" && e.Apply != api.MemoryApplyAlways {
+		out.Apply = e.Apply
+		out.Globs = e.Globs
+	}
 	// yaml.Marshal never fails for this flat struct; ignore its error.
 	meta, _ := yaml.Marshal(out)
 
@@ -211,6 +263,8 @@ func renderMemory(e api.MemoryEntry) []byte {
 type frontmatterOut struct {
 	ID      string   `yaml:"id"`
 	Kind    string   `yaml:"kind,omitempty"`
+	Apply   string   `yaml:"apply,omitempty"`
+	Globs   []string `yaml:"globs,omitempty"`
 	Title   string   `yaml:"title,omitempty"`
 	Tags    []string `yaml:"tags,omitempty"`
 	Task    string   `yaml:"task,omitempty"`
@@ -255,6 +309,45 @@ func slugify(s string) string {
 // slugMaxLen caps a title-derived id so a long title cannot produce an unwieldy
 // filename.
 const slugMaxLen = 60
+
+// globMatch reports whether a doublestar glob matches a slash-separated path. It
+// supports "**" (matching zero or more path segments), plus "*" and "?" within a
+// segment (via path.Match). Both inputs are normalized to forward slashes, so
+// authored patterns like "**/*.go" or "src/**/test_*.go" work cross-platform.
+func globMatch(pattern, name string) bool {
+	pat := strings.Split(strings.Trim(filepath.ToSlash(pattern), "/"), "/")
+	seg := strings.Split(strings.Trim(filepath.ToSlash(name), "/"), "/")
+	return matchSegments(pat, seg)
+}
+
+// matchSegments matches pattern segments against path segments, treating "**" as
+// a wildcard over zero or more whole segments.
+func matchSegments(pat, seg []string) bool {
+	for len(pat) > 0 {
+		if pat[0] == "**" {
+			// A trailing ** matches any remaining segments (including none).
+			if len(pat) == 1 {
+				return true
+			}
+			// Otherwise try to match the rest of the pattern at every suffix.
+			for i := 0; i <= len(seg); i++ {
+				if matchSegments(pat[1:], seg[i:]) {
+					return true
+				}
+			}
+			return false
+		}
+		if len(seg) == 0 {
+			return false
+		}
+		// path.Match's * and ? do not cross "/", which is what we want per segment.
+		if ok, err := path.Match(pat[0], seg[0]); err != nil || !ok {
+			return false
+		}
+		pat, seg = pat[1:], seg[1:]
+	}
+	return len(seg) == 0
+}
 
 // randomSuffix is a short random hex string used to make an id unique when a
 // write carries neither an id nor a title.
@@ -374,10 +467,14 @@ func (p *FileProvider) parseFile(path string) (api.MemoryEntry, error) {
 		}
 	}
 
+	kind := firstNonEmpty(meta.Kind, api.MemoryKindNote)
+	apply, globs := normalizeSteering(kind, meta.Apply, meta.Globs)
 	e := api.MemoryEntry{
 		ID:          api.MemoryID(firstNonEmpty(meta.ID, baseName(path))),
 		WorkspaceID: p.ws,
-		Kind:        firstNonEmpty(meta.Kind, api.MemoryKindNote),
+		Kind:        kind,
+		Apply:       apply,
+		Globs:       globs,
 		Title:       meta.Title,
 		Tags:        meta.Tags,
 		Task:        p.taskRef(meta.Task),
@@ -385,6 +482,22 @@ func (p *FileProvider) parseFile(path string) (api.MemoryEntry, error) {
 		CreatedAt:   meta.created(fileModTime(path)),
 	}
 	return e, nil
+}
+
+// normalizeSteering resolves the activation mode for an entry. Activation is
+// meaningful only for steering: notes get none. A steering entry with no mode
+// defaults to always; globs are kept only in glob mode.
+func normalizeSteering(kind, apply string, globs []string) (string, []string) {
+	if kind != api.MemoryKindSteering {
+		return "", nil
+	}
+	if apply == "" {
+		apply = api.MemoryApplyAlways
+	}
+	if apply != api.MemoryApplyGlob {
+		return apply, nil
+	}
+	return apply, globs
 }
 
 // taskRef parses a frontmatter task value ("provider:id" or "id") into a TaskRef
@@ -406,6 +519,8 @@ func (p *FileProvider) taskRef(s string) *api.TaskRef {
 type frontmatter struct {
 	ID      string   `yaml:"id"`
 	Kind    string   `yaml:"kind"`
+	Apply   string   `yaml:"apply"`
+	Globs   []string `yaml:"globs"`
 	Title   string   `yaml:"title"`
 	Tags    []string `yaml:"tags"`
 	Task    string   `yaml:"task"`

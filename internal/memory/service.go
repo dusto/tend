@@ -13,9 +13,10 @@ import (
 
 // Method names, matching the api contract.
 const (
-	MethodSearch = "memory.search"
-	MethodGet    = "memory.get"
-	MethodWrite  = "memory.write"
+	MethodSearch   = "memory.search"
+	MethodGet      = "memory.get"
+	MethodWrite    = "memory.write"
+	MethodSteering = "memory.steering"
 )
 
 // Emitter publishes events on the workspace event stream. *events.Store
@@ -49,7 +50,10 @@ func Register(m *dispatch.Mux, s *Service) error {
 	if err := dispatch.Handle(m, MethodGet, s.get); err != nil {
 		return err
 	}
-	return dispatch.Handle(m, MethodWrite, s.write)
+	if err := dispatch.Handle(m, MethodWrite, s.write); err != nil {
+		return err
+	}
+	return dispatch.Handle(m, MethodSteering, s.steering)
 }
 
 func (s *Service) provider(ws api.WorkspaceID) Provider {
@@ -122,6 +126,17 @@ func (s *Service) write(ctx context.Context, p api.MemoryWriteParams) (api.Memor
 		Task:        e.Task,
 	})
 	return api.MemoryWriteResult{Entry: e}, nil
+}
+
+func (s *Service) steering(ctx context.Context, p api.MemorySteeringParams) (api.MemorySteeringResult, error) {
+	if p.WorkspaceID == "" {
+		return api.MemorySteeringResult{}, invalidParams("workspace_id is required")
+	}
+	entries, err := s.provider(p.WorkspaceID).Steering(ctx, p.Path)
+	if err != nil {
+		return api.MemorySteeringResult{}, internalErr(err)
+	}
+	return api.MemorySteeringResult{Entries: entries}, nil
 }
 
 // publish emits one workspace event, marshaling payload. Emission is best-effort:

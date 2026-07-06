@@ -12,6 +12,15 @@
         "kind": {
           "type": "string"
         },
+        "apply": {
+          "type": "string"
+        },
+        "globs": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
         "task": {
           "$ref": "#/$defs/TaskRef"
         },

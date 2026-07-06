@@ -71,13 +71,16 @@
     }
   },
   "properties": {
-    "entry": {
-      "$ref": "#/$defs/MemoryEntry"
+    "entries": {
+      "items": {
+        "$ref": "#/$defs/MemoryEntry"
+      },
+      "type": "array"
     }
   },
   "additionalProperties": false,
   "type": "object",
   "required": [
-    "entry"
+    "entries"
   ]
 }

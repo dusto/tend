@@ -21,6 +21,9 @@ type Provider interface {
 	// Write creates or updates a memory entry (an upsert keyed by id) and returns
 	// the stored entry with its resolved id and timestamp.
 	Write(ctx context.Context, params api.MemoryWriteParams) (api.MemoryEntry, error)
+	// Steering returns the full steering entries that apply to the given context
+	// path, ordered by id. An empty path yields only always-steering.
+	Steering(ctx context.Context, path string) ([]api.MemoryEntry, error)
 }
 
 // Factory builds the memory Provider for a workspace. Each workspace gets one
