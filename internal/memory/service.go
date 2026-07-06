@@ -112,7 +112,7 @@ func (s *Service) write(ctx context.Context, p api.MemoryWriteParams) (api.Memor
 		return api.MemoryWriteResult{}, invalidParams("title or text is required")
 	}
 	e, err := s.provider(p.WorkspaceID).Write(ctx, p)
-	if errors.Is(err, ErrInvalidID) {
+	if errors.Is(err, ErrInvalidID) || errors.Is(err, ErrInvalidApply) {
 		return api.MemoryWriteResult{}, invalidParams(err.Error())
 	}
 	if err != nil {

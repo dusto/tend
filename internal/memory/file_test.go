@@ -421,6 +421,41 @@ func TestFileProviderSteeringDefaultsToAlways(t *testing.T) {
 	}
 }
 
+func TestFileProviderUnknownApplyFailsClosed(t *testing.T) {
+	p, dir := newProvider(t)
+	// A typo'd apply value in a hand-edited file must NOT be treated as always: it
+	// coerces to manual, so it is never auto-injected for any context.
+	writeMemory(t, dir, "typo.md", "---\nid: typo\nkind: steering\napply: glbo\n---\nbad mode")
+	e, err := p.Get(context.Background(), "typo")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if e.Apply != api.MemoryApplyManual {
+		t.Errorf("apply = %q, want manual (fail closed)", e.Apply)
+	}
+	for _, path := range []string{"", "main.go", "anything"} {
+		if got, _ := p.Steering(context.Background(), path); len(got) != 0 {
+			t.Errorf("unknown-apply steering returned for path %q: %+v", path, got)
+		}
+	}
+}
+
+func TestFileProviderWriteRejectsUnknownApply(t *testing.T) {
+	p, _ := newProvider(t)
+	_, err := p.Write(context.Background(), api.MemoryWriteParams{
+		WorkspaceID: "ws1", ID: "s", Kind: api.MemoryKindSteering, Apply: "bogus", Text: "x",
+	})
+	if !errors.Is(err, ErrInvalidApply) {
+		t.Errorf("Write with bad apply err = %v, want ErrInvalidApply", err)
+	}
+	// A note ignores apply entirely, so a bad value there is not an error.
+	if _, err := p.Write(context.Background(), api.MemoryWriteParams{
+		WorkspaceID: "ws1", ID: "n", Apply: "bogus", Text: "x",
+	}); err != nil {
+		t.Errorf("note write with apply should not error: %v", err)
+	}
+}
+
 func TestFileProviderNoteHasNoActivation(t *testing.T) {
 	p, _ := newProvider(t)
 	// A note write ignores apply/globs: they are steering-only.

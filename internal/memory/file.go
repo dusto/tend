@@ -133,12 +133,12 @@ func (p *FileProvider) Steering(_ context.Context, path string) ([]api.MemoryEnt
 }
 
 // steeringApplies reports whether a steering entry activates for the context
-// path. An unknown apply mode is treated as always, matching the parse-time
-// default for steering.
+// path. It fails closed: only always and a matching glob activate; manual and any
+// unrecognized mode do not, so a bad value is never injected into agent context.
 func steeringApplies(e api.MemoryEntry, path string) bool {
 	switch e.Apply {
-	case api.MemoryApplyManual:
-		return false
+	case api.MemoryApplyAlways:
+		return true
 	case api.MemoryApplyGlob:
 		if path == "" {
 			return false
@@ -149,8 +149,8 @@ func steeringApplies(e api.MemoryEntry, path string) bool {
 			}
 		}
 		return false
-	default: // always
-		return true
+	default: // manual or unknown: never auto-included
+		return false
 	}
 }
 
@@ -165,6 +165,9 @@ func (p *FileProvider) Write(_ context.Context, in api.MemoryWriteParams) (api.M
 		return api.MemoryEntry{}, err
 	}
 	kind := firstNonEmpty(in.Kind, api.MemoryKindNote)
+	if kind == api.MemoryKindSteering && in.Apply != "" && !validApply(in.Apply) {
+		return api.MemoryEntry{}, fmt.Errorf("%w: %q", ErrInvalidApply, in.Apply)
+	}
 	apply, globs := normalizeSteering(kind, in.Apply, in.Globs)
 	e := api.MemoryEntry{
 		ID:          id,
@@ -223,6 +226,10 @@ func safeID(id string) bool {
 // ErrInvalidID reports that an explicit memory id is not a safe filename segment
 // (e.g. it contains a path separator or "..").
 var ErrInvalidID = fmt.Errorf("memory: invalid id")
+
+// ErrInvalidApply reports that a steering write carried an activation mode outside
+// the contract's always | glob | manual set.
+var ErrInvalidApply = fmt.Errorf("memory: invalid apply mode")
 
 // renderMemory serializes an entry to a markdown file: YAML frontmatter fenced by
 // --- lines, then the body. Kind is omitted for the default note.
@@ -486,18 +493,34 @@ func (p *FileProvider) parseFile(path string) (api.MemoryEntry, error) {
 
 // normalizeSteering resolves the activation mode for an entry. Activation is
 // meaningful only for steering: notes get none. A steering entry with no mode
-// defaults to always; globs are kept only in glob mode.
+// defaults to always; globs are kept only in glob mode. An unknown mode (e.g. a
+// typo in a hand-authored file) fails closed to manual so a bad value is never
+// auto-injected into agent context — it stays searchable but off by default.
+// Writes reject unknown modes up front (see validApply), so this coercion only
+// guards files edited outside memory.write.
 func normalizeSteering(kind, apply string, globs []string) (string, []string) {
 	if kind != api.MemoryKindSteering {
 		return "", nil
 	}
-	if apply == "" {
-		apply = api.MemoryApplyAlways
-	}
-	if apply != api.MemoryApplyGlob {
+	switch apply {
+	case api.MemoryApplyGlob:
+		return apply, globs
+	case api.MemoryApplyManual:
 		return apply, nil
+	case api.MemoryApplyAlways, "":
+		return api.MemoryApplyAlways, nil
+	default:
+		return api.MemoryApplyManual, nil
 	}
-	return apply, globs
+}
+
+// validApply reports whether apply is one of the contract's activation modes.
+func validApply(apply string) bool {
+	switch apply {
+	case api.MemoryApplyAlways, api.MemoryApplyGlob, api.MemoryApplyManual:
+		return true
+	}
+	return false
 }
 
 // taskRef parses a frontmatter task value ("provider:id" or "id") into a TaskRef

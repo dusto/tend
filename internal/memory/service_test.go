@@ -157,6 +157,16 @@ func TestServiceWriteInvalidIDIsInvalidParams(t *testing.T) {
 	}
 }
 
+func TestServiceWriteInvalidApplyIsInvalidParams(t *testing.T) {
+	svc := newService(&fakeProvider{writeErr: ErrInvalidApply})
+	_, err := svc.write(context.Background(), api.MemoryWriteParams{
+		WorkspaceID: "ws1", ID: "s", Kind: api.MemoryKindSteering, Apply: "bogus", Text: "x",
+	})
+	if codeOf(t, err) != rpc.CodeInvalidParams {
+		t.Errorf("invalid apply should map to invalid params, got %v", err)
+	}
+}
+
 func TestServiceWriteEmitsMemoryWritten(t *testing.T) {
 	emit := &fakeEmitter{}
 	svc := newServiceEmit(&fakeProvider{}, emit)
