@@ -9,16 +9,40 @@ import (
 	"text/tabwriter"
 
 	"github.com/dusto/tend/api"
+	"github.com/dusto/tend/internal/memimport"
 )
 
-// renderJSON emits the sessions as indented JSON for scripting: the full
-// SessionInfo objects, so any field the daemon reports is available.
-func renderJSON(sessions []api.SessionInfo) (string, error) {
-	b, err := json.MarshalIndent(sessions, "", "  ")
+// renderJSON emits v as indented JSON for scripting, so any field is available.
+func renderJSON(v any) (string, error) {
+	b, err := json.MarshalIndent(v, "", "  ")
 	if err != nil {
 		return "", err
 	}
 	return string(b) + "\n", nil
+}
+
+// renderImport formats an import run as an aligned table plus a summary line.
+func renderImport(res memimport.Result, dryRun bool) string {
+	prefix := ""
+	if dryRun {
+		prefix = "[dry-run] "
+	}
+	if len(res.Outcomes) == 0 {
+		return prefix + "no importable memory files found\n"
+	}
+	var b strings.Builder
+	w := tabwriter.NewWriter(&b, 0, 0, 2, ' ', 0)
+	_, _ = fmt.Fprintln(w, "STATUS\tSOURCE\tID\tORIGIN\tNOTE")
+	for _, o := range res.Outcomes {
+		_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", o.Status, o.Source, o.ID, o.Origin, o.Reason)
+	}
+	_ = w.Flush()
+
+	c := res.Counts()
+	_, _ = fmt.Fprintf(&b, "%s%d created, %d updated, %d unchanged, %d skipped\n",
+		prefix, c[memimport.StatusCreated], c[memimport.StatusUpdated],
+		c[memimport.StatusUnchanged], c[memimport.StatusSkipped])
+	return b.String()
 }
 
 // renderTable formats the sessions as a plain aligned table, ordered by

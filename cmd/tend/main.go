@@ -7,9 +7,11 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/urfave/cli/v3"
 
+	"github.com/dusto/tend/internal/memimport"
 	"github.com/dusto/tend/internal/rpc"
 )
 
@@ -32,7 +34,57 @@ func newApp() *cli.Command {
 				Value:   rpc.SocketPath(),
 			},
 		},
-		Commands: []*cli.Command{psCommand()},
+		Commands: []*cli.Command{psCommand(), memoryCommand()},
+	}
+}
+
+func memoryCommand() *cli.Command {
+	return &cli.Command{
+		Name:  "memory",
+		Usage: "manage a workspace's agent memory",
+		Commands: []*cli.Command{
+			{
+				Name:      "import",
+				Usage:     "import external agent memory/instruction files into TEND memory",
+				ArgsUsage: "[dir]",
+				Description: "Scan a repo for external agent files (Kiro steering, AGENTS.md, ...) and " +
+					"import them as TEND memory entries. Each entry records provenance, so a re-import " +
+					"updates it in place without duplicating or clobbering later human edits.",
+				Flags: []cli.Flag{
+					&cli.StringSliceFlag{
+						Name:    "source",
+						Aliases: []string{"s"},
+						Usage:   "sources to import (repeatable; default all): " + strings.Join(memimport.Sources(), ", "),
+					},
+					&cli.BoolFlag{Name: "dry-run", Usage: "report what would be imported without writing"},
+					&cli.BoolFlag{Name: "json", Usage: "emit JSON instead of a table"},
+				},
+				Action: func(ctx context.Context, cmd *cli.Command) error {
+					dir := cmd.Args().First()
+					if dir == "" {
+						cwd, err := os.Getwd()
+						if err != nil {
+							return err
+						}
+						dir = cwd
+					}
+					res, err := runImport(ctx, cmd.String("socket"), dir, cmd.StringSlice("source"), cmd.Bool("dry-run"))
+					if err != nil {
+						return err
+					}
+					if cmd.Bool("json") {
+						out, err := renderJSON(res.Outcomes)
+						if err != nil {
+							return err
+						}
+						fmt.Print(out)
+						return nil
+					}
+					fmt.Print(renderImport(res, cmd.Bool("dry-run")))
+					return nil
+				},
+			},
+		},
 	}
 }
 
