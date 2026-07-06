@@ -20,6 +20,8 @@ type (
 	ChangeSetID string
 	// ClientID identifies one connected client (editor or observer).
 	ClientID string
+	// MemoryID identifies one stored memory entry within a workspace.
+	MemoryID string
 	// DaemonEpoch is fresh per daemon process; it keys client cursor stores and
 	// invalidates stale per-stream sequence numbers across daemon restarts.
 	DaemonEpoch string

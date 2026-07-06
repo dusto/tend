@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "properties": {
+    "workspace_id": {
+      "type": "string"
+    },
+    "query": {
+      "type": "string"
+    },
+    "kind": {
+      "type": "string"
+    },
+    "limit": {
+      "type": "integer"
+    }
+  },
+  "additionalProperties": false,
+  "type": "object",
+  "required": [
+    "workspace_id",
+    "query"
+  ]
+}
