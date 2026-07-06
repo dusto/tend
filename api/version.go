@@ -20,8 +20,8 @@ const (
 	// thought-level fields on SessionInfo, captured from ACP configOptions);
 	// 0.17.0 added provider.health; 0.18.0 added SessionInfo.resource_usage
 	// (per-session agent CPU/RSS); 0.19.0 added memory.search/get; 0.20.0 added
-	// memory.write.
-	PluginToDaemonVersion = "0.20.0"
+	// memory.write; 0.21.0 added memory.steering (steering activation model).
+	PluginToDaemonVersion = "0.21.0"
 	// 0.2.0 added editor.open + editor.diff; 0.3.0 added editor.diagnostics.
 	DaemonToEditorVersion = "0.3.0"
 	// 0.2.0 added the agent_thought_chunk session event; 0.3.0 added the

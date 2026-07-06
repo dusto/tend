@@ -12,10 +12,12 @@ import (
 
 // fakeProvider is an in-memory provider for service tests.
 type fakeProvider struct {
-	hits     []api.MemoryHit
-	entries  map[api.MemoryID]api.MemoryEntry
-	written  *api.MemoryWriteParams // records the last Write call
-	writeErr error                  // when set, Write returns it
+	hits      []api.MemoryHit
+	entries   map[api.MemoryID]api.MemoryEntry
+	written   *api.MemoryWriteParams // records the last Write call
+	writeErr  error                  // when set, Write returns it
+	steering  []api.MemoryEntry      // returned by Steering
+	steerPath string                 // records the last Steering path
 }
 
 func (f *fakeProvider) Search(_ context.Context, _, _ string, _ int) ([]api.MemoryHit, error) {
@@ -42,6 +44,11 @@ func (f *fakeProvider) Write(_ context.Context, in api.MemoryWriteParams) (api.M
 		ID: id, WorkspaceID: in.WorkspaceID, Kind: in.Kind,
 		Title: in.Title, Tags: in.Tags, Task: in.Task, Text: in.Text,
 	}, nil
+}
+
+func (f *fakeProvider) Steering(_ context.Context, path string) ([]api.MemoryEntry, error) {
+	f.steerPath = path
+	return f.steering, nil
 }
 
 // fakeEmitter records the events a service publishes.
@@ -150,6 +157,16 @@ func TestServiceWriteInvalidIDIsInvalidParams(t *testing.T) {
 	}
 }
 
+func TestServiceWriteInvalidApplyIsInvalidParams(t *testing.T) {
+	svc := newService(&fakeProvider{writeErr: ErrInvalidApply})
+	_, err := svc.write(context.Background(), api.MemoryWriteParams{
+		WorkspaceID: "ws1", ID: "s", Kind: api.MemoryKindSteering, Apply: "bogus", Text: "x",
+	})
+	if codeOf(t, err) != rpc.CodeInvalidParams {
+		t.Errorf("invalid apply should map to invalid params, got %v", err)
+	}
+}
+
 func TestServiceWriteEmitsMemoryWritten(t *testing.T) {
 	emit := &fakeEmitter{}
 	svc := newServiceEmit(&fakeProvider{}, emit)
@@ -187,6 +204,28 @@ func TestServiceSearchEmitsMemorySearched(t *testing.T) {
 	}
 	if got.Query != "q" || got.Kind != "note" || got.Results != 2 {
 		t.Errorf("payload = %+v, want query=q kind=note results=2", got)
+	}
+}
+
+func TestServiceSteeringRoundTrip(t *testing.T) {
+	fp := &fakeProvider{steering: []api.MemoryEntry{{ID: "s1", Kind: api.MemoryKindSteering, Text: "rule"}}}
+	svc := newService(fp)
+	res, err := svc.steering(context.Background(), api.MemorySteeringParams{WorkspaceID: "ws1", Path: "a.go"})
+	if err != nil {
+		t.Fatalf("steering: %v", err)
+	}
+	if len(res.Entries) != 1 || res.Entries[0].ID != "s1" {
+		t.Errorf("entries = %+v", res.Entries)
+	}
+	if fp.steerPath != "a.go" {
+		t.Errorf("provider got path %q, want a.go", fp.steerPath)
+	}
+}
+
+func TestServiceSteeringValidation(t *testing.T) {
+	svc := newService(&fakeProvider{})
+	if _, err := svc.steering(context.Background(), api.MemorySteeringParams{Path: "a.go"}); codeOf(t, err) != rpc.CodeInvalidParams {
+		t.Error("missing workspace should be invalid params")
 	}
 }
 

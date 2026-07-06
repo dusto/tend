@@ -14,6 +14,21 @@ const (
 	MemoryKindSteering = "steering"
 )
 
+// Steering activation modes (MemoryEntry.Apply): how a steering memory is applied
+// to agent context, not just searched. The model mirrors Kiro inclusion modes
+// (always/fileMatch/manual) and Cursor rules (alwaysApply/globs) so one model
+// spans tools. Notes carry no activation mode.
+const (
+	// MemoryApplyAlways always includes the steering (the default for steering).
+	MemoryApplyAlways = "always"
+	// MemoryApplyGlob includes the steering when a context path matches one of its
+	// globs (like Kiro fileMatch / Cursor globs).
+	MemoryApplyGlob = "glob"
+	// MemoryApplyManual never auto-includes the steering; it surfaces only through
+	// memory.search / memory.get.
+	MemoryApplyManual = "manual"
+)
+
 // MemoryEntry is one stored memory: a task-bound, agent-authored note, or a piece
 // of standing steering (see Kind). The backend is pluggable; the default stores
 // each entry as a markdown file with YAML frontmatter.
@@ -22,6 +37,12 @@ type MemoryEntry struct {
 	WorkspaceID WorkspaceID `json:"workspace_id"`
 	// Kind is the memory type (note or steering); empty is treated as note.
 	Kind string `json:"kind,omitempty"`
+	// Apply is the steering activation mode (always|glob|manual); empty on notes,
+	// and defaults to always on steering. See MemoryApply*.
+	Apply string `json:"apply,omitempty"`
+	// Globs are the match patterns for Apply == glob (doublestar globs, e.g.
+	// "**/*.go"), matched against a context path relative to the worktree root.
+	Globs []string `json:"globs,omitempty"`
 	// Task is the task the note was written under, or nil for a workspace-level
 	// note.
 	Task  *TaskRef `json:"task,omitempty"`
@@ -37,6 +58,7 @@ type MemoryEntry struct {
 type MemoryHit struct {
 	ID    MemoryID `json:"id"`
 	Kind  string   `json:"kind,omitempty"`
+	Apply string   `json:"apply,omitempty"`
 	Title string   `json:"title,omitempty"`
 	Tags  []string `json:"tags,omitempty"`
 	Task  *TaskRef `json:"task,omitempty"`
@@ -81,7 +103,12 @@ type MemoryWriteParams struct {
 	// the title, or a generated id when the title is also empty.
 	ID MemoryID `json:"id,omitempty"`
 	// Kind is the memory type (note or steering); empty defaults to note.
-	Kind  string   `json:"kind,omitempty"`
+	Kind string `json:"kind,omitempty"`
+	// Apply is the steering activation mode (always|glob|manual); ignored for
+	// notes, and defaults to always for steering. See MemoryApply*.
+	Apply string `json:"apply,omitempty"`
+	// Globs are the match patterns for Apply == glob.
+	Globs []string `json:"globs,omitempty"`
 	Title string   `json:"title,omitempty"`
 	Tags  []string `json:"tags,omitempty"`
 	// Task binds the note to the task it was written under, or nil for a
@@ -94,4 +121,20 @@ type MemoryWriteParams struct {
 // MemoryWriteResult is the stored entry, with its resolved id and timestamp.
 type MemoryWriteResult struct {
 	Entry MemoryEntry `json:"entry"`
+}
+
+// MemorySteeringParams resolves the steering that applies to a context within a
+// workspace. Path is an optional worktree-relative file path: steering with
+// apply=glob is included when one of its globs matches Path, apply=always is
+// always included, and apply=manual is never auto-included. With an empty Path
+// only always-steering applies.
+type MemorySteeringParams struct {
+	WorkspaceID WorkspaceID `json:"workspace_id"`
+	Path        string      `json:"path,omitempty"`
+}
+
+// MemorySteeringResult is the full steering entries that apply, ordered by id, so
+// a client can inject their bodies into agent context.
+type MemorySteeringResult struct {
+	Entries []MemoryEntry `json:"entries"`
 }

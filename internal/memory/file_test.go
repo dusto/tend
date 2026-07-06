@@ -308,6 +308,168 @@ func TestFileProviderWriteRejectsUnsafeID(t *testing.T) {
 	}
 }
 
+func TestGlobMatch(t *testing.T) {
+	cases := []struct {
+		pattern, path string
+		want          bool
+	}{
+		{"**/*.go", "main.go", true},
+		{"**/*.go", "internal/memory/file.go", true},
+		{"**/*.go", "internal/memory/file.rs", false},
+		{"*.go", "main.go", true},
+		{"*.go", "internal/main.go", false}, // * does not cross a separator
+		{"src/**/test_*.go", "src/a/b/test_x.go", true},
+		{"src/**/test_*.go", "src/test_x.go", true}, // ** matches zero segments
+		{"src/**/test_*.go", "lib/test_x.go", false},
+		{"docs/**", "docs/a/b.md", true},
+		{"docs/**", "docs", true}, // trailing ** matches zero segments
+		{"docs/**", "src/a.md", false},
+		{"api/*.go", "api/memory.go", true},
+		{"?ain.go", "main.go", true},
+	}
+	for _, c := range cases {
+		if got := globMatch(c.pattern, c.path); got != c.want {
+			t.Errorf("globMatch(%q, %q) = %v, want %v", c.pattern, c.path, got, c.want)
+		}
+	}
+}
+
+func TestFileProviderSteeringActivation(t *testing.T) {
+	p, dir := newProvider(t)
+	// A note is never steering, even if it somehow carried globs.
+	writeMemory(t, dir, "note.md", "---\nid: note\ntitle: a note\n---\nbody")
+	// always steering (no apply): always included.
+	writeMemory(t, dir, "std.md", "---\nid: std\nkind: steering\ntitle: standards\n---\nalways on")
+	// glob steering: included only when a glob matches the path.
+	writeMemory(t, dir, "go.md", "---\nid: go\nkind: steering\napply: glob\nglobs: [\"**/*.go\"]\n---\ngo rules")
+	// manual steering: never auto-included.
+	writeMemory(t, dir, "man.md", "---\nid: man\nkind: steering\napply: manual\n---\nby hand only")
+
+	ids := func(es []api.MemoryEntry) []string {
+		out := make([]string, len(es))
+		for i, e := range es {
+			out[i] = string(e.ID)
+		}
+		return out
+	}
+
+	// Empty path: only always-steering (std), not the glob or manual, not the note.
+	got, err := p.Steering(context.Background(), "")
+	if err != nil {
+		t.Fatalf("Steering: %v", err)
+	}
+	if g := ids(got); len(g) != 1 || g[0] != "std" {
+		t.Errorf("empty-path steering = %v, want [std]", g)
+	}
+
+	// A .go path: always (std) + the matching glob (go), in id order.
+	got, _ = p.Steering(context.Background(), "internal/memory/file.go")
+	if g := ids(got); len(g) != 2 || g[0] != "go" || g[1] != "std" {
+		t.Errorf("go-path steering = %v, want [go std] (id order)", g)
+	}
+
+	// A non-.go path: only always (std).
+	got, _ = p.Steering(context.Background(), "README.md")
+	if g := ids(got); len(g) != 1 || g[0] != "std" {
+		t.Errorf("md-path steering = %v, want [std]", g)
+	}
+}
+
+func TestFileProviderWriteSteeringRoundTrips(t *testing.T) {
+	p, dir := newProvider(t)
+	in := api.MemoryWriteParams{
+		WorkspaceID: "ws1",
+		ID:          "go-rules",
+		Kind:        api.MemoryKindSteering,
+		Apply:       api.MemoryApplyGlob,
+		Globs:       []string{"**/*.go"},
+		Title:       "Go rules",
+		Text:        "use %w",
+	}
+	e, err := p.Write(context.Background(), in)
+	if err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+	if e.Apply != api.MemoryApplyGlob || len(e.Globs) != 1 {
+		t.Errorf("returned entry activation = %+v", e)
+	}
+	// The written file carries apply + globs and reads back through Steering.
+	data, _ := os.ReadFile(filepath.Join(dir, "go-rules.md"))
+	if !strings.Contains(string(data), "apply: glob") || !strings.Contains(string(data), "**/*.go") {
+		t.Errorf("file missing activation frontmatter:\n%s", data)
+	}
+	got, _ := p.Steering(context.Background(), "cmd/tend/main.go")
+	if len(got) != 1 || got[0].ID != "go-rules" {
+		t.Errorf("steering after write = %+v, want the glob entry", got)
+	}
+}
+
+func TestFileProviderSteeringDefaultsToAlways(t *testing.T) {
+	p, _ := newProvider(t)
+	// Steering written with no apply defaults to always and needs no path.
+	if _, err := p.Write(context.Background(), api.MemoryWriteParams{
+		WorkspaceID: "ws1", ID: "s", Kind: api.MemoryKindSteering, Text: "x",
+	}); err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+	e, _ := p.Get(context.Background(), "s")
+	if e.Apply != api.MemoryApplyAlways {
+		t.Errorf("apply = %q, want always (default for steering)", e.Apply)
+	}
+	if got, _ := p.Steering(context.Background(), ""); len(got) != 1 {
+		t.Errorf("always steering not returned for empty path: %+v", got)
+	}
+}
+
+func TestFileProviderUnknownApplyFailsClosed(t *testing.T) {
+	p, dir := newProvider(t)
+	// A typo'd apply value in a hand-edited file must NOT be treated as always: it
+	// coerces to manual, so it is never auto-injected for any context.
+	writeMemory(t, dir, "typo.md", "---\nid: typo\nkind: steering\napply: glbo\n---\nbad mode")
+	e, err := p.Get(context.Background(), "typo")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if e.Apply != api.MemoryApplyManual {
+		t.Errorf("apply = %q, want manual (fail closed)", e.Apply)
+	}
+	for _, path := range []string{"", "main.go", "anything"} {
+		if got, _ := p.Steering(context.Background(), path); len(got) != 0 {
+			t.Errorf("unknown-apply steering returned for path %q: %+v", path, got)
+		}
+	}
+}
+
+func TestFileProviderWriteRejectsUnknownApply(t *testing.T) {
+	p, _ := newProvider(t)
+	_, err := p.Write(context.Background(), api.MemoryWriteParams{
+		WorkspaceID: "ws1", ID: "s", Kind: api.MemoryKindSteering, Apply: "bogus", Text: "x",
+	})
+	if !errors.Is(err, ErrInvalidApply) {
+		t.Errorf("Write with bad apply err = %v, want ErrInvalidApply", err)
+	}
+	// A note ignores apply entirely, so a bad value there is not an error.
+	if _, err := p.Write(context.Background(), api.MemoryWriteParams{
+		WorkspaceID: "ws1", ID: "n", Apply: "bogus", Text: "x",
+	}); err != nil {
+		t.Errorf("note write with apply should not error: %v", err)
+	}
+}
+
+func TestFileProviderNoteHasNoActivation(t *testing.T) {
+	p, _ := newProvider(t)
+	// A note write ignores apply/globs: they are steering-only.
+	if _, err := p.Write(context.Background(), api.MemoryWriteParams{
+		WorkspaceID: "ws1", ID: "n", Apply: api.MemoryApplyGlob, Globs: []string{"**"}, Text: "x",
+	}); err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+	e, _ := p.Get(context.Background(), "n")
+	if e.Apply != "" || e.Globs != nil {
+		t.Errorf("note carried activation: apply=%q globs=%v", e.Apply, e.Globs)
+	}
+}
+
 func TestSlugify(t *testing.T) {
 	cases := map[string]string{
 		"Deploy the API!":  "deploy-the-api",

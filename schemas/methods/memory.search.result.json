@@ -9,6 +9,9 @@
         "kind": {
           "type": "string"
         },
+        "apply": {
+          "type": "string"
+        },
         "title": {
           "type": "string"
         },

@@ -9,4 +9,10 @@
 // approval-gated. The service emits memory_written on a write and memory_searched
 // on a search, both on the workspace event stream, so a supervisor can observe
 // what an agent records and recalls.
+//
+// Steering memories (kind=steering) carry an activation mode — always, glob, or
+// manual — so they can be applied to agent context, not just searched. memory.
+// steering resolves the steering that applies to a context (always entries, plus
+// glob entries whose patterns match an optional worktree-relative path), mirroring
+// Kiro inclusion modes and Cursor rules so one model spans tools.
 package memory
