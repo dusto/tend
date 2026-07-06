@@ -48,6 +48,8 @@ Schemas live under `schemas/` (`methods/<name>.params.json` / `.result.json`, `e
   - Params: `MemorySearchParams` · Result: `MemorySearchResult`
 - **`memory.get`** — Fetch one memory entry's full text by id within a workspace.
   - Params: `MemoryGetParams` · Result: `MemoryGetResult`
+- **`memory.write`** — Create or update a memory entry (upsert by id); task-bound and not approval-gated. Emits memory_written.
+  - Params: `MemoryWriteParams` · Result: `MemoryWriteResult`
 - **`slash.list`** — List a session's merged slash-command set: the agent's advertised commands plus the daemon/harness commands.
   - Params: `SlashListParams` · Result: `SlashListResult`
 - **`slash.complete`** — Complete a daemon command's argument against live state (e.g. task ids); provider/unknown commands yield no candidates.
@@ -143,6 +145,10 @@ Schemas live under `schemas/` (`methods/<name>.params.json` / `.result.json`, `e
   - Payload: `ApprovalRequested`
 - **`approval_resolved`** (`session` stream) — A pending approval was resolved.
   - Payload: `ApprovalResolved`
+- **`memory_searched`** (`workspace` stream) — A workspace's memories were searched (memory.search), so a supervisor can see what an agent recalled. Repo-wide: delivered on the workspace stream.
+  - Payload: `MemorySearched`
+- **`memory_written`** (`workspace` stream) — A memory entry was created or updated (memory.write). Repo-wide: delivered on the workspace stream.
+  - Payload: `MemoryWritten`
 - **`pane_exited`** (`pane` stream) — A pane's process exited.
   - Payload: `PaneExited`
 - **`pane_output`** (`pane` stream) — A chunk of a pane's output, on the pane stream. Lossy under load; pane.read is the authoritative scrollback.

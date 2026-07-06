@@ -2,6 +2,8 @@ package memory
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -108,6 +110,190 @@ func (p *FileProvider) Get(_ context.Context, id api.MemoryID) (api.MemoryEntry,
 		return e, nil
 	}
 	return api.MemoryEntry{}, ErrNotFound
+}
+
+// Write creates or overwrites a memory file (an upsert keyed by id) and returns
+// the stored entry. It renders YAML frontmatter + the markdown body and writes
+// atomically (temp file + rename) so a concurrent Search/Get never reads a
+// half-written file. The directory is created on demand. The next index call
+// picks up the change via the directory signature.
+func (p *FileProvider) Write(_ context.Context, in api.MemoryWriteParams) (api.MemoryEntry, error) {
+	id, err := resolveID(in)
+	if err != nil {
+		return api.MemoryEntry{}, err
+	}
+	e := api.MemoryEntry{
+		ID:          id,
+		WorkspaceID: p.ws,
+		Kind:        firstNonEmpty(in.Kind, api.MemoryKindNote),
+		Title:       in.Title,
+		Tags:        in.Tags,
+		Task:        p.taskRef(taskString(in.Task)),
+		Text:        strings.TrimSpace(in.Text),
+		CreatedAt:   time.Now().UTC(),
+	}
+	if err := writeFileAtomic(filepath.Join(p.dir, string(id)+".md"), renderMemory(e)); err != nil {
+		return api.MemoryEntry{}, err
+	}
+	return e, nil
+}
+
+// resolveID picks the file id: an explicit id, else a slug of the title, else a
+// generated id when the title is empty too. An explicit id must be a safe single
+// filename segment: since memory.write is not approval-gated, a caller id like
+// "../../README" would otherwise escape the memory directory. Derived and
+// generated ids are safe by construction, so only the explicit id is checked.
+func resolveID(in api.MemoryWriteParams) (api.MemoryID, error) {
+	if in.ID != "" {
+		if !safeID(string(in.ID)) {
+			return "", fmt.Errorf("%w: %q", ErrInvalidID, in.ID)
+		}
+		return in.ID, nil
+	}
+	if slug := slugify(in.Title); slug != "" {
+		return api.MemoryID(slug), nil
+	}
+	return api.MemoryID("mem-" + randomSuffix()), nil
+}
+
+// safeID reports whether id is a safe single filename segment: a non-empty string
+// of [A-Za-z0-9._-] with no ".." run, so it cannot contain a path separator,
+// name an absolute path, or traverse out of the memory directory.
+func safeID(id string) bool {
+	if id == "" || id == "." || id == ".." || strings.Contains(id, "..") {
+		return false
+	}
+	for _, r := range id {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
+		case r == '-', r == '_', r == '.':
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+// ErrInvalidID reports that an explicit memory id is not a safe filename segment
+// (e.g. it contains a path separator or "..").
+var ErrInvalidID = fmt.Errorf("memory: invalid id")
+
+// renderMemory serializes an entry to a markdown file: YAML frontmatter fenced by
+// --- lines, then the body. Kind is omitted for the default note.
+func renderMemory(e api.MemoryEntry) []byte {
+	out := frontmatterOut{
+		ID:      string(e.ID),
+		Title:   e.Title,
+		Tags:    e.Tags,
+		Task:    taskString(e.Task),
+		Created: e.CreatedAt.Format(time.RFC3339),
+	}
+	if e.Kind != "" && e.Kind != api.MemoryKindNote {
+		out.Kind = e.Kind
+	}
+	// yaml.Marshal never fails for this flat struct; ignore its error.
+	meta, _ := yaml.Marshal(out)
+
+	var b strings.Builder
+	b.WriteString("---\n")
+	b.Write(meta)
+	b.WriteString("---\n")
+	if e.Text != "" {
+		b.WriteString("\n")
+		b.WriteString(e.Text)
+		b.WriteString("\n")
+	}
+	return []byte(b.String())
+}
+
+// frontmatterOut is the write-side view of frontmatter: it omits empty fields so
+// authored files stay clean (mirrors the read-side frontmatter struct).
+type frontmatterOut struct {
+	ID      string   `yaml:"id"`
+	Kind    string   `yaml:"kind,omitempty"`
+	Title   string   `yaml:"title,omitempty"`
+	Tags    []string `yaml:"tags,omitempty"`
+	Task    string   `yaml:"task,omitempty"`
+	Created string   `yaml:"created"`
+}
+
+// taskString renders a TaskRef back to its frontmatter "provider:id" form (or
+// "id" with no provider), the inverse of taskRef. It returns "" for a nil ref.
+func taskString(t *api.TaskRef) string {
+	if t == nil {
+		return ""
+	}
+	if t.Provider != "" {
+		return t.Provider + ":" + t.ID
+	}
+	return t.ID
+}
+
+// slugify turns a title into a filesystem-safe id: lowercase, non-alphanumeric
+// runs collapsed to single hyphens, trimmed, capped in length.
+func slugify(s string) string {
+	var b strings.Builder
+	prevHyphen := false
+	for _, r := range strings.ToLower(s) {
+		switch {
+		case (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9'):
+			b.WriteRune(r)
+			prevHyphen = false
+		default:
+			if !prevHyphen && b.Len() > 0 {
+				b.WriteByte('-')
+				prevHyphen = true
+			}
+		}
+		if b.Len() >= slugMaxLen {
+			break
+		}
+	}
+	return strings.Trim(b.String(), "-")
+}
+
+// slugMaxLen caps a title-derived id so a long title cannot produce an unwieldy
+// filename.
+const slugMaxLen = 60
+
+// randomSuffix is a short random hex string used to make an id unique when a
+// write carries neither an id nor a title.
+func randomSuffix() string {
+	var buf [4]byte
+	if _, err := rand.Read(buf[:]); err != nil {
+		// crypto/rand should not fail; fall back to a time-based suffix.
+		return fmt.Sprintf("%x", time.Now().UnixNano())
+	}
+	return hex.EncodeToString(buf[:])
+}
+
+// writeFileAtomic writes data to path via a temp file in the same directory then
+// a rename, so a reader never observes a partially written file. It creates the
+// parent directory on demand.
+func writeFileAtomic(path string, data []byte) error {
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	tmp, err := os.CreateTemp(dir, ".memory-*.tmp")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	// On any error after creation, don't leave the temp file behind. After a
+	// successful rename the temp no longer exists, so the Remove is a harmless no-op.
+	defer func() { _ = os.Remove(tmpName) }()
+	if _, err := tmp.Write(data); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	if err := os.Chmod(tmpName, 0o644); err != nil {
+		return err
+	}
+	return os.Rename(tmpName, path)
 }
 
 // ErrNotFound reports that a memory id does not exist in the workspace.

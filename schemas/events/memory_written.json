@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$defs": {
+    "TaskRef": {
+      "properties": {
+        "provider": {
+          "type": "string"
+        },
+        "workspace_id": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "provider",
+        "workspace_id",
+        "id"
+      ]
+    }
+  },
+  "properties": {
+    "workspace_id": {
+      "type": "string"
+    },
+    "id": {
+      "type": "string"
+    },
+    "kind": {
+      "type": "string"
+    },
+    "title": {
+      "type": "string"
+    },
+    "task": {
+      "$ref": "#/$defs/TaskRef"
+    }
+  },
+  "additionalProperties": false,
+  "type": "object",
+  "required": [
+    "workspace_id",
+    "id"
+  ]
+}

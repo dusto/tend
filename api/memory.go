@@ -72,3 +72,26 @@ type MemoryGetParams struct {
 type MemoryGetResult struct {
 	Entry MemoryEntry `json:"entry"`
 }
+
+// MemoryWriteParams creates or updates one memory entry (an upsert keyed by id).
+// A memory is agent-authored and task-bound; the write is not approval-gated.
+type MemoryWriteParams struct {
+	WorkspaceID WorkspaceID `json:"workspace_id"`
+	// ID addresses an existing entry to overwrite; empty derives a stable id from
+	// the title, or a generated id when the title is also empty.
+	ID MemoryID `json:"id,omitempty"`
+	// Kind is the memory type (note or steering); empty defaults to note.
+	Kind  string   `json:"kind,omitempty"`
+	Title string   `json:"title,omitempty"`
+	Tags  []string `json:"tags,omitempty"`
+	// Task binds the note to the task it was written under, or nil for a
+	// workspace-level note.
+	Task *TaskRef `json:"task,omitempty"`
+	// Text is the note body (markdown).
+	Text string `json:"text"`
+}
+
+// MemoryWriteResult is the stored entry, with its resolved id and timestamp.
+type MemoryWriteResult struct {
+	Entry MemoryEntry `json:"entry"`
+}

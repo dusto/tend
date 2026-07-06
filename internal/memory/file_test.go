@@ -171,6 +171,158 @@ func TestFileProviderSearchFiltersByKind(t *testing.T) {
 	}
 }
 
+func TestFileProviderWriteRoundTrips(t *testing.T) {
+	p, _ := newProvider(t)
+	in := api.MemoryWriteParams{
+		WorkspaceID: "ws1",
+		ID:          "runbook",
+		Kind:        api.MemoryKindSteering,
+		Title:       "Deploy runbook",
+		Tags:        []string{"ops", "deploy"},
+		Task:        &api.TaskRef{Provider: "beads", ID: "tend-7"},
+		Text:        "  run make deploy  ",
+	}
+	e, err := p.Write(context.Background(), in)
+	if err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+	if e.ID != "runbook" || e.Text != "run make deploy" {
+		t.Errorf("returned entry = %+v (text should be trimmed)", e)
+	}
+	// Read it back through Get: the write must be indexed like any file.
+	got, err := p.Get(context.Background(), "runbook")
+	if err != nil {
+		t.Fatalf("Get after write: %v", err)
+	}
+	if got.Title != "Deploy runbook" || got.Kind != api.MemoryKindSteering || len(got.Tags) != 2 {
+		t.Errorf("read-back entry = %+v", got)
+	}
+	if got.Task == nil || got.Task.Provider != "beads" || got.Task.ID != "tend-7" || got.Task.WorkspaceID != "ws1" {
+		t.Errorf("read-back task = %+v", got.Task)
+	}
+	if got.Text != "run make deploy" {
+		t.Errorf("read-back text = %q", got.Text)
+	}
+}
+
+func TestFileProviderWriteIsUpsertByID(t *testing.T) {
+	p, dir := newProvider(t)
+	if _, err := p.Write(context.Background(), api.MemoryWriteParams{WorkspaceID: "ws1", ID: "n", Title: "first", Text: "a"}); err != nil {
+		t.Fatalf("first write: %v", err)
+	}
+	if _, err := p.Write(context.Background(), api.MemoryWriteParams{WorkspaceID: "ws1", ID: "n", Title: "second", Text: "b"}); err != nil {
+		t.Fatalf("second write: %v", err)
+	}
+	// Same id overwrites rather than duplicating: one file, latest content.
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 {
+		t.Errorf("dir has %d files, want 1 (upsert)", len(entries))
+	}
+	got, _ := p.Get(context.Background(), "n")
+	if got.Title != "second" || got.Text != "b" {
+		t.Errorf("entry = %+v, want the second write", got)
+	}
+}
+
+func TestFileProviderWriteDerivesIDFromTitle(t *testing.T) {
+	p, _ := newProvider(t)
+	e, err := p.Write(context.Background(), api.MemoryWriteParams{WorkspaceID: "ws1", Title: "Deploy the API!", Text: "x"})
+	if err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+	if e.ID != "deploy-the-api" {
+		t.Errorf("id = %q, want slug deploy-the-api", e.ID)
+	}
+}
+
+func TestFileProviderWriteGeneratesIDWhenNoTitle(t *testing.T) {
+	p, _ := newProvider(t)
+	e, err := p.Write(context.Background(), api.MemoryWriteParams{WorkspaceID: "ws1", Text: "orphan note"})
+	if err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+	if !strings.HasPrefix(string(e.ID), "mem-") {
+		t.Errorf("id = %q, want a generated mem- id", e.ID)
+	}
+	if _, err := p.Get(context.Background(), e.ID); err != nil {
+		t.Errorf("Get generated id: %v", err)
+	}
+}
+
+func TestFileProviderWriteCreatesMissingDir(t *testing.T) {
+	// The memory dir does not exist yet: Write must create it.
+	dir := filepath.Join(t.TempDir(), "nested", "memory")
+	p := NewFileProvider("ws1", dir)
+	if _, err := p.Write(context.Background(), api.MemoryWriteParams{WorkspaceID: "ws1", ID: "n", Text: "hi"}); err != nil {
+		t.Fatalf("Write into missing dir: %v", err)
+	}
+	if _, err := p.Get(context.Background(), "n"); err != nil {
+		t.Errorf("Get after creating dir: %v", err)
+	}
+}
+
+func TestFileProviderWriteOmitsKindForNote(t *testing.T) {
+	p, dir := newProvider(t)
+	if _, err := p.Write(context.Background(), api.MemoryWriteParams{WorkspaceID: "ws1", ID: "n", Title: "t", Text: "b"}); err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(dir, "n.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), "kind:") {
+		t.Errorf("note file should not carry an explicit kind:\n%s", data)
+	}
+}
+
+func TestFileProviderWriteRejectsUnsafeID(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "memory")
+	p := NewFileProvider("ws1", dir)
+
+	unsafe := []string{"../../README", "../escape", "a/b", `a\b`, "..", ".", "/etc/passwd", "sub/note"}
+	for _, id := range unsafe {
+		_, err := p.Write(context.Background(), api.MemoryWriteParams{WorkspaceID: "ws1", ID: api.MemoryID(id), Text: "x"})
+		if !errors.Is(err, ErrInvalidID) {
+			t.Errorf("Write(id=%q) err = %v, want ErrInvalidID", id, err)
+		}
+	}
+	// No traversal wrote a file anywhere under the temp root — the memory dir was
+	// never even created (rejection happens before any filesystem work).
+	if _, err := os.Stat(filepath.Join(root, "README.md")); !os.IsNotExist(err) {
+		t.Errorf("traversal wrote a file outside the memory dir: stat err = %v", err)
+	}
+	if entries, _ := os.ReadDir(root); len(entries) != 0 {
+		t.Errorf("temp root has %d entries, want 0 (nothing created)", len(entries))
+	}
+
+	// A safe id still works and stays inside the memory dir.
+	if _, err := p.Write(context.Background(), api.MemoryWriteParams{WorkspaceID: "ws1", ID: "ok.note-1", Text: "x"}); err != nil {
+		t.Fatalf("safe id write: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "ok.note-1.md")); err != nil {
+		t.Errorf("safe id file missing: %v", err)
+	}
+}
+
+func TestSlugify(t *testing.T) {
+	cases := map[string]string{
+		"Deploy the API!":  "deploy-the-api",
+		"  spaced  out  ":  "spaced-out",
+		"UPPER_snake-Case": "upper-snake-case",
+		"!!!":              "",
+		"":                 "",
+	}
+	for in, want := range cases {
+		if got := slugify(in); got != want {
+			t.Errorf("slugify(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
 func TestSplitFrontmatter(t *testing.T) {
 	fm, body := splitFrontmatter([]byte("---\nid: x\n---\nbody here"))
 	if strings.TrimSpace(string(fm)) != "id: x" || strings.TrimSpace(string(body)) != "body here" {

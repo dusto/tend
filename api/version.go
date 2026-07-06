@@ -19,8 +19,9 @@ const (
 	// files/images/audio); 0.16.0 added session.set_thought_level (+ the
 	// thought-level fields on SessionInfo, captured from ACP configOptions);
 	// 0.17.0 added provider.health; 0.18.0 added SessionInfo.resource_usage
-	// (per-session agent CPU/RSS); 0.19.0 added memory.search/get.
-	PluginToDaemonVersion = "0.19.0"
+	// (per-session agent CPU/RSS); 0.19.0 added memory.search/get; 0.20.0 added
+	// memory.write.
+	PluginToDaemonVersion = "0.20.0"
 	// 0.2.0 added editor.open + editor.diff; 0.3.0 added editor.diagnostics.
 	DaemonToEditorVersion = "0.3.0"
 	// 0.2.0 added the agent_thought_chunk session event; 0.3.0 added the
@@ -28,8 +29,9 @@ const (
 	// provider_started workspace event; 0.5.0 added the agent_plan session event;
 	// 0.6.0 added the slash_commands_updated session event; 0.7.0 added the
 	// agent_thought_level_updated session event; 0.8.0 added the
-	// agent_prompt_usage session event.
-	DaemonToClientVersion = "0.8.0"
+	// agent_prompt_usage session event; 0.9.0 added the memory_written and
+	// memory_searched workspace events.
+	DaemonToClientVersion = "0.9.0"
 )
 
 // Versions reports the contract version of each method set.
