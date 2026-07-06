@@ -12,9 +12,10 @@ import (
 
 // fakeProvider is an in-memory provider for service tests.
 type fakeProvider struct {
-	hits    []api.MemoryHit
-	entries map[api.MemoryID]api.MemoryEntry
-	written *api.MemoryWriteParams // records the last Write call
+	hits     []api.MemoryHit
+	entries  map[api.MemoryID]api.MemoryEntry
+	written  *api.MemoryWriteParams // records the last Write call
+	writeErr error                  // when set, Write returns it
 }
 
 func (f *fakeProvider) Search(_ context.Context, _, _ string, _ int) ([]api.MemoryHit, error) {
@@ -30,6 +31,9 @@ func (f *fakeProvider) Get(_ context.Context, id api.MemoryID) (api.MemoryEntry,
 
 func (f *fakeProvider) Write(_ context.Context, in api.MemoryWriteParams) (api.MemoryEntry, error) {
 	f.written = &in
+	if f.writeErr != nil {
+		return api.MemoryEntry{}, f.writeErr
+	}
 	id := in.ID
 	if id == "" {
 		id = "generated"
@@ -130,6 +134,19 @@ func TestServiceWriteValidation(t *testing.T) {
 	}
 	if _, err := svc.write(context.Background(), api.MemoryWriteParams{WorkspaceID: "ws1"}); codeOf(t, err) != rpc.CodeInvalidParams {
 		t.Error("empty title and text should be invalid params")
+	}
+}
+
+func TestServiceWriteInvalidIDIsInvalidParams(t *testing.T) {
+	emit := &fakeEmitter{}
+	svc := newServiceEmit(&fakeProvider{writeErr: ErrInvalidID}, emit)
+	_, err := svc.write(context.Background(), api.MemoryWriteParams{WorkspaceID: "ws1", ID: "../escape", Text: "x"})
+	if codeOf(t, err) != rpc.CodeInvalidParams {
+		t.Errorf("unsafe id should map to invalid params, got %v", err)
+	}
+	// A rejected write emits nothing.
+	if len(emit.events) != 0 {
+		t.Errorf("rejected write emitted %d events, want 0", len(emit.events))
 	}
 }
 

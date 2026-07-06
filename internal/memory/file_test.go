@@ -278,6 +278,36 @@ func TestFileProviderWriteOmitsKindForNote(t *testing.T) {
 	}
 }
 
+func TestFileProviderWriteRejectsUnsafeID(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "memory")
+	p := NewFileProvider("ws1", dir)
+
+	unsafe := []string{"../../README", "../escape", "a/b", `a\b`, "..", ".", "/etc/passwd", "sub/note"}
+	for _, id := range unsafe {
+		_, err := p.Write(context.Background(), api.MemoryWriteParams{WorkspaceID: "ws1", ID: api.MemoryID(id), Text: "x"})
+		if !errors.Is(err, ErrInvalidID) {
+			t.Errorf("Write(id=%q) err = %v, want ErrInvalidID", id, err)
+		}
+	}
+	// No traversal wrote a file anywhere under the temp root — the memory dir was
+	// never even created (rejection happens before any filesystem work).
+	if _, err := os.Stat(filepath.Join(root, "README.md")); !os.IsNotExist(err) {
+		t.Errorf("traversal wrote a file outside the memory dir: stat err = %v", err)
+	}
+	if entries, _ := os.ReadDir(root); len(entries) != 0 {
+		t.Errorf("temp root has %d entries, want 0 (nothing created)", len(entries))
+	}
+
+	// A safe id still works and stays inside the memory dir.
+	if _, err := p.Write(context.Background(), api.MemoryWriteParams{WorkspaceID: "ws1", ID: "ok.note-1", Text: "x"}); err != nil {
+		t.Fatalf("safe id write: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "ok.note-1.md")); err != nil {
+		t.Errorf("safe id file missing: %v", err)
+	}
+}
+
 func TestSlugify(t *testing.T) {
 	cases := map[string]string{
 		"Deploy the API!":  "deploy-the-api",

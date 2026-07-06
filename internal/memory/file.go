@@ -118,7 +118,10 @@ func (p *FileProvider) Get(_ context.Context, id api.MemoryID) (api.MemoryEntry,
 // half-written file. The directory is created on demand. The next index call
 // picks up the change via the directory signature.
 func (p *FileProvider) Write(_ context.Context, in api.MemoryWriteParams) (api.MemoryEntry, error) {
-	id := resolveID(in)
+	id, err := resolveID(in)
+	if err != nil {
+		return api.MemoryEntry{}, err
+	}
 	e := api.MemoryEntry{
 		ID:          id,
 		WorkspaceID: p.ws,
@@ -136,16 +139,44 @@ func (p *FileProvider) Write(_ context.Context, in api.MemoryWriteParams) (api.M
 }
 
 // resolveID picks the file id: an explicit id, else a slug of the title, else a
-// generated id when the title is empty too.
-func resolveID(in api.MemoryWriteParams) api.MemoryID {
+// generated id when the title is empty too. An explicit id must be a safe single
+// filename segment: since memory.write is not approval-gated, a caller id like
+// "../../README" would otherwise escape the memory directory. Derived and
+// generated ids are safe by construction, so only the explicit id is checked.
+func resolveID(in api.MemoryWriteParams) (api.MemoryID, error) {
 	if in.ID != "" {
-		return in.ID
+		if !safeID(string(in.ID)) {
+			return "", fmt.Errorf("%w: %q", ErrInvalidID, in.ID)
+		}
+		return in.ID, nil
 	}
 	if slug := slugify(in.Title); slug != "" {
-		return api.MemoryID(slug)
+		return api.MemoryID(slug), nil
 	}
-	return api.MemoryID("mem-" + randomSuffix())
+	return api.MemoryID("mem-" + randomSuffix()), nil
 }
+
+// safeID reports whether id is a safe single filename segment: a non-empty string
+// of [A-Za-z0-9._-] with no ".." run, so it cannot contain a path separator,
+// name an absolute path, or traverse out of the memory directory.
+func safeID(id string) bool {
+	if id == "" || id == "." || id == ".." || strings.Contains(id, "..") {
+		return false
+	}
+	for _, r := range id {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
+		case r == '-', r == '_', r == '.':
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+// ErrInvalidID reports that an explicit memory id is not a safe filename segment
+// (e.g. it contains a path separator or "..").
+var ErrInvalidID = fmt.Errorf("memory: invalid id")
 
 // renderMemory serializes an entry to a markdown file: YAML frontmatter fenced by
 // --- lines, then the body. Kind is omitted for the default note.
