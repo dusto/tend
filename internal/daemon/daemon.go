@@ -96,9 +96,10 @@ type Server struct {
 type Option func(*options)
 
 type options struct {
-	acp         *acp.Config
-	taskFactory tasks.Factory
-	retention   uint64
+	acp           *acp.Config
+	taskFactory   tasks.Factory
+	memoryFactory memory.Factory
+	retention     uint64
 }
 
 // WithACPConfig sets the ACP provider config the daemon spawns from (default:
@@ -108,6 +109,12 @@ func WithACPConfig(c *acp.Config) Option { return func(o *options) { o.acp = c }
 // WithTaskFactory sets the per-workspace task provider factory (default: an
 // in-memory fake provider).
 func WithTaskFactory(f tasks.Factory) Option { return func(o *options) { o.taskFactory = f } }
+
+// WithMemoryFactory sets the per-workspace memory provider factory (default:
+// memory.InRepoFactory, each workspace's own .tend/memory directory).
+func WithMemoryFactory(f memory.Factory) Option {
+	return func(o *options) { o.memoryFactory = f }
+}
 
 // WithEventRetention sets how many most-recent raw event records each stream
 // keeps uncompacted (default: events.DefaultRetention).
@@ -119,9 +126,10 @@ func WithEventRetention(n uint64) Option { return func(o *options) { o.retention
 // startup rather than per connection.
 func New(ln net.Listener, logPath string, opts ...Option) (*Server, error) {
 	o := options{
-		acp:         acp.DefaultConfig(),
-		taskFactory: func(ws api.WorkspaceID) tasks.Provider { return tasks.NewFake(ws) },
-		retention:   events.DefaultRetention,
+		acp:           acp.DefaultConfig(),
+		taskFactory:   func(ws api.WorkspaceID) tasks.Provider { return tasks.NewFake(ws) },
+		memoryFactory: memory.InRepoFactory,
+		retention:     events.DefaultRetention,
 	}
 	for _, opt := range opts {
 		opt(&o)
@@ -157,7 +165,7 @@ func New(ln net.Listener, logPath string, opts ...Option) (*Server, error) {
 	s.tasks = tasks.NewService(o.taskFactory, s.store)
 	// Memory tools: the default backend reads a workspace's in-tree markdown
 	// memory directory; a config-driven factory can replace it, like task sources.
-	s.memory = memory.NewService(memory.InRepoFactory, s.store)
+	s.memory = memory.NewService(o.memoryFactory, s.store)
 	s.ptyMgr = pty.NewManager()
 	s.panes = pty.NewService(s.ptyMgr, s.sessions, s.gate, s.store, "")
 

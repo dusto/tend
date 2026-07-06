@@ -57,6 +57,7 @@ func run() error {
 	srv, err := daemon.New(ln, filepath.Join(filepath.Dir(path), "events.log"),
 		daemon.WithACPConfig(cfg),
 		daemon.WithTaskFactory(cfg.Tasks.Factory()),
+		daemon.WithMemoryFactory(cfg.Memory.Factory()),
 	)
 	if err != nil {
 		_ = ln.Close()

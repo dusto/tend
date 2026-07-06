@@ -110,6 +110,44 @@ use = "tend"`))
 	}
 }
 
+func TestParseMemorySection(t *testing.T) {
+	cfg, err := Parse([]byte(`[[acp.providers]]
+id = "x"
+command = "x-cli"
+
+[[memory.sources]]
+name = "central"
+type = "file"
+dir = "/shared/mem"
+
+[[memory.rules]]
+under = ["/w"]
+use = "central"`))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if len(cfg.Memory.Sources) != 1 || cfg.Memory.Sources[0].Name != "central" || cfg.Memory.Sources[0].Dir != "/shared/mem" {
+		t.Fatalf("parsed memory sources = %+v, want one named central dir=/shared/mem", cfg.Memory.Sources)
+	}
+	if len(cfg.Memory.Rules) != 1 || cfg.Memory.Rules[0].Use != "central" {
+		t.Fatalf("parsed memory rule = %+v, want use=central", cfg.Memory.Rules)
+	}
+}
+
+func TestParseMemorySectionInvalid(t *testing.T) {
+	// An invalid memory-source section fails the whole config load, loudly.
+	_, err := Parse([]byte(`[[acp.providers]]
+id = "x"
+command = "x-cli"
+
+[[memory.rules]]
+under = ["/w"]
+use = "ghost"`))
+	if err == nil {
+		t.Fatal("expected error for a memory rule referencing an undefined source")
+	}
+}
+
 func TestParseTasksSectionInvalid(t *testing.T) {
 	// An invalid task-source section fails the whole config load, loudly.
 	_, err := Parse([]byte(`[[acp.providers]]

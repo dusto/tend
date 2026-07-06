@@ -67,3 +67,27 @@ enabled = false
 # [[tasks.rules]]
 # under = ["/home/you/work/acme"]     # every repo under here shares one backlog
 # use   = "acme"
+
+# Memory sources map a workspace to where its memories (agent notes + steering)
+# are stored. It mirrors task sources: define each store once as a named source,
+# then map repositories to it. A workspace resolves to the source of the first
+# rule whose repos/under matches its repo root; with no match it uses its OWN
+# in-tree store (<repo>/.tend/memory). This only changes WHERE memory is stored —
+# the memory.* tools are unchanged.
+#
+# Matching is by the same robust path identity as task sources:
+#   repos = exact repository roots
+#   under = parent directories; any repository beneath one applies
+# An exact `repos` match takes precedence over an `under` prefix match.
+#
+# A source of type "file" reads/writes markdown memory files under `dir`. Several
+# repos can share one `dir` (a central memory repo) or map to distinct dirs.
+
+# [[memory.sources]]
+# name = "central"
+# type = "file"
+# dir  = "/home/you/work/tend-workspace/tend-memory"
+
+# [[memory.rules]]
+# under = ["/home/you/work/tend-workspace"]   # all these repos share one memory store
+# use   = "central"
