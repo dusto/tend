@@ -18,6 +18,9 @@ type Provider interface {
 	Search(ctx context.Context, query, kind string, limit int) ([]api.MemoryHit, error)
 	// Get returns one memory's full entry by id.
 	Get(ctx context.Context, id api.MemoryID) (api.MemoryEntry, error)
+	// Write creates or updates a memory entry (an upsert keyed by id) and returns
+	// the stored entry with its resolved id and timestamp.
+	Write(ctx context.Context, params api.MemoryWriteParams) (api.MemoryEntry, error)
 }
 
 // Factory builds the memory Provider for a workspace. Each workspace gets one

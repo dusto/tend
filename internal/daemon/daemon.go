@@ -157,7 +157,7 @@ func New(ln net.Listener, logPath string, opts ...Option) (*Server, error) {
 	s.tasks = tasks.NewService(o.taskFactory, s.store)
 	// Memory tools: the default backend reads a workspace's in-tree markdown
 	// memory directory; a config-driven factory can replace it, like task sources.
-	s.memory = memory.NewService(memory.InRepoFactory)
+	s.memory = memory.NewService(memory.InRepoFactory, s.store)
 	s.ptyMgr = pty.NewManager()
 	s.panes = pty.NewService(s.ptyMgr, s.sessions, s.gate, s.store, "")
 

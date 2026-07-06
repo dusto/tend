@@ -93,6 +93,8 @@ var EventDefs = []EventDef{
 	{Type: "task_closed", Scope: ScopeWorkspace, Payload: TaskChange{}, Summary: "A task was closed. Repo-wide: delivered on the workspace stream."},
 	{Type: "pane_output", Scope: ScopePane, Payload: PaneOutput{}, Summary: "A chunk of a pane's output, on the pane stream. Lossy under load; pane.read is the authoritative scrollback."},
 	{Type: "pane_exited", Scope: ScopePane, Payload: PaneExited{}, Summary: "A pane's process exited."},
+	{Type: "memory_written", Scope: ScopeWorkspace, Payload: MemoryWritten{}, Summary: "A memory entry was created or updated (memory.write). Repo-wide: delivered on the workspace stream."},
+	{Type: "memory_searched", Scope: ScopeWorkspace, Payload: MemorySearched{}, Summary: "A workspace's memories were searched (memory.search), so a supervisor can see what an agent recalled. Repo-wide: delivered on the workspace stream."},
 }
 
 // --- Event payloads (initial set) ---
@@ -246,4 +248,27 @@ type PlanEntry struct {
 	Content  string `json:"content"`
 	Priority string `json:"priority,omitempty"`
 	Status   string `json:"status"`
+}
+
+// MemoryWritten signals that a memory entry was created or updated via
+// memory.write. It carries identity, not the full body: fetch that with
+// memory.get. Repo-wide, so it is delivered on the workspace stream.
+type MemoryWritten struct {
+	WorkspaceID WorkspaceID `json:"workspace_id"`
+	ID          MemoryID    `json:"id"`
+	Kind        string      `json:"kind,omitempty"`
+	Title       string      `json:"title,omitempty"`
+	Task        *TaskRef    `json:"task,omitempty"`
+}
+
+// MemorySearched signals that a workspace's memories were searched, so a
+// supervisor can observe what an agent recalled. It carries the query and the
+// number of hits, not the results. Repo-wide, on the workspace stream.
+type MemorySearched struct {
+	WorkspaceID WorkspaceID `json:"workspace_id"`
+	Query       string      `json:"query"`
+	// Kind is the kind filter the search applied, if any.
+	Kind string `json:"kind,omitempty"`
+	// Results is how many hits the search returned.
+	Results int `json:"results"`
 }
