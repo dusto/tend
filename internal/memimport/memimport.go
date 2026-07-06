@@ -11,6 +11,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
@@ -152,19 +153,63 @@ func Run(ctx context.Context, store Store, root string, adapters []Adapter, dryR
 	return res, nil
 }
 
-// hashBody is the content hash recorded as provenance and used to detect a later
-// human edit. It hashes the trimmed body so it matches what the store persists
-// (the file provider trims the body on read and write).
-func hashBody(text string) string {
-	sum := sha256.Sum256([]byte(strings.TrimSpace(text)))
+// hashOwned is the provenance hash recorded on import and used to detect a later
+// human edit. It covers the full normalized owned state (title/activation/body),
+// not just the body, so an edit to any field the importer owns is detected and
+// preserved. The hash is stable across a write/read round-trip: it is computed
+// identically from a source Item and from the entry the store later returns.
+func hashOwned(s ownedState) string {
+	s.Text = strings.TrimSpace(s.Text)
+	// json.Marshal is deterministic here: fixed field order, slice order preserved.
+	b, _ := json.Marshal(s)
+	sum := sha256.Sum256(b)
 	return hex.EncodeToString(sum[:])
+}
+
+// ownedState is the subset of an entry the importer authors and therefore owns.
+// A human's edit to any of these fields must not be clobbered by a re-import, so
+// the provenance hash covers all of them.
+type ownedState struct {
+	Kind  string   `json:"kind"`
+	Apply string   `json:"apply"`
+	Globs []string `json:"globs"`
+	Title string   `json:"title"`
+	Text  string   `json:"text"`
+}
+
+// ownedFromItem is the owned state an item would be stored as, applying the same
+// activation normalization the store does, so it matches the stored entry.
+func ownedFromItem(it Item) ownedState {
+	apply, globs := normalizeActivation(it.Kind, it.Apply, it.Globs)
+	return ownedState{Kind: it.Kind, Apply: apply, Globs: globs, Title: it.Title, Text: it.Text}
+}
+
+// ownedFromEntry is a stored entry's owned state; its activation is already
+// normalized by the store on read.
+func ownedFromEntry(e api.MemoryEntry) ownedState {
+	return ownedState{Kind: e.Kind, Apply: e.Apply, Globs: e.Globs, Title: e.Title, Text: e.Text}
+}
+
+// normalizeActivation mirrors the store's steering normalization: notes carry no
+// activation, steering defaults to always, and globs are kept only in glob mode.
+func normalizeActivation(kind, apply string, globs []string) (string, []string) {
+	if kind != api.MemoryKindSteering {
+		return "", nil
+	}
+	if apply == "" {
+		apply = api.MemoryApplyAlways
+	}
+	if apply != api.MemoryApplyGlob {
+		return apply, nil
+	}
+	return apply, globs
 }
 
 // importItem applies one item to the store under the re-import safety rules and
 // returns its outcome.
 func importItem(ctx context.Context, store Store, source string, it Item, dryRun bool) (Outcome, error) {
 	out := Outcome{Source: source, Origin: it.Origin, ID: it.ID}
-	hash := hashBody(it.Text)
+	wantHash := hashOwned(ownedFromItem(it))
 
 	existing, found, err := store.Get(ctx, it.ID)
 	if err != nil {
@@ -172,23 +217,24 @@ func importItem(ctx context.Context, store Store, source string, it Item, dryRun
 	}
 	if found {
 		// The id is occupied. Only overwrite an entry this same source imported and
-		// that a human has not edited since.
+		// whose owned fields a human has not edited since.
 		pv := existing.Provenance
 		switch {
 		case pv == nil || pv.Source != source || pv.Origin != it.Origin:
 			out.Status, out.Reason = StatusSkipped, "id already used by a non-import or different-source entry"
 			return out, nil
-		case hashBody(existing.Text) != pv.Hash:
+		case hashOwned(ownedFromEntry(existing)) != pv.Hash:
 			out.Status, out.Reason = StatusSkipped, "entry was edited since import; not overwriting"
 			return out, nil
-		case existing.Text == strings.TrimSpace(it.Text) && sameActivation(existing, it):
+		case wantHash == pv.Hash:
+			// Pristine and the source still produces the same state: nothing to do.
 			out.Status = StatusUnchanged
 			return out, nil
 		}
 	}
 
 	if !dryRun {
-		if _, err := store.Write(ctx, writeParams(existing, source, it, hash)); err != nil {
+		if _, err := store.Write(ctx, writeParams(existing, source, it, wantHash)); err != nil {
 			return out, err
 		}
 	}
@@ -213,42 +259,6 @@ func writeParams(existing api.MemoryEntry, source string, it Item, hash string) 
 		Text:        it.Text,
 		Provenance:  &api.MemoryProvenance{Source: source, Origin: it.Origin, Hash: hash},
 	}
-}
-
-// sameActivation reports whether an item's steering activation matches a stored
-// entry, so an unchanged re-import is a no-op.
-func sameActivation(e api.MemoryEntry, it Item) bool {
-	if e.Kind != it.Kind || e.Title != it.Title {
-		return false
-	}
-	if e.Apply != normalizedApply(it) {
-		return false
-	}
-	return equalStrings(e.Globs, it.Globs)
-}
-
-// normalizedApply mirrors how the store normalizes steering activation: notes
-// carry none, and steering with no explicit mode defaults to always.
-func normalizedApply(it Item) string {
-	if it.Kind != api.MemoryKindSteering {
-		return ""
-	}
-	if it.Apply == "" {
-		return api.MemoryApplyAlways
-	}
-	return it.Apply
-}
-
-func equalStrings(a, b []string) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if a[i] != b[i] {
-			return false
-		}
-	}
-	return true
 }
 
 // sortItems orders items by id for a deterministic report.

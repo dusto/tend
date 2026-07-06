@@ -23,10 +23,11 @@ func (s *fakeStore) Get(_ context.Context, id string) (api.MemoryEntry, bool, er
 
 func (s *fakeStore) Write(_ context.Context, p api.MemoryWriteParams) (api.MemoryEntry, error) {
 	s.writes++
-	// The file provider persists the trimmed body; mirror that so a stored entry's
-	// text matches what hashBody hashes.
+	// Mirror the file provider: trim the body and normalize steering activation, so
+	// a stored entry matches what a re-import recomputes from the source.
+	apply, globs := normalizeActivation(p.Kind, p.Apply, p.Globs)
 	e := api.MemoryEntry{
-		ID: p.ID, WorkspaceID: p.WorkspaceID, Kind: p.Kind, Apply: p.Apply, Globs: p.Globs,
+		ID: p.ID, WorkspaceID: p.WorkspaceID, Kind: p.Kind, Apply: apply, Globs: globs,
 		Title: p.Title, Text: strings.TrimSpace(p.Text), Provenance: p.Provenance,
 	}
 	s.entries[string(p.ID)] = e
@@ -50,8 +51,9 @@ func TestImportItemCreates(t *testing.T) {
 	if e.Provenance == nil || e.Provenance.Source != "agents" || e.Provenance.Origin != "AGENTS.md" {
 		t.Errorf("provenance = %+v", e.Provenance)
 	}
-	if e.Provenance.Hash != hashBody("hello") {
-		t.Errorf("hash = %q, want %q", e.Provenance.Hash, hashBody("hello"))
+	want := hashOwned(ownedFromItem(item("agents", "hello")))
+	if e.Provenance.Hash != want {
+		t.Errorf("hash = %q, want %q", e.Provenance.Hash, want)
 	}
 }
 
@@ -88,7 +90,7 @@ func TestImportItemUpdatesWhenSourceChanges(t *testing.T) {
 	if s.entries["agents"].Text != "v2" {
 		t.Errorf("text = %q, want v2", s.entries["agents"].Text)
 	}
-	if s.entries["agents"].Provenance.Hash != hashBody("v2") {
+	if s.entries["agents"].Provenance.Hash != hashOwned(ownedFromItem(item("agents", "v2"))) {
 		t.Error("hash not refreshed on update")
 	}
 }
@@ -119,6 +121,46 @@ func TestImportItemSkipsHumanEdited(t *testing.T) {
 	}
 }
 
+func TestImportItemSkipsMetadataEdit(t *testing.T) {
+	// A human edit to an imported entry's metadata (title/apply/globs) — with the
+	// body untouched — must not be clobbered by a re-import: the provenance hash
+	// covers the whole owned state, not just the body.
+	glob := Item{
+		ID: "kiro-ts", Kind: api.MemoryKindSteering, Apply: api.MemoryApplyGlob,
+		Globs: []string{"**/*.ts"}, Title: "TS", Text: "body", Origin: ".kiro/steering/ts.md",
+	}
+	for _, edit := range []struct {
+		name  string
+		apply func(e *api.MemoryEntry)
+	}{
+		{"title", func(e *api.MemoryEntry) { e.Title = "My TS rules" }},
+		{"apply", func(e *api.MemoryEntry) { e.Apply = api.MemoryApplyManual }},
+		{"globs", func(e *api.MemoryEntry) { e.Globs = []string{"**/*.tsx"} }},
+	} {
+		t.Run(edit.name, func(t *testing.T) {
+			s := newStore()
+			if _, err := importItem(context.Background(), s, "kiro", glob, false); err != nil {
+				t.Fatal(err)
+			}
+			e := s.entries["kiro-ts"]
+			edit.apply(&e)
+			s.entries["kiro-ts"] = e
+			before := s.writes
+
+			out, err := importItem(context.Background(), s, "kiro", glob, false)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if out.Status != StatusSkipped {
+				t.Fatalf("status = %q, want skipped (%s edited)", out.Status, edit.name)
+			}
+			if s.writes != before {
+				t.Errorf("%s edit was clobbered (a write happened)", edit.name)
+			}
+		})
+	}
+}
+
 func TestImportItemSkipsIDConflict(t *testing.T) {
 	s := newStore()
 	// A hand-authored entry (no provenance) occupies the id.
@@ -140,7 +182,7 @@ func TestImportItemForeignSourceConflict(t *testing.T) {
 	// An entry imported by a different source holds the id.
 	s.entries["agents"] = api.MemoryEntry{
 		ID: "agents", Text: "x", Kind: api.MemoryKindSteering,
-		Provenance: &api.MemoryProvenance{Source: "kiro", Origin: "AGENTS.md", Hash: hashBody("x")},
+		Provenance: &api.MemoryProvenance{Source: "kiro", Origin: "AGENTS.md", Hash: "any"},
 	}
 	out, _ := importItem(context.Background(), s, "agents", item("agents", "v1"), false)
 	if out.Status != StatusSkipped {
