@@ -9,6 +9,7 @@ import (
 
 	"github.com/BurntSushi/toml"
 
+	"github.com/dusto/tend/internal/memory"
 	"github.com/dusto/tend/internal/tasks"
 )
 
@@ -25,8 +26,9 @@ const (
 // Config is the parsed TEND configuration file. It aggregates the daemon's
 // configurable sections: the ACP providers and the task sources.
 type Config struct {
-	ACP   Settings            `toml:"acp"`
-	Tasks tasks.SourcesConfig `toml:"tasks"`
+	ACP    Settings             `toml:"acp"`
+	Tasks  tasks.SourcesConfig  `toml:"tasks"`
+	Memory memory.SourcesConfig `toml:"memory"`
 }
 
 // Settings holds the ACP provider definitions.
@@ -129,7 +131,10 @@ func (c *Config) validate() error {
 			return fmt.Errorf("config: provider %q: invalid cwd_mode %q", p.ID, p.CwdMode)
 		}
 	}
-	return c.Tasks.Validate()
+	if err := c.Tasks.Validate(); err != nil {
+		return err
+	}
+	return c.Memory.Validate()
 }
 
 // EnabledProviders returns the providers with enabled = true, in definition

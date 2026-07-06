@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/dusto/tend/api"
+	"github.com/dusto/tend/internal/wsrules"
 )
 
 // Source type identifiers for a SourceDef.
@@ -89,14 +89,6 @@ func (c SourcesConfig) Validate() error {
 	return nil
 }
 
-// resolvedRule is a MappingRule with its paths canonicalized, so they compare
-// against the workspace root in the same symlink-resolved form.
-type resolvedRule struct {
-	repos []string
-	under []string
-	use   string
-}
-
 // Factory returns the per-workspace task Factory these rules describe: a
 // workspace resolves to a rule's named source, else its own in-tree source, else
 // an empty provider (an empty queue whose writes report that none is configured).
@@ -105,20 +97,11 @@ func (c SourcesConfig) Factory() Factory {
 	for _, s := range c.Sources {
 		byName[s.Name] = s
 	}
-	// Canonicalize rule paths once: WorkspaceID is symlink-resolved, so config
-	// paths must be too or a symlinked repo/under would silently miss its rule.
-	rules := make([]resolvedRule, len(c.Rules))
-	for i := range c.Rules {
-		rules[i] = resolvedRule{
-			repos: canonicalizeAll(c.Rules[i].Repos),
-			under: canonicalizeAll(c.Rules[i].Under),
-			use:   c.Rules[i].Use,
-		}
-	}
+	resolver := wsrules.NewResolver(mappingRules(c.Rules))
 	return func(ws api.WorkspaceID) Provider {
-		root := repoRoot(ws)
-		if def, ok := resolve(root, rules, byName); ok {
-			return newSource(ws, def)
+		root := wsrules.RepoRoot(string(ws))
+		if use, ok := resolver.Resolve(root); ok {
+			return newSource(ws, byName[use])
 		}
 		if def, ok := detectInRepoSource(root); ok {
 			return newSource(ws, def)
@@ -127,81 +110,13 @@ func (c SourcesConfig) Factory() Factory {
 	}
 }
 
-// resolve returns the source a repo root maps to via the rules. Exact repos
-// matches take precedence over under-prefix matches; within a tier the first
-// rule wins.
-func resolve(root string, rules []resolvedRule, byName map[string]SourceDef) (SourceDef, bool) {
-	for i := range rules {
-		if matchesAny(root, rules[i].repos, pathEqual) {
-			return byName[rules[i].use], true
-		}
-	}
-	for i := range rules {
-		if matchesAny(root, rules[i].under, pathUnder) {
-			return byName[rules[i].use], true
-		}
-	}
-	return SourceDef{}, false
-}
-
-// canonicalizeAll resolves each path to the symlink-free, absolute form used for
-// workspace roots. A path that cannot be resolved (e.g. does not exist yet)
-// falls back to its absolute, cleaned form.
-func canonicalizeAll(paths []string) []string {
-	out := make([]string, len(paths))
-	for i, p := range paths {
-		out[i] = canonicalize(p)
+// mappingRules converts the config rules to the shared resolver's rule shape.
+func mappingRules(rules []MappingRule) []wsrules.Rule {
+	out := make([]wsrules.Rule, len(rules))
+	for i, r := range rules {
+		out[i] = wsrules.Rule{Repos: r.Repos, Under: r.Under, Use: r.Use}
 	}
 	return out
-}
-
-// canonicalize resolves p to its symlink-free absolute path, matching how a
-// WorkspaceID is derived; it falls back to the absolute cleaned path when p
-// cannot be resolved.
-func canonicalize(p string) string {
-	if resolved, err := filepath.EvalSymlinks(p); err == nil {
-		return resolved
-	}
-	if abs, err := filepath.Abs(p); err == nil {
-		return abs
-	}
-	return filepath.Clean(p)
-}
-
-// matchesAny reports whether root satisfies pred against any of candidates.
-func matchesAny(root string, candidates []string, pred func(root, candidate string) bool) bool {
-	for _, c := range candidates {
-		if pred(root, c) {
-			return true
-		}
-	}
-	return false
-}
-
-// pathEqual reports whether root and candidate name the same path.
-func pathEqual(root, candidate string) bool {
-	return segEqual(segments(root), segments(candidate))
-}
-
-// pathUnder reports whether root is candidate or a descendant of it.
-func pathUnder(root, candidate string) bool {
-	rs, cs := segments(root), segments(candidate)
-	if len(cs) == 0 || len(cs) > len(rs) {
-		return false
-	}
-	return segEqual(rs[:len(cs)], cs)
-}
-
-func segEqual(a, b []string) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if a[i] != b[i] {
-			return false
-		}
-	}
-	return true
 }
 
 // detectInRepoSource reports the repository's own task source: a beads source
@@ -224,28 +139,6 @@ func newSource(ws api.WorkspaceID, def SourceDef) Provider {
 		// Validate rejects unknown types; guard defensively.
 		return emptyProvider{ws: ws}
 	}
-}
-
-// repoRoot is the workspace's repository root: the WorkspaceID is the canonical
-// path of the common git dir, so a trailing ".git" segment names the root's
-// worktree.
-func repoRoot(ws api.WorkspaceID) string {
-	p := string(ws)
-	if filepath.Base(p) == ".git" {
-		return filepath.Dir(p)
-	}
-	return p
-}
-
-// segments splits a path into its non-empty, slash-separated components.
-func segments(p string) []string {
-	var out []string
-	for s := range strings.SplitSeq(filepath.ToSlash(filepath.Clean(p)), "/") {
-		if s != "" {
-			out = append(out, s)
-		}
-	}
-	return out
 }
 
 // emptyProvider is the resolved provider for a workspace with no task source:

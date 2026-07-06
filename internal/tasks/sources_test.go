@@ -193,24 +193,6 @@ func TestFactoryNoSourceYieldsEmptyProvider(t *testing.T) {
 	}
 }
 
-func TestPathMatchers(t *testing.T) {
-	if !pathEqual("/a/b/tend", "/a/b/tend") {
-		t.Error("pathEqual identical should be true")
-	}
-	if pathEqual("/a/b/tend", "/a/b/nettend") {
-		t.Error("pathEqual must be segment-wise, not substring")
-	}
-	if !pathUnder("/home/u/work/x", "/home/u/work") {
-		t.Error("pathUnder descendant should be true")
-	}
-	if !pathUnder("/home/u/work", "/home/u/work") {
-		t.Error("pathUnder self should be true")
-	}
-	if pathUnder("/home/u/workshop", "/home/u/work") {
-		t.Error("pathUnder must be segment-wise, not prefix-substring")
-	}
-}
-
 // beadsSource asserts p is a beads provider with the given name and dir.
 func beadsSource(t *testing.T, p Provider, name, dir string) {
 	t.Helper()
