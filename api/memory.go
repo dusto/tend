@@ -51,6 +51,26 @@ type MemoryEntry struct {
 	// Text is the note body (markdown).
 	Text      string    `json:"text"`
 	CreatedAt time.Time `json:"created_at,omitzero"`
+	// Provenance is set on entries produced by importing an external file, so a
+	// re-import can update them in place without clobbering later human edits.
+	Provenance *MemoryProvenance `json:"provenance,omitempty"`
+}
+
+// MemoryProvenance records that an entry was produced by importing an external
+// agent's memory/instruction file (see the memory import adapters). It lets a
+// re-import find the entry it wrote, detect whether a human has since edited it,
+// and update in place rather than duplicating or clobbering.
+type MemoryProvenance struct {
+	// Source is the importer/adapter that produced the entry (e.g. "kiro",
+	// "agents").
+	Source string `json:"source"`
+	// Origin is the source file the entry was imported from, relative to the repo
+	// root.
+	Origin string `json:"origin"`
+	// Hash is the content hash of the imported body at import time. On re-import, a
+	// stored entry whose current body no longer hashes to this was edited by a
+	// human, so the import skips it instead of overwriting.
+	Hash string `json:"hash"`
 }
 
 // MemoryHit is one memory.search result: identity and a short snippet rather than
@@ -116,6 +136,9 @@ type MemoryWriteParams struct {
 	Task *TaskRef `json:"task,omitempty"`
 	// Text is the note body (markdown).
 	Text string `json:"text"`
+	// Provenance, when set, marks the entry as imported from an external file (see
+	// MemoryProvenance); it is persisted so a re-import can update in place.
+	Provenance *MemoryProvenance `json:"provenance,omitempty"`
 }
 
 // MemoryWriteResult is the stored entry, with its resolved id and timestamp.

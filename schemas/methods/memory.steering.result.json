@@ -39,6 +39,9 @@
         "created_at": {
           "type": "string",
           "format": "date-time"
+        },
+        "provenance": {
+          "$ref": "#/$defs/MemoryProvenance"
         }
       },
       "additionalProperties": false,
@@ -47,6 +50,26 @@
         "id",
         "workspace_id",
         "text"
+      ]
+    },
+    "MemoryProvenance": {
+      "properties": {
+        "source": {
+          "type": "string"
+        },
+        "origin": {
+          "type": "string"
+        },
+        "hash": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "source",
+        "origin",
+        "hash"
       ]
     },
     "TaskRef": {

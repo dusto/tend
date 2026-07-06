@@ -470,6 +470,46 @@ func TestFileProviderNoteHasNoActivation(t *testing.T) {
 	}
 }
 
+func TestFileProviderProvenanceRoundTrips(t *testing.T) {
+	p, dir := newProvider(t)
+	in := api.MemoryWriteParams{
+		WorkspaceID: "ws1",
+		ID:          "kiro-standards",
+		Kind:        api.MemoryKindSteering,
+		Title:       "Standards",
+		Text:        "always on",
+		Provenance:  &api.MemoryProvenance{Source: "kiro", Origin: ".kiro/steering/standards.md", Hash: "abc123"},
+	}
+	if _, err := p.Write(context.Background(), in); err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+	// The file carries a nested provenance block.
+	data, _ := os.ReadFile(filepath.Join(dir, "kiro-standards.md"))
+	if !strings.Contains(string(data), "provenance:") || !strings.Contains(string(data), "source: kiro") {
+		t.Errorf("file missing provenance frontmatter:\n%s", data)
+	}
+	// And it reads back into the entry.
+	e, err := p.Get(context.Background(), "kiro-standards")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if e.Provenance == nil || e.Provenance.Source != "kiro" ||
+		e.Provenance.Origin != ".kiro/steering/standards.md" || e.Provenance.Hash != "abc123" {
+		t.Errorf("read-back provenance = %+v", e.Provenance)
+	}
+}
+
+func TestFileProviderNoProvenanceByDefault(t *testing.T) {
+	p, _ := newProvider(t)
+	if _, err := p.Write(context.Background(), api.MemoryWriteParams{WorkspaceID: "ws1", ID: "n", Text: "x"}); err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+	e, _ := p.Get(context.Background(), "n")
+	if e.Provenance != nil {
+		t.Errorf("unexpected provenance %+v", e.Provenance)
+	}
+}
+
 func TestSlugify(t *testing.T) {
 	cases := map[string]string{
 		"Deploy the API!":  "deploy-the-api",

@@ -1,6 +1,26 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$defs": {
+    "MemoryProvenance": {
+      "properties": {
+        "source": {
+          "type": "string"
+        },
+        "origin": {
+          "type": "string"
+        },
+        "hash": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "source",
+        "origin",
+        "hash"
+      ]
+    },
     "TaskRef": {
       "properties": {
         "provider": {
@@ -55,6 +75,9 @@
     },
     "text": {
       "type": "string"
+    },
+    "provenance": {
+      "$ref": "#/$defs/MemoryProvenance"
     }
   },
   "additionalProperties": false,

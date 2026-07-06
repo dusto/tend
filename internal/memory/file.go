@@ -180,6 +180,7 @@ func (p *FileProvider) Write(_ context.Context, in api.MemoryWriteParams) (api.M
 		Task:        p.taskRef(taskString(in.Task)),
 		Text:        strings.TrimSpace(in.Text),
 		CreatedAt:   time.Now().UTC(),
+		Provenance:  in.Provenance,
 	}
 	if err := writeFileAtomic(filepath.Join(p.dir, string(id)+".md"), renderMemory(e)); err != nil {
 		return api.MemoryEntry{}, err
@@ -250,6 +251,9 @@ func renderMemory(e api.MemoryEntry) []byte {
 		out.Apply = e.Apply
 		out.Globs = e.Globs
 	}
+	if pv := e.Provenance; pv != nil {
+		out.Provenance = &provenanceYAML{Source: pv.Source, Origin: pv.Origin, Hash: pv.Hash}
+	}
 	// yaml.Marshal never fails for this flat struct; ignore its error.
 	meta, _ := yaml.Marshal(out)
 
@@ -268,14 +272,15 @@ func renderMemory(e api.MemoryEntry) []byte {
 // frontmatterOut is the write-side view of frontmatter: it omits empty fields so
 // authored files stay clean (mirrors the read-side frontmatter struct).
 type frontmatterOut struct {
-	ID      string   `yaml:"id"`
-	Kind    string   `yaml:"kind,omitempty"`
-	Apply   string   `yaml:"apply,omitempty"`
-	Globs   []string `yaml:"globs,omitempty"`
-	Title   string   `yaml:"title,omitempty"`
-	Tags    []string `yaml:"tags,omitempty"`
-	Task    string   `yaml:"task,omitempty"`
-	Created string   `yaml:"created"`
+	ID         string          `yaml:"id"`
+	Kind       string          `yaml:"kind,omitempty"`
+	Apply      string          `yaml:"apply,omitempty"`
+	Globs      []string        `yaml:"globs,omitempty"`
+	Title      string          `yaml:"title,omitempty"`
+	Tags       []string        `yaml:"tags,omitempty"`
+	Task       string          `yaml:"task,omitempty"`
+	Created    string          `yaml:"created"`
+	Provenance *provenanceYAML `yaml:"provenance,omitempty"`
 }
 
 // taskString renders a TaskRef back to its frontmatter "provider:id" form (or
@@ -487,8 +492,17 @@ func (p *FileProvider) parseFile(path string) (api.MemoryEntry, error) {
 		Task:        p.taskRef(meta.Task),
 		Text:        strings.TrimSpace(string(body)),
 		CreatedAt:   meta.created(fileModTime(path)),
+		Provenance:  meta.Provenance.entry(),
 	}
 	return e, nil
+}
+
+// entry converts frontmatter provenance to the api form, or nil when absent.
+func (p *provenanceYAML) entry() *api.MemoryProvenance {
+	if p == nil {
+		return nil
+	}
+	return &api.MemoryProvenance{Source: p.Source, Origin: p.Origin, Hash: p.Hash}
 }
 
 // normalizeSteering resolves the activation mode for an entry. Activation is
@@ -540,14 +554,22 @@ func (p *FileProvider) taskRef(s string) *api.TaskRef {
 // frontmatter is the recognized YAML metadata of a memory file. Unknown keys are
 // ignored, so files can carry extra fields.
 type frontmatter struct {
-	ID      string   `yaml:"id"`
-	Kind    string   `yaml:"kind"`
-	Apply   string   `yaml:"apply"`
-	Globs   []string `yaml:"globs"`
-	Title   string   `yaml:"title"`
-	Tags    []string `yaml:"tags"`
-	Task    string   `yaml:"task"`
-	Created string   `yaml:"created"`
+	ID         string          `yaml:"id"`
+	Kind       string          `yaml:"kind"`
+	Apply      string          `yaml:"apply"`
+	Globs      []string        `yaml:"globs"`
+	Title      string          `yaml:"title"`
+	Tags       []string        `yaml:"tags"`
+	Task       string          `yaml:"task"`
+	Created    string          `yaml:"created"`
+	Provenance *provenanceYAML `yaml:"provenance"`
+}
+
+// provenanceYAML is the frontmatter form of api.MemoryProvenance.
+type provenanceYAML struct {
+	Source string `yaml:"source"`
+	Origin string `yaml:"origin"`
+	Hash   string `yaml:"hash"`
 }
 
 // created parses the frontmatter timestamp (RFC3339 or a plain date), falling
