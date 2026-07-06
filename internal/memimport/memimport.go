@@ -1,6 +1,6 @@
 // Package memimport is a one-shot importer that maps external agent
-// memory/instruction files (Kiro steering, AGENTS.md, ...) into TEND memory
-// entries. Each imported entry carries provenance (source, origin path, content
+// memory/instruction files (Kiro steering, Cursor rules, Claude CLAUDE.md +
+// .claude memory, Copilot instructions, AGENTS.md) into TEND memory entries. Each imported entry carries provenance (source, origin path, content
 // hash), so a re-import updates the entry in place without duplicating it or
 // clobbering a human's later edits. The adapters are pure file parsers; the
 // engine talks to memory through a small Store interface, so it is unit-testable
@@ -21,7 +21,9 @@ import (
 
 // registry lists every available adapter in a stable order. New adapters are
 // added here.
-func registry() []Adapter { return []Adapter{Agents{}, Kiro{}} }
+func registry() []Adapter {
+	return []Adapter{Agents{}, Claude{}, Copilot{}, Cursor{}, Kiro{}}
+}
 
 // Sources returns the names of every available adapter, for help/validation.
 func Sources() []string {
