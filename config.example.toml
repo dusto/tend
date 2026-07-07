@@ -91,3 +91,31 @@ enabled = false
 # [[memory.rules]]
 # under = ["/home/you/work/tend-workspace"]   # all these repos share one memory store
 # use   = "central"
+
+# The [summarize] section configures TEND's pluggable summarizer: how it condenses
+# the context it owns (memory/steering it injects, a session transcript, a resume
+# seed) to a budget. With no config the deterministic fallback (truncation) is
+# used, so summarization always works.
+#
+#   backend      = none | local | acp   (default none)
+#   target_chars = default output budget in characters (default 2000)
+#
+# backend "local" runs a local command as the model: the prompt is written to its
+# stdin and its stdout is the summary (wrap an Ollama/llm-style CLI).
+#
+# backend "acp" summarizes on a DEDICATED session of a configured provider — a
+# separate session from the working one, so summarization never pollutes it. The
+# provider must be an enabled [[acp.providers]] id.
+
+# [summarize]
+# backend = "local"
+# target_chars = 2000
+# [summarize.local]
+# command = "ollama"
+# args    = ["run", "llama3.2"]
+
+# [summarize]
+# backend = "acp"
+# [summarize.acp]
+# provider = "claude"          # an enabled [[acp.providers]] id
+# model    = ""                # optional: pin a model on the summarizer session

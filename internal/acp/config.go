@@ -10,6 +10,7 @@ import (
 	"github.com/BurntSushi/toml"
 
 	"github.com/dusto/tend/internal/memory"
+	"github.com/dusto/tend/internal/summarize"
 	"github.com/dusto/tend/internal/tasks"
 )
 
@@ -26,9 +27,10 @@ const (
 // Config is the parsed TEND configuration file. It aggregates the daemon's
 // configurable sections: the ACP providers and the task sources.
 type Config struct {
-	ACP    Settings             `toml:"acp"`
-	Tasks  tasks.SourcesConfig  `toml:"tasks"`
-	Memory memory.SourcesConfig `toml:"memory"`
+	ACP       Settings             `toml:"acp"`
+	Tasks     tasks.SourcesConfig  `toml:"tasks"`
+	Memory    memory.SourcesConfig `toml:"memory"`
+	Summarize summarize.Config     `toml:"summarize"`
 }
 
 // Settings holds the ACP provider definitions.
@@ -134,7 +136,25 @@ func (c *Config) validate() error {
 	if err := c.Tasks.Validate(); err != nil {
 		return err
 	}
-	return c.Memory.Validate()
+	if err := c.Memory.Validate(); err != nil {
+		return err
+	}
+	if err := c.Summarize.Validate(); err != nil {
+		return err
+	}
+	// Cross-check the summarizer's ACP backend against the provider list here,
+	// where it is visible (the summarize package cannot see it): the named
+	// provider must exist and be enabled, since a disabled provider cannot spawn.
+	if c.Summarize.Backend == summarize.BackendACP {
+		prov, ok := c.Provider(c.Summarize.ACP.Provider)
+		if !ok {
+			return fmt.Errorf("config: summarize.acp.provider %q is not a configured provider", c.Summarize.ACP.Provider)
+		}
+		if !prov.Enabled {
+			return fmt.Errorf("config: summarize.acp.provider %q is disabled", c.Summarize.ACP.Provider)
+		}
+	}
+	return nil
 }
 
 // EnabledProviders returns the providers with enabled = true, in definition
