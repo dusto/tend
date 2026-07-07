@@ -7,6 +7,8 @@ import (
 	"testing"
 
 	"github.com/BurntSushi/toml"
+
+	"github.com/dusto/tend/internal/summarize"
 )
 
 // planExamples is a three-provider config covering Codex, Claude, and Kiro.
@@ -159,6 +161,74 @@ repos = ["/w/tend"]
 use = "ghost"`))
 	if err == nil {
 		t.Fatal("expected error for a rule referencing an undefined source")
+	}
+}
+
+func TestParseSummarizeSection(t *testing.T) {
+	cfg, err := Parse([]byte(`[[acp.providers]]
+id = "claude"
+command = "claude-agent-acp"
+enabled = true
+
+[summarize]
+backend = "acp"
+target_chars = 1500
+
+[summarize.acp]
+provider = "claude"
+model = "opus"`))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if cfg.Summarize.Backend != summarize.BackendACP || cfg.Summarize.TargetChars != 1500 {
+		t.Fatalf("parsed summarize = %+v", cfg.Summarize)
+	}
+	if cfg.Summarize.ACP.Provider != "claude" || cfg.Summarize.ACP.Model != "opus" {
+		t.Fatalf("parsed summarize.acp = %+v", cfg.Summarize.ACP)
+	}
+}
+
+func TestSummarizeDefaultsToNone(t *testing.T) {
+	// With no [summarize] section the backend defaults to none, so the fallback
+	// summarizer is always available.
+	cfg, err := Parse([]byte(`[[acp.providers]]
+id = "x"
+command = "x-cli"`))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if cfg.Summarize.Backend != summarize.BackendNone {
+		t.Errorf("default backend = %q, want none", cfg.Summarize.Backend)
+	}
+}
+
+func TestSummarizeACPProviderCrossCheck(t *testing.T) {
+	// The acp summarizer backend must name an enabled, configured provider — a
+	// cross-check the summarize package cannot do on its own.
+	cases := map[string]string{
+		"unknown provider": `[[acp.providers]]
+id = "claude"
+command = "claude-agent-acp"
+enabled = true
+[summarize]
+backend = "acp"
+[summarize.acp]
+provider = "ghost"`,
+		"disabled provider": `[[acp.providers]]
+id = "codex"
+command = "codex-acp"
+enabled = false
+[summarize]
+backend = "acp"
+[summarize.acp]
+provider = "codex"`,
+	}
+	for name, src := range cases {
+		t.Run(name, func(t *testing.T) {
+			if _, err := Parse([]byte(src)); err == nil {
+				t.Errorf("expected error for %s", name)
+			}
+		})
 	}
 }
 
