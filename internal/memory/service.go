@@ -4,11 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"sync"
 
 	"github.com/dusto/tend/api"
 	"github.com/dusto/tend/internal/dispatch"
 	"github.com/dusto/tend/internal/rpc"
+	"github.com/dusto/tend/internal/summarize"
 )
 
 // Method names, matching the api contract.
@@ -17,7 +19,12 @@ const (
 	MethodGet      = "memory.get"
 	MethodWrite    = "memory.write"
 	MethodSteering = "memory.steering"
+	MethodContext  = "memory.context"
 )
+
+// defaultContextNotes caps how many query-matched notes memory.context includes
+// when the caller sets no limit.
+const defaultContextNotes = 5
 
 // Emitter publishes events on the workspace event stream. *events.Store
 // satisfies it. A nil Emitter disables emission (memory still works).
@@ -31,15 +38,21 @@ type Emitter interface {
 type Service struct {
 	factory Factory
 	emit    Emitter
+	sum     summarize.Summarizer
 
 	mu        sync.Mutex
 	providers map[api.WorkspaceID]Provider
 }
 
-// NewService returns a Service that builds providers with factory and emits
-// memory events through emit (nil disables emission).
-func NewService(factory Factory, emit Emitter) *Service {
-	return &Service{factory: factory, emit: emit, providers: make(map[api.WorkspaceID]Provider)}
+// NewService returns a Service that builds providers with factory, emits memory
+// events through emit (nil disables emission), and condenses assembled context
+// with sum. A nil sum uses the deterministic fallback, so memory.context always
+// works.
+func NewService(factory Factory, emit Emitter, sum summarize.Summarizer) *Service {
+	if sum == nil {
+		sum = summarize.Fallback{}
+	}
+	return &Service{factory: factory, emit: emit, sum: sum, providers: make(map[api.WorkspaceID]Provider)}
 }
 
 // Register installs the memory.* methods on m, backed by s.
@@ -53,7 +66,10 @@ func Register(m *dispatch.Mux, s *Service) error {
 	if err := dispatch.Handle(m, MethodWrite, s.write); err != nil {
 		return err
 	}
-	return dispatch.Handle(m, MethodSteering, s.steering)
+	if err := dispatch.Handle(m, MethodSteering, s.steering); err != nil {
+		return err
+	}
+	return dispatch.Handle(m, MethodContext, s.memContext)
 }
 
 func (s *Service) provider(ws api.WorkspaceID) Provider {
@@ -137,6 +153,91 @@ func (s *Service) steering(ctx context.Context, p api.MemorySteeringParams) (api
 		return api.MemorySteeringResult{}, internalErr(err)
 	}
 	return api.MemorySteeringResult{Entries: entries}, nil
+}
+
+// memContext assembles the steering that applies to the context (plus optional
+// query-matched notes) and condenses it to a character budget via the
+// summarizer, returning a bounded digest to inject. Assembly order is steering
+// first, then notes; a within-budget assembly is returned verbatim.
+func (s *Service) memContext(ctx context.Context, p api.MemoryContextParams) (api.MemoryContextResult, error) {
+	if p.WorkspaceID == "" {
+		return api.MemoryContextResult{}, invalidParams("workspace_id is required")
+	}
+	prov := s.provider(p.WorkspaceID)
+
+	entries, err := prov.Steering(ctx, p.Path)
+	if err != nil {
+		return api.MemoryContextResult{}, internalErr(err)
+	}
+
+	// Optional query-matched notes. A note that fails to fetch (e.g. removed
+	// between search and get) is skipped rather than failing the whole assembly.
+	var notes []api.MemoryEntry
+	if p.Query != "" {
+		limit := p.Limit
+		if limit <= 0 {
+			limit = defaultContextNotes
+		}
+		hits, err := prov.Search(ctx, p.Query, api.MemoryKindNote, limit)
+		if err != nil {
+			return api.MemoryContextResult{}, internalErr(err)
+		}
+		for _, h := range hits {
+			e, err := prov.Get(ctx, h.ID)
+			if err != nil {
+				continue
+			}
+			notes = append(notes, e)
+		}
+	}
+
+	text, included := assembleContext(entries, notes)
+	if text == "" {
+		return api.MemoryContextResult{Included: []api.MemoryID{}}, nil
+	}
+
+	res, err := s.sum.Summarize(ctx, summarize.Request{
+		Purpose:     summarize.PurposeMemory,
+		Text:        text,
+		TargetChars: p.Budget,
+	})
+	if err != nil {
+		return api.MemoryContextResult{}, internalErr(err)
+	}
+	return api.MemoryContextResult{Text: res.Text, Included: included, Summarized: res.Summarized}, nil
+}
+
+// assembleContext renders steering and notes into one labeled markdown blob for
+// the summarizer, and returns the ids that fed it in order. Steering leads
+// (standing rules), then notes.
+func assembleContext(steering, notes []api.MemoryEntry) (string, []api.MemoryID) {
+	var b strings.Builder
+	included := make([]api.MemoryID, 0, len(steering)+len(notes))
+	section := func(label string, entries []api.MemoryEntry) {
+		for _, e := range entries {
+			if b.Len() > 0 {
+				b.WriteString("\n\n")
+			}
+			b.WriteString("# ")
+			b.WriteString(label)
+			b.WriteString(": ")
+			b.WriteString(entryTitle(e))
+			b.WriteString("\n")
+			b.WriteString(e.Text)
+			included = append(included, e.ID)
+		}
+	}
+	section("Steering", steering)
+	section("Note", notes)
+	return b.String(), included
+}
+
+// entryTitle is an entry's display heading: its title, falling back to its id.
+func entryTitle(e api.MemoryEntry) string {
+	if e.Title != "" {
+		return e.Title
+	}
+	return string(e.ID)
 }
 
 // publish emits one workspace event, marshaling payload. Emission is best-effort:

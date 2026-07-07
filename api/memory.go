@@ -161,3 +161,40 @@ type MemorySteeringParams struct {
 type MemorySteeringResult struct {
 	Entries []MemoryEntry `json:"entries"`
 }
+
+// MemoryContextParams assembles the memory context that applies to a task/session
+// and condenses it to a character budget, so a caller injects a bounded digest
+// rather than every full entry. It combines the activated steering (always, plus
+// glob-matched to Path — the memory.steering semantics) with, optionally, the
+// notes matching Query, then reduces the whole to Budget via the daemon's
+// configured summarizer. TEND owns this context, so it reduces what it injects
+// rather than dumping everything every turn.
+type MemoryContextParams struct {
+	WorkspaceID WorkspaceID `json:"workspace_id"`
+	// Path is an optional worktree-relative file path for steering glob activation
+	// (same semantics as memory.steering). Empty includes only always-steering.
+	Path string `json:"path,omitempty"`
+	// Query, when set, also includes the notes matching it (via memory.search),
+	// so task-relevant notes join the steering in the assembled context.
+	Query string `json:"query,omitempty"`
+	// Limit caps how many matching notes are included; 0 uses a sensible default.
+	// Ignored when Query is empty.
+	Limit int `json:"limit,omitempty"`
+	// Budget is the target character budget for the assembled context; 0 uses the
+	// summarizer's configured default. Content within budget is returned verbatim;
+	// only an over-budget assembly is condensed.
+	Budget int `json:"budget,omitempty"`
+}
+
+// MemoryContextResult is the assembled, budget-bounded context to inject.
+type MemoryContextResult struct {
+	// Text is the assembled context, condensed to the budget when it was too large.
+	Text string `json:"text"`
+	// Included are the ids of the entries that fed the context, in assembly order
+	// (steering first, then notes), for observability — even when Text was then
+	// summarized into a single digest.
+	Included []MemoryID `json:"included,omitempty"`
+	// Summarized reports whether the assembly was condensed by the summarizer
+	// (false when it already fit the budget and is returned verbatim).
+	Summarized bool `json:"summarized"`
+}

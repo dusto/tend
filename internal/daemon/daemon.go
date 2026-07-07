@@ -32,6 +32,7 @@ import (
 	"github.com/dusto/tend/internal/session"
 	"github.com/dusto/tend/internal/sessions"
 	"github.com/dusto/tend/internal/slash"
+	"github.com/dusto/tend/internal/summarize"
 	"github.com/dusto/tend/internal/tasks"
 	"github.com/dusto/tend/internal/workspace"
 )
@@ -165,7 +166,8 @@ func New(ln net.Listener, logPath string, opts ...Option) (*Server, error) {
 	s.tasks = tasks.NewService(o.taskFactory, s.store)
 	// Memory tools: the default backend reads a workspace's in-tree markdown
 	// memory directory; a config-driven factory can replace it, like task sources.
-	s.memory = memory.NewService(o.memoryFactory, s.store)
+	// The summarizer condenses assembled context (memory.context) to a budget.
+	s.memory = memory.NewService(o.memoryFactory, s.store, buildSummarizer(o.acp))
 	s.ptyMgr = pty.NewManager()
 	s.panes = pty.NewService(s.ptyMgr, s.sessions, s.gate, s.store, "")
 
@@ -227,6 +229,23 @@ func (s *Server) setSessionResource(id api.SessionID, u *api.SessionResourceUsag
 // spawnProvider returns the pool's SpawnFunc: it launches the configured provider
 // for a key and runs the ACP initialize handshake, installing h as the inbound
 // handler so the agent's session/update notifications are normalized to events.
+// buildSummarizer constructs the memory-context summarizer from config. The ACP
+// completer is not yet wired (tend-w1h.12), so an acp backend degrades to the
+// deterministic fallback with a warning rather than failing startup; none/local
+// build normally. A nil config (zero-config runs, tests) uses the fallback.
+func buildSummarizer(cfg *acp.Config) summarize.Summarizer {
+	if cfg == nil {
+		return summarize.Fallback{}
+	}
+	sum, err := summarize.New(cfg.Summarize, nil)
+	if err != nil {
+		slog.Warn("tendd: summarizer backend unavailable; using fallback",
+			"backend", cfg.Summarize.Backend, "err", err)
+		return summarize.Fallback{TargetChars: cfg.Summarize.TargetChars}
+	}
+	return sum
+}
+
 func spawnProvider(cfg *acp.Config, h rpc.Handler) acp.SpawnFunc {
 	return func(ctx context.Context, key acp.Key) (acp.Process, error) {
 		prov, ok := cfg.Provider(string(key.Provider))

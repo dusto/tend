@@ -52,6 +52,8 @@ Schemas live under `schemas/` (`methods/<name>.params.json` / `.result.json`, `e
   - Params: `MemoryWriteParams` · Result: `MemoryWriteResult`
 - **`memory.steering`** — Resolve the steering memories that apply to a context (always, or glob-matched to an optional worktree-relative path); returns full entries to inject into agent context.
   - Params: `MemorySteeringParams` · Result: `MemorySteeringResult`
+- **`memory.context`** — Assemble the applicable steering (plus optional query-matched notes) and condense it to a character budget via the configured summarizer; returns a bounded context digest to inject.
+  - Params: `MemoryContextParams` · Result: `MemoryContextResult`
 - **`slash.list`** — List a session's merged slash-command set: the agent's advertised commands plus the daemon/harness commands.
   - Params: `SlashListParams` · Result: `SlashListResult`
 - **`slash.complete`** — Complete a daemon command's argument against live state (e.g. task ids); provider/unknown commands yield no candidates.

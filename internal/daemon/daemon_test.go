@@ -6,6 +6,7 @@ import (
 	"net"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -414,5 +415,54 @@ func TestClientRegisterAndDisconnect(t *testing.T) {
 			t.Fatal("client identity not removed after disconnect")
 		}
 		time.Sleep(time.Millisecond)
+	}
+}
+
+// TestMemoryContextEndToEnd drives the new memory.context method over a real
+// socket: it writes an always-steering entry, then asks for the assembled,
+// budget-bounded context and checks the steering body comes back. This exercises
+// dispatch registration, schema validation, and the 0.23.0 handshake version.
+func TestMemoryContextEndToEnd(t *testing.T) {
+	srv, path := newServer(t)
+	go func() { _ = srv.Serve() }()
+	t.Cleanup(srv.Shutdown)
+
+	repo := initRepo(t)
+	client := dial(t, path)
+	if _, err := handshake.Do(testCtx(t), client, api.CurrentVersions()); err != nil {
+		t.Fatalf("handshake: %v", err)
+	}
+
+	var opened api.WorkspaceInfo
+	if err := client.Call(testCtx(t), "workspace.open", api.WorkspaceOpenParams{Dir: repo}, &opened); err != nil {
+		t.Fatalf("workspace.open: %v", err)
+	}
+
+	var written api.MemoryWriteResult
+	if err := client.Call(testCtx(t), "memory.write", api.MemoryWriteParams{
+		WorkspaceID: opened.WorkspaceID,
+		ID:          "house-style",
+		Kind:        api.MemoryKindSteering,
+		Apply:       api.MemoryApplyAlways,
+		Title:       "House style",
+		Text:        "Prefer table-driven tests.",
+	}, &written); err != nil {
+		t.Fatalf("memory.write: %v", err)
+	}
+
+	var ctxRes api.MemoryContextResult
+	if err := client.Call(testCtx(t), "memory.context", api.MemoryContextParams{
+		WorkspaceID: opened.WorkspaceID,
+	}, &ctxRes); err != nil {
+		t.Fatalf("memory.context: %v", err)
+	}
+	if ctxRes.Summarized {
+		t.Error("small assembly should not be summarized")
+	}
+	if len(ctxRes.Included) != 1 || ctxRes.Included[0] != "house-style" {
+		t.Errorf("included = %v, want [house-style]", ctxRes.Included)
+	}
+	if !strings.Contains(ctxRes.Text, "Prefer table-driven tests.") {
+		t.Errorf("context text missing steering body:\n%s", ctxRes.Text)
 	}
 }
