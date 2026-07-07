@@ -28,7 +28,9 @@ func (f Fallback) Summarize(_ context.Context, req Request) (Result, error) {
 	if len([]rune(req.Text)) <= budget {
 		return Result{Text: req.Text, Summarized: false}, nil
 	}
-	return Result{Text: truncateToBudget(req.Text, budget), Summarized: false}, nil
+	// Truncation is a reduction: the caller did not receive the full content, so
+	// report Summarized=true (see Result.Summarized).
+	return Result{Text: truncateToBudget(req.Text, budget), Summarized: true}, nil
 }
 
 // truncateToBudget cuts text to at most budget runes, preferring the last line

@@ -348,6 +348,26 @@ func TestContextCondensesOverBudgetViaSummarizer(t *testing.T) {
 	}
 }
 
+func TestContextFallbackTruncationReportsSummarized(t *testing.T) {
+	// The default install has no configured backend, so over-budget context is
+	// truncated by the fallback. That is a reduction, so Summarized must be true —
+	// a caller must be able to tell a digest from the full context.
+	p := &fakeProvider{steering: []api.MemoryEntry{
+		{ID: "s1", Text: strings.Repeat("rule ", 300), Kind: api.MemoryKindSteering},
+	}}
+	svc := newService(p) // nil summarizer -> deterministic fallback
+	res, err := svc.memContext(context.Background(), api.MemoryContextParams{WorkspaceID: "ws", Budget: 100})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.Summarized {
+		t.Error("fallback-truncated context must report Summarized=true, not false")
+	}
+	if n := len([]rune(res.Text)); n > 100 {
+		t.Errorf("truncated text is %d runes, over budget 100", n)
+	}
+}
+
 func TestContextEmptyWhenNothingApplies(t *testing.T) {
 	svc := newService(&fakeProvider{})
 	res, err := svc.memContext(context.Background(), api.MemoryContextParams{WorkspaceID: "ws"})

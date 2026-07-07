@@ -42,9 +42,10 @@ type Request struct {
 type Result struct {
 	// Text is the condensed content.
 	Text string
-	// Summarized reports whether the content was actually run through the backend.
-	// It is false when the input already fit the budget (returned unchanged) or
-	// the deterministic fallback merely truncated it.
+	// Summarized reports whether the content was reduced — condensed by a backend
+	// or truncated by the fallback — rather than returned in full. It is false
+	// only when the input already fit the budget and is returned verbatim, so a
+	// caller can distinguish full context from a reduced digest.
 	Summarized bool
 }
 

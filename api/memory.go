@@ -194,7 +194,9 @@ type MemoryContextResult struct {
 	// (steering first, then notes), for observability — even when Text was then
 	// summarized into a single digest.
 	Included []MemoryID `json:"included,omitempty"`
-	// Summarized reports whether the assembly was condensed by the summarizer
-	// (false when it already fit the budget and is returned verbatim).
+	// Summarized reports whether the assembly was reduced to fit the budget —
+	// condensed by a model backend or truncated by the default fallback — so a
+	// caller knows Text is a digest, not the full context. It is false only when
+	// the assembly already fit the budget and is returned verbatim.
 	Summarized bool `json:"summarized"`
 }
