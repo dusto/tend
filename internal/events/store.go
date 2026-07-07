@@ -73,6 +73,25 @@ func (s *Store) HighWater(streamID api.StreamID) uint64 {
 	return s.log.HighWater(streamID)
 }
 
+// CompactableRange returns the widest range [from, to] of streamID that may be
+// compacted right now: it begins after the already-compacted prefix and ends at
+// the retention boundary, so the most-recent retention records stay uncompacted
+// for exact replay. ok is false when nothing beyond retention remains (or the
+// prefix already covers it). A caller decides whether to compact; this only
+// bounds the safe range.
+func (s *Store) CompactableRange(streamID api.StreamID) (from, to uint64, ok bool) {
+	tail := s.log.HighWater(streamID)
+	if tail <= s.retention {
+		return 0, 0, false
+	}
+	to = tail - s.retention
+	from = s.log.LastSummaryEnd(streamID) + 1
+	if from > to {
+		return 0, 0, false
+	}
+	return from, to, true
+}
+
 // Subscribe registers a subscriber for streamID and returns a Sub whose Wake
 // channel fires (coalescing) whenever the stream gains records. Close to
 // unsubscribe. A subscriber reads the log itself; the Store holds no per-stream

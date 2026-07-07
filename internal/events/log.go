@@ -186,6 +186,25 @@ func (l *Log) HighWater(streamID api.StreamID) uint64 {
 	return 0
 }
 
+// LastSummaryEnd returns the highest to_seq of any summary on streamID, or 0
+// when the stream has no summaries. It marks the end of the already-compacted
+// prefix, so the next compactable range begins at LastSummaryEnd+1.
+func (l *Log) LastSummaryEnd(streamID api.StreamID) uint64 {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	si := l.index[streamID]
+	if si == nil {
+		return 0
+	}
+	var end uint64
+	for _, sum := range si.summary {
+		if sum.Summary.ToSeq > end {
+			end = sum.Summary.ToSeq
+		}
+	}
+	return end
+}
+
 // Read returns up to limit records to deliver for streamID after the cursor
 // after, in seq order, honoring compaction: a summary is served at its from_seq
 // in place of the raw records it subsumes. compactedFrom is non-zero when after

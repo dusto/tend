@@ -58,6 +58,17 @@ type SummaryInfo struct {
 	ToSeq   uint64 `json:"to_seq"`
 }
 
+// ContextSummary is the payload of a summary record (Type "summary",
+// Kind KindSummary): the condensed text standing in for the raw turns in the
+// subsumed range. The range itself is on the envelope (Event.Summary); this
+// carries the session and the summary text a client renders in place of the
+// collapsed turns.
+type ContextSummary struct {
+	SessionID SessionID `json:"session_id"`
+	// Text is the condensed summary of the compacted turns.
+	Text string `json:"text"`
+}
+
 // EventDef declares a TEND event type for the generated contract. Payload holds
 // a zero value of the payload struct (nil for payloadless events).
 type EventDef struct {
@@ -95,6 +106,7 @@ var EventDefs = []EventDef{
 	{Type: "pane_exited", Scope: ScopePane, Payload: PaneExited{}, Summary: "A pane's process exited."},
 	{Type: "memory_written", Scope: ScopeWorkspace, Payload: MemoryWritten{}, Summary: "A memory entry was created or updated (memory.write). Repo-wide: delivered on the workspace stream."},
 	{Type: "memory_searched", Scope: ScopeWorkspace, Payload: MemorySearched{}, Summary: "A workspace's memories were searched (memory.search), so a supervisor can see what an agent recalled. Repo-wide: delivered on the workspace stream."},
+	{Type: "summary", Scope: ScopeSession, Payload: ContextSummary{}, Summary: "A compaction record standing in for a range [from_seq,to_seq] of raw session turns: the condensed text a client renders in place of the collapsed turns. It is a kind=summary record (Event.summary carries the range), served on replay as a range replacement rather than appended live."},
 }
 
 // --- Event payloads (initial set) ---

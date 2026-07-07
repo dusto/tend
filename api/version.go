@@ -32,8 +32,9 @@ const (
 	// 0.6.0 added the slash_commands_updated session event; 0.7.0 added the
 	// agent_thought_level_updated session event; 0.8.0 added the
 	// agent_prompt_usage session event; 0.9.0 added the memory_written and
-	// memory_searched workspace events.
-	DaemonToClientVersion = "0.9.0"
+	// memory_searched workspace events; 0.10.0 added the summary session event
+	// (context compaction: a condensed record replacing a range of raw turns).
+	DaemonToClientVersion = "0.10.0"
 )
 
 // Versions reports the contract version of each method set.
