@@ -41,23 +41,25 @@ func measurePromptUsage(id api.SessionID, p api.AgentPromptParams) api.AgentProm
 }
 
 // userPrompt composes the user's prompt content for a turn into a UserPrompt
-// event payload: the text (the plain Text, or the concatenated text blocks, to
-// mirror promptBlocks) plus a count of non-text attachment blocks, whose content
-// is not persisted. It parallels measurePromptUsage's block handling.
+// event payload: the text (the plain Text, or the text blocks joined on newlines
+// to mirror promptBlocks) plus a count of non-text attachment blocks, whose
+// content is not persisted. Text blocks are separate ACP blocks, so they are
+// joined with a newline rather than concatenated — otherwise adjacent blocks
+// ("fix"+"parser") would fuse into "fixparser" in the persisted replay input.
 func userPrompt(id api.SessionID, p api.AgentPromptParams) api.UserPrompt {
 	if len(p.Content) == 0 {
 		return api.UserPrompt{SessionID: id, Text: p.Text}
 	}
 	up := api.UserPrompt{SessionID: id}
-	var text strings.Builder
+	var texts []string
 	for _, c := range p.Content {
 		if c.Type == api.PromptContentText {
-			text.WriteString(c.Text)
+			texts = append(texts, c.Text)
 			continue
 		}
 		up.Attachments++
 	}
-	up.Text = text.String()
+	up.Text = strings.Join(texts, "\n")
 	return up
 }
 

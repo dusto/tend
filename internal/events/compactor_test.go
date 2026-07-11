@@ -77,6 +77,27 @@ func TestRenderTranscriptIncludesSummaries(t *testing.T) {
 	}
 }
 
+func TestRenderTranscriptUserPromptAttachments(t *testing.T) {
+	sid := api.SessionID("s")
+	cases := []struct {
+		name string
+		up   api.UserPrompt
+		want string
+	}{
+		{"attachment-only turn is not dropped", api.UserPrompt{SessionID: sid, Attachments: 2}, "[user] (2 attachments)"},
+		{"single attachment is singular", api.UserPrompt{SessionID: sid, Attachments: 1}, "[user] (1 attachment)"},
+		{"text plus attachments notes the count", api.UserPrompt{SessionID: sid, Text: "look here", Attachments: 1}, "[user] look here (1 attachment)"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			recs := []api.Event{{Kind: api.KindEvent, Seq: 1, Type: "user_prompt", Payload: mustJSON(t, tc.up)}}
+			if got := renderTranscript(recs, 1, 1); got != tc.want {
+				t.Errorf("render = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestRenderTranscriptRawOnlyNotCondensed(t *testing.T) {
 	sid := api.SessionID("s")
 	recs := []api.Event{
