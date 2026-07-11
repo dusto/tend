@@ -620,4 +620,29 @@ func TestPublishTokenUsage(t *testing.T) {
 			t.Errorf("empty usage should emit nothing; got %+v", c.events())
 		}
 	})
+
+	// A provider that reports no token accounting (Kiro through 2.4.1 sends null
+	// token counts) must not surface an all-zeros event.
+	t.Run("null or empty usage means no event", func(t *testing.T) {
+		for _, raw := range []string{"null", "{}", `{"inputTokens":0,"outputTokens":0,"totalTokens":0}`} {
+			c := &capture{}
+			n := NewNormalizer(c, nil)
+			n.PublishTokenUsage("s1", json.RawMessage(raw), nil)
+			if len(c.events()) != 0 {
+				t.Errorf("usage %q should emit nothing; got %+v", raw, c.events())
+			}
+		}
+	})
+
+	// An all-zero top-level usage but a real per-model breakdown still emits (the
+	// provider reported something, just not in the aggregate object).
+	t.Run("model breakdown alone still emits", func(t *testing.T) {
+		c := &capture{}
+		n := NewNormalizer(c, nil)
+		meta := json.RawMessage(`{"quota":{"model_usage":[{"model":"m1","token_count":{"totalTokens":50}}]}}`)
+		n.PublishTokenUsage("s1", json.RawMessage("{}"), meta)
+		if len(c.events()) != 1 {
+			t.Fatalf("model-only usage should emit one event; got %+v", c.events())
+		}
+	})
 }

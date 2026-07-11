@@ -412,15 +412,30 @@ func (t tokenCounts) reasoning() int {
 	return t.ReasoningOutputTokens
 }
 
+// isZero reports whether no token field carries a count. A provider that reports
+// no usage — JSON null, {}, or all-null fields (e.g. Kiro through 2.4.1, which
+// surfaces context percent + credits but null token counts) — decodes to a zero
+// tokenCounts, which must not be surfaced as a real (all-zeros) accounting.
+func (t tokenCounts) isZero() bool {
+	return t == tokenCounts{}
+}
+
 // parseTokenUsage maps a session/prompt result's usage object (and optional _meta
-// per-model breakdown) into an AgentTokenUsage. ok is false when usage is empty,
-// so no event is emitted for a provider that reports none.
+// per-model breakdown) into an AgentTokenUsage. ok is false when the provider
+// reported no usage — an empty, null, or all-zero usage object with no per-model
+// breakdown — so no all-zeros event is emitted.
 func parseTokenUsage(sessionID string, usage, meta json.RawMessage) (api.AgentTokenUsage, bool) {
 	if len(usage) == 0 {
 		return api.AgentTokenUsage{}, false
 	}
 	var u tokenCounts
 	if json.Unmarshal(usage, &u) != nil {
+		return api.AgentTokenUsage{}, false
+	}
+	// usage:null, usage:{}, or all-null token fields decode to a zero tokenCounts.
+	// With no per-model breakdown either, the provider reported nothing to surface.
+	models := parseModelUsage(meta)
+	if u.isZero() && len(models) == 0 {
 		return api.AgentTokenUsage{}, false
 	}
 	return api.AgentTokenUsage{
@@ -431,7 +446,7 @@ func parseTokenUsage(sessionID string, usage, meta json.RawMessage) (api.AgentTo
 		CachedWriteTokens: u.CachedWriteTokens,
 		ReasoningTokens:   u.reasoning(),
 		TotalTokens:       u.TotalTokens,
-		ModelUsage:        parseModelUsage(meta),
+		ModelUsage:        models,
 	}, true
 }
 
