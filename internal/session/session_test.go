@@ -12,6 +12,25 @@ func newSession(t *testing.T) *Session {
 	return r.Create("s1", "codex", "ws1", api.TaskRef{Provider: "beads", ID: "t1"}, "/repo")
 }
 
+func TestContextUsageRoundTrip(t *testing.T) {
+	s := newSession(t)
+	// Until the provider reports a window, fullness is unknown — a caller must not
+	// treat that as an empty context.
+	if _, _, ok := s.ContextUsage(); ok {
+		t.Error("new session should report unknown context usage")
+	}
+	s.SetContextUsage(150000, 200000)
+	used, window, ok := s.ContextUsage()
+	if !ok || used != 150000 || window != 200000 {
+		t.Fatalf("usage = %d/%d ok=%v, want 150000/200000 known", used, window, ok)
+	}
+	// A zero window (e.g. a malformed update) reads back as unknown, not 0/0 full.
+	s.SetContextUsage(10, 0)
+	if _, _, ok := s.ContextUsage(); ok {
+		t.Error("zero window should report unknown")
+	}
+}
+
 func TestResourceUsageRoundTrip(t *testing.T) {
 	s := newSession(t)
 	if s.ResourceUsage() != nil {

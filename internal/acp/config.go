@@ -31,6 +31,37 @@ type Config struct {
 	Tasks     tasks.SourcesConfig  `toml:"tasks"`
 	Memory    memory.SourcesConfig `toml:"memory"`
 	Summarize summarize.Config     `toml:"summarize"`
+	Compact   CompactConfig        `toml:"compact"`
+}
+
+// DefaultCompactThreshold is the context-window fullness fraction at which an
+// enabled compaction trigger fires when none is configured.
+const DefaultCompactThreshold = 0.85
+
+// CompactConfig is the [compact] section: the post-turn agent context-window
+// compaction trigger. When the agent's reported context fills past the
+// threshold, the daemon forwards the provider's /compact command (when the
+// provider advertises one) or falls back to summarizing the daemon transcript.
+// It is opt-in: spending a turn on /compact and mutating provider-side context
+// is a behavior a user chooses, not a silent default.
+type CompactConfig struct {
+	// Enabled turns on the post-turn compaction trigger.
+	Enabled bool `toml:"enabled"`
+	// Threshold is the context-window fullness fraction (0,1] at which a turn's
+	// completion triggers compaction; 0 uses DefaultCompactThreshold.
+	Threshold float64 `toml:"threshold"`
+	// Budget is the character budget for the daemon-side summarizer fallback; 0
+	// uses the summarizer's configured default.
+	Budget int `toml:"budget"`
+}
+
+// EffectiveThreshold returns the configured fullness threshold, or the default
+// when unset.
+func (c CompactConfig) EffectiveThreshold() float64 {
+	if c.Threshold <= 0 {
+		return DefaultCompactThreshold
+	}
+	return c.Threshold
 }
 
 // Settings holds the ACP provider definitions.
@@ -141,6 +172,12 @@ func (c *Config) validate() error {
 	}
 	if err := c.Summarize.Validate(); err != nil {
 		return err
+	}
+	if c.Compact.Threshold < 0 || c.Compact.Threshold > 1 {
+		return fmt.Errorf("config: compact.threshold must be in (0,1] (or 0 for the default)")
+	}
+	if c.Compact.Budget < 0 {
+		return fmt.Errorf("config: compact.budget must be >= 0")
 	}
 	// Cross-check the summarizer's ACP backend against the provider list here,
 	// where it is visible (the summarize package cannot see it): the named

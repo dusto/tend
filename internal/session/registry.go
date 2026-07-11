@@ -82,6 +82,15 @@ func (r *Registry) SetSessionThoughtLevel(id api.SessionID, thoughtLevelID strin
 	}
 }
 
+// SetSessionContextUsage records the agent's latest reported context-window
+// fullness (ACP usage_update) on the session, so the compaction trigger can read
+// it after a turn. Unknown ids are a no-op. This satisfies acp.UsageSink.
+func (r *Registry) SetSessionContextUsage(id api.SessionID, used, window int) {
+	if s, ok := r.Get(id); ok {
+		s.SetContextUsage(used, window)
+	}
+}
+
 // List returns the live sessions in unspecified order.
 func (r *Registry) List() []*Session {
 	r.mu.Lock()

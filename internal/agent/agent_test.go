@@ -789,3 +789,53 @@ func TestSetModeManagerErrorLeavesStateUnchanged(t *testing.T) {
 		t.Errorf("high water = %d, want 0", hw)
 	}
 }
+
+// fakeTrigger records the sessions MaybeCompact was called for.
+type fakeTrigger struct {
+	mu    sync.Mutex
+	calls []api.SessionID
+}
+
+func (f *fakeTrigger) MaybeCompact(_ context.Context, id api.SessionID) {
+	f.mu.Lock()
+	f.calls = append(f.calls, id)
+	f.mu.Unlock()
+}
+
+func (f *fakeTrigger) count() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return len(f.calls)
+}
+
+func TestPromptRunsCompactionTriggerOnSuccess(t *testing.T) {
+	mgr := &fakeManager{openID: "sess-1", promptResult: acp.PromptResult{StopReason: "end_turn"}}
+	svc, _ := newService(t, mgr)
+	trig := &fakeTrigger{}
+	svc.SetCompactionTrigger(trig)
+	startSession(t, svc)
+
+	if _, err := svc.Prompt(context.Background(), api.AgentPromptParams{SessionID: "sess-1", Text: "hi"}); err != nil {
+		t.Fatalf("Prompt: %v", err)
+	}
+	if trig.count() != 1 || trig.calls[0] != "sess-1" {
+		t.Fatalf("trigger calls = %+v, want one for sess-1", trig.calls)
+	}
+}
+
+func TestPromptSkipsCompactionTriggerOnFailure(t *testing.T) {
+	mgr := &fakeManager{openID: "sess-1", promptErr: errors.New("boom")}
+	svc, _ := newService(t, mgr)
+	trig := &fakeTrigger{}
+	svc.SetCompactionTrigger(trig)
+	startSession(t, svc)
+
+	if _, err := svc.Prompt(context.Background(), api.AgentPromptParams{SessionID: "sess-1"}); err == nil {
+		t.Fatal("expected error from failed turn")
+	}
+	// A failed turn ends errored, not idle, so the trigger must not run — its
+	// /compact would need the session idle.
+	if trig.count() != 0 {
+		t.Fatalf("trigger ran %d times on a failed turn, want 0", trig.count())
+	}
+}

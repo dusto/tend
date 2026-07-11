@@ -232,6 +232,71 @@ provider = "codex"`,
 	}
 }
 
+func TestParseCompactSection(t *testing.T) {
+	cfg, err := Parse([]byte(`[[acp.providers]]
+id = "claude"
+command = "claude-agent-acp"
+enabled = true
+
+[compact]
+enabled = true
+threshold = 0.9
+budget = 1200`))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if !cfg.Compact.Enabled || cfg.Compact.Threshold != 0.9 || cfg.Compact.Budget != 1200 {
+		t.Fatalf("parsed compact = %+v", cfg.Compact)
+	}
+	if got := cfg.Compact.EffectiveThreshold(); got != 0.9 {
+		t.Errorf("EffectiveThreshold = %v, want 0.9", got)
+	}
+}
+
+func TestCompactDefaults(t *testing.T) {
+	// With no [compact] section the trigger is off and an unset threshold resolves
+	// to the default when the section is later enabled.
+	cfg, err := Parse([]byte(`[[acp.providers]]
+id = "x"
+command = "x-cli"`))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if cfg.Compact.Enabled {
+		t.Error("compact should be disabled by default")
+	}
+	if got := cfg.Compact.EffectiveThreshold(); got != DefaultCompactThreshold {
+		t.Errorf("EffectiveThreshold = %v, want default %v", got, DefaultCompactThreshold)
+	}
+}
+
+func TestParseCompactValidationErrors(t *testing.T) {
+	cases := map[string]string{
+		"threshold too high": `[[acp.providers]]
+id = "x"
+command = "a"
+[compact]
+threshold = 1.5`,
+		"negative threshold": `[[acp.providers]]
+id = "x"
+command = "a"
+[compact]
+threshold = -0.2`,
+		"negative budget": `[[acp.providers]]
+id = "x"
+command = "a"
+[compact]
+budget = -1`,
+	}
+	for name, src := range cases {
+		t.Run(name, func(t *testing.T) {
+			if _, err := Parse([]byte(src)); err == nil {
+				t.Errorf("expected error for %s", name)
+			}
+		})
+	}
+}
+
 func TestParseValidationErrors(t *testing.T) {
 	cases := map[string]string{
 		"missing id": `[[acp.providers]]

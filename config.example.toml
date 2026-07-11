@@ -119,3 +119,24 @@ enabled = false
 # [summarize.acp]
 # provider = "claude"          # an enabled [[acp.providers]] id
 # model    = ""                # optional: pin a model on the summarizer session
+
+# The [compact] section configures the post-turn agent context-window compaction
+# trigger. When a session's reported context fullness crosses the threshold, TEND
+# shrinks BOTH contexts: it forwards the provider's own command to shrink the
+# agent-side context (/compact when advertised, else /clear; Claude offers both,
+# Codex neither) AND compacts the daemon transcript (via the [summarize] backend)
+# into a summary record. Both run together — shrinking only the agent while TEND
+# still holds the full history would re-inflate the context on the next resume.
+# Compaction is non-destructive: raw records are kept, replay just serves the
+# summary. It is off by default: forwarding a command spends a turn and mutates
+# the provider's context, so it is opt-in. The trigger only fires for providers
+# that report context usage (usage_update); providers that do not are inert.
+#
+#   enabled   = turn the trigger on (default false)
+#   threshold = context-window fullness fraction, (0,1] (default 0.85)
+#   budget    = character budget for the transcript summarizer (0 = summarizer default)
+
+# [compact]
+# enabled   = true
+# threshold = 0.85
+# budget    = 0

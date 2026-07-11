@@ -583,6 +583,41 @@ func TestNormalizeUsageUpdate(t *testing.T) {
 	}
 }
 
+// fakeUsageSink records SetSessionContextUsage calls.
+type fakeUsageSink struct {
+	sessionID    api.SessionID
+	used, window int
+	calls        int
+}
+
+func (f *fakeUsageSink) SetSessionContextUsage(id api.SessionID, used, window int) {
+	f.sessionID, f.used, f.window = id, used, window
+	f.calls++
+}
+
+// TestUsageUpdateWritesBackToSink verifies a usage_update both streams the
+// agent_context_usage event and records the fullness on the session, so the
+// post-turn compaction trigger can read it. Without a sink wired, the event
+// still publishes (the trigger is simply off).
+func TestUsageUpdateWritesBackToSink(t *testing.T) {
+	c := &capture{}
+	sink := &fakeUsageSink{}
+	n := NewNormalizer(c, nil)
+	n.SetUsageSink(sink)
+
+	notify(n, SessionUpdateMethod, update("s1", map[string]any{
+		"sessionUpdate": "usage_update", "used": 20348, "size": 200000,
+	}))
+
+	if sink.calls != 1 || sink.sessionID != "s1" || sink.used != 20348 || sink.window != 200000 {
+		t.Fatalf("sink = %+v, want one write of s1 20348/200000", sink)
+	}
+	// The event still streams alongside the write-back.
+	if ev := c.last(t); ev.Type != "agent_context_usage" {
+		t.Fatalf("event type = %q, want agent_context_usage", ev.Type)
+	}
+}
+
 // TestPublishTokenUsage covers the authoritative per-turn accounting parsed from
 // the session/prompt result, across both providers' field vocabularies.
 func TestPublishTokenUsage(t *testing.T) {

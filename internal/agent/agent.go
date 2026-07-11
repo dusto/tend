@@ -46,11 +46,22 @@ type Manager interface {
 	SetThoughtLevel(ctx context.Context, id api.SessionID, thoughtLevelID string) error
 }
 
+// CompactionTrigger is the post-turn agent context-window compaction policy. The
+// service calls it after a turn completes (session idle) so it can decide,
+// off the session's reported context usage, whether to compact. *compaction.Service
+// satisfies it. Optional: nil disables the trigger. It is an interface here so the
+// agent package does not import compaction (which forwards /compact back through
+// this service's Prompt), avoiding an import cycle.
+type CompactionTrigger interface {
+	MaybeCompact(ctx context.Context, id api.SessionID)
+}
+
 // Service backs the agent.* methods. It is safe for concurrent use.
 type Service struct {
 	sessions *session.Registry
 	manager  Manager
 	norm     *acp.Normalizer
+	compact  CompactionTrigger // optional; set via SetCompactionTrigger
 
 	mu       sync.Mutex
 	inflight map[api.SessionID]context.CancelFunc
@@ -65,6 +76,12 @@ func NewService(sessions *session.Registry, manager Manager, norm *acp.Normalize
 		norm:     norm,
 		inflight: make(map[api.SessionID]context.CancelFunc),
 	}
+}
+
+// SetCompactionTrigger wires the post-turn context-window compaction policy. Set
+// once at daemon wiring, before serving turns. nil (the default) disables it.
+func (s *Service) SetCompactionTrigger(t CompactionTrigger) {
+	s.compact = t
 }
 
 // Register installs the agent lifecycle methods on m, backed by s.
@@ -311,6 +328,13 @@ func (s *Service) Prompt(ctx context.Context, p api.AgentPromptParams) (api.Agen
 	s.norm.PublishTokenUsage(string(p.SessionID), res.Usage, res.Meta)
 	s.norm.PublishTurnEnd(string(p.SessionID))
 	_ = sess.SetStatus(api.StatusIdle, nil)
+	// The turn is complete and the session idle: give the compaction trigger a
+	// chance to act on the agent's now-updated context-window usage. It may run a
+	// /compact turn on this session; the session must be idle first (done above),
+	// and its own re-entrancy guard stops the resulting turn from re-triggering.
+	if s.compact != nil {
+		s.compact.MaybeCompact(ctx, p.SessionID)
+	}
 	return api.AgentPromptResult{StopReason: res.StopReason, Status: api.StatusIdle}, nil
 }
 
