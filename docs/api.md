@@ -131,6 +131,8 @@ Schemas live under `schemas/` (`methods/<name>.params.json` / `.result.json`, `e
 
 ## Events
 
+- **`agent_context_usage`** (`session` stream) — The agent's context-window fullness (tokens used of the window size), from the provider's usage_update. The authoritative signal for context-window management (e.g. compaction triggering), distinct from a single turn's spend. Carries cost when the provider reports it.
+  - Payload: `AgentContextUsage`
 - **`agent_error`** (`session` stream) — A session's turn failed (e.g. its provider process exited mid-turn).
   - Payload: `AgentError`
 - **`agent_message_chunk`** (`session` stream) — A streamed chunk of an agent message.
@@ -147,6 +149,8 @@ Schemas live under `schemas/` (`methods/<name>.params.json` / `.result.json`, `e
   - Payload: `AgentThoughtChunk`
 - **`agent_thought_level_updated`** (`session` stream) — A session's active reasoning/thought level changed.
   - Payload: `AgentThoughtLevelUpdated`
+- **`agent_token_usage`** (`session` stream) — The provider's authoritative token accounting for one completed turn, from the session/prompt result (input/output/cached/reasoning/total). Supersedes the agent_prompt_usage estimate; includes a per-model breakdown when the provider supplies one.
+  - Payload: `AgentTokenUsage`
 - **`approval_requested`** (`session` stream) — A mutating action is awaiting approval.
   - Payload: `ApprovalRequested`
 - **`approval_resolved`** (`session` stream) — A pending approval was resolved.

@@ -305,6 +305,10 @@ func (s *Service) Prompt(ctx context.Context, p api.AgentPromptParams) (api.Agen
 		return api.AgentPromptResult{}, internalErr(err)
 	}
 
+	// The provider reports authoritative token usage on the prompt result (when it
+	// reports any); emit it before turn_end so the turn's accounting precedes its
+	// close. This supersedes the agent_prompt_usage estimate published at the start.
+	s.norm.PublishTokenUsage(string(p.SessionID), res.Usage, res.Meta)
 	s.norm.PublishTurnEnd(string(p.SessionID))
 	_ = sess.SetStatus(api.StatusIdle, nil)
 	return api.AgentPromptResult{StopReason: res.StopReason, Status: api.StatusIdle}, nil

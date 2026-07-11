@@ -1,0 +1,69 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$defs": {
+    "ModelTokenUsage": {
+      "properties": {
+        "model": {
+          "type": "string"
+        },
+        "input_tokens": {
+          "type": "integer"
+        },
+        "output_tokens": {
+          "type": "integer"
+        },
+        "cached_read_tokens": {
+          "type": "integer"
+        },
+        "reasoning_tokens": {
+          "type": "integer"
+        },
+        "total_tokens": {
+          "type": "integer"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "model"
+      ]
+    }
+  },
+  "properties": {
+    "session_id": {
+      "type": "string"
+    },
+    "input_tokens": {
+      "type": "integer"
+    },
+    "output_tokens": {
+      "type": "integer"
+    },
+    "cached_read_tokens": {
+      "type": "integer"
+    },
+    "cached_write_tokens": {
+      "type": "integer"
+    },
+    "reasoning_tokens": {
+      "type": "integer"
+    },
+    "total_tokens": {
+      "type": "integer"
+    },
+    "model_usage": {
+      "items": {
+        "$ref": "#/$defs/ModelTokenUsage"
+      },
+      "type": "array"
+    }
+  },
+  "additionalProperties": false,
+  "type": "object",
+  "required": [
+    "session_id",
+    "input_tokens",
+    "output_tokens",
+    "total_tokens"
+  ]
+}

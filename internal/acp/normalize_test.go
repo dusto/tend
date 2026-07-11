@@ -170,8 +170,10 @@ func TestProviderPrivateNotificationPreserved(t *testing.T) {
 
 func TestMetadataParserHook(t *testing.T) {
 	c := &capture{}
+	// A provider-private update the core mapping does not recognize; the hook maps
+	// it to an event of its choosing.
 	parse := func(sessionID, method string, _ json.RawMessage) (api.Event, bool) {
-		if method == "session/update:usage_update" {
+		if method == "session/update:provider_metric" {
 			return sessionEvent(sessionID, "agent_message_chunk", api.AgentMessageChunk{
 				SessionID: api.SessionID(sessionID), Text: "parsed",
 			}), true
@@ -180,8 +182,8 @@ func TestMetadataParserHook(t *testing.T) {
 	}
 	n := NewNormalizer(c, parse)
 	notify(n, SessionUpdateMethod, update("s1", map[string]any{
-		"sessionUpdate": "usage_update",
-		"usage":         map[string]any{"used": 42},
+		"sessionUpdate": "provider_metric",
+		"value":         42,
 	}))
 
 	ev := c.last(t)
@@ -517,4 +519,105 @@ func TestConfigOptionUpdateWithoutSink(t *testing.T) {
 	if ev.Type != "agent_model_updated" {
 		t.Errorf("event type = %q, want agent_model_updated", ev.Type)
 	}
+}
+
+// TestNormalizeUsageUpdate covers the context-window signal both providers emit
+// with the same shape; Claude also attaches a cumulative cost, Codex does not.
+func TestNormalizeUsageUpdate(t *testing.T) {
+	c := &capture{}
+	n := NewNormalizer(c, nil)
+
+	// Claude-shaped: used/size + cost.
+	notify(n, SessionUpdateMethod, update("s1", map[string]any{
+		"sessionUpdate": "usage_update", "used": 20348, "size": 200000,
+		"cost": map[string]any{"amount": 0.0862785, "currency": "USD"},
+	}))
+	ev := c.last(t)
+	if ev.Type != "agent_context_usage" || ev.StreamID != "session:s1" || ev.Scope != api.ScopeSession {
+		t.Fatalf("event = %+v", ev)
+	}
+	var p api.AgentContextUsage
+	if err := json.Unmarshal(ev.Payload, &p); err != nil {
+		t.Fatal(err)
+	}
+	if p.SessionID != "s1" || p.UsedTokens != 20348 || p.WindowTokens != 200000 {
+		t.Errorf("payload = %+v", p)
+	}
+	if p.Cost == nil || p.Cost.Currency != "USD" || p.Cost.Amount == 0 {
+		t.Errorf("cost = %+v, want a USD amount", p.Cost)
+	}
+
+	// Codex-shaped: bare used/size, no cost.
+	notify(n, SessionUpdateMethod, update("s1", map[string]any{
+		"sessionUpdate": "usage_update", "used": 22598, "size": 258400,
+	}))
+	var q api.AgentContextUsage
+	if err := json.Unmarshal(c.last(t).Payload, &q); err != nil {
+		t.Fatal(err)
+	}
+	if q.UsedTokens != 22598 || q.WindowTokens != 258400 || q.Cost != nil {
+		t.Errorf("codex-shaped payload = %+v, want used/size only", q)
+	}
+}
+
+// TestPublishTokenUsage covers the authoritative per-turn accounting parsed from
+// the session/prompt result, across both providers' field vocabularies.
+func TestPublishTokenUsage(t *testing.T) {
+	t.Run("claude", func(t *testing.T) {
+		c := &capture{}
+		n := NewNormalizer(c, nil)
+		usage := json.RawMessage(`{"inputTokens":11526,"outputTokens":61,"cachedReadTokens":6427,"cachedWriteTokens":2391,"totalTokens":20405}`)
+		n.PublishTokenUsage("s1", usage, nil)
+
+		ev := c.last(t)
+		if ev.Type != "agent_token_usage" || ev.StreamID != "session:s1" {
+			t.Fatalf("event = %+v", ev)
+		}
+		var p api.AgentTokenUsage
+		if err := json.Unmarshal(ev.Payload, &p); err != nil {
+			t.Fatal(err)
+		}
+		if p.InputTokens != 11526 || p.OutputTokens != 61 || p.CachedReadTokens != 6427 || p.CachedWriteTokens != 2391 || p.TotalTokens != 20405 {
+			t.Errorf("payload = %+v", p)
+		}
+		if len(p.ModelUsage) != 0 {
+			t.Errorf("claude reports no per-model breakdown; got %+v", p.ModelUsage)
+		}
+	})
+
+	t.Run("codex with _meta model breakdown", func(t *testing.T) {
+		c := &capture{}
+		n := NewNormalizer(c, nil)
+		usage := json.RawMessage(`{"totalTokens":16000,"inputTokens":5869,"cachedReadTokens":10112,"outputTokens":19,"thoughtTokens":3}`)
+		// _meta.quota.model_usage uses the aliased names cachedInputTokens/reasoningOutputTokens.
+		meta := json.RawMessage(`{"quota":{"model_usage":[{"model":"gpt-5.5","token_count":{"totalTokens":16000,"inputTokens":5869,"cachedInputTokens":10112,"outputTokens":19,"reasoningOutputTokens":7}}]}}`)
+		n.PublishTokenUsage("s1", usage, meta)
+
+		var p api.AgentTokenUsage
+		if err := json.Unmarshal(c.last(t).Payload, &p); err != nil {
+			t.Fatal(err)
+		}
+		if p.InputTokens != 5869 || p.OutputTokens != 19 || p.CachedReadTokens != 10112 || p.TotalTokens != 16000 {
+			t.Errorf("top-level payload = %+v", p)
+		}
+		if p.ReasoningTokens != 3 { // top-level thoughtTokens maps to reasoning
+			t.Errorf("reasoning = %d, want 3 (from thoughtTokens)", p.ReasoningTokens)
+		}
+		if len(p.ModelUsage) != 1 {
+			t.Fatalf("model usage = %+v, want one model", p.ModelUsage)
+		}
+		m := p.ModelUsage[0]
+		if m.Model != "gpt-5.5" || m.CachedReadTokens != 10112 || m.ReasoningTokens != 7 || m.TotalTokens != 16000 {
+			t.Errorf("model usage[0] = %+v (aliases cachedInputTokens/reasoningOutputTokens should map)", m)
+		}
+	})
+
+	t.Run("no usage means no event", func(t *testing.T) {
+		c := &capture{}
+		n := NewNormalizer(c, nil)
+		n.PublishTokenUsage("s1", nil, nil)
+		if len(c.events()) != 0 {
+			t.Errorf("empty usage should emit nothing; got %+v", c.events())
+		}
+	})
 }
