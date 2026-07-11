@@ -140,9 +140,15 @@ type PromptParams struct {
 	Prompt    []json.RawMessage `json:"prompt"`
 }
 
-// PromptResult is the agent's session/prompt reply.
+// PromptResult is the agent's session/prompt reply. Usage and Meta are kept raw:
+// the provider reports authoritative token usage on the result (codex and claude
+// both put a "usage" object here, codex adding a per-model breakdown under
+// "_meta"), which the agent service parses into an agent_token_usage event. They
+// are empty when the provider reports no usage.
 type PromptResult struct {
-	StopReason string `json:"stopReason"`
+	StopReason string          `json:"stopReason"`
+	Usage      json.RawMessage `json:"usage,omitempty"`
+	Meta       json.RawMessage `json:"_meta,omitempty"`
 }
 
 // CancelParams is the session/cancel notification.

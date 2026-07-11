@@ -301,6 +301,66 @@ func TestPromptEmitsUserPrompt(t *testing.T) {
 	}
 }
 
+func TestPromptEmitsProviderTokenUsage(t *testing.T) {
+	// A turn whose provider reports usage on the result publishes agent_token_usage
+	// (authoritative), ordered before turn_end.
+	mgr := &fakeManager{openID: "sess-1", promptResult: acp.PromptResult{
+		StopReason: "end_turn",
+		Usage:      json.RawMessage(`{"inputTokens":100,"outputTokens":20,"totalTokens":120}`),
+	}}
+	svc, store := newService(t, mgr)
+	startSession(t, svc)
+
+	if _, err := svc.Prompt(context.Background(), api.AgentPromptParams{SessionID: "sess-1", Text: "hi"}); err != nil {
+		t.Fatalf("Prompt: %v", err)
+	}
+	evs, _, err := store.Read("session:sess-1", 0, 10)
+	if err != nil {
+		t.Fatalf("Read: %v", err)
+	}
+	tokenIdx, turnEndIdx := -1, -1
+	var types []string
+	for i, e := range evs {
+		types = append(types, e.Type)
+		switch e.Type {
+		case "agent_token_usage":
+			tokenIdx = i
+			var p api.AgentTokenUsage
+			if err := json.Unmarshal(e.Payload, &p); err != nil {
+				t.Fatal(err)
+			}
+			if p.InputTokens != 100 || p.OutputTokens != 20 || p.TotalTokens != 120 {
+				t.Errorf("token usage = %+v", p)
+			}
+		case "turn_end":
+			turnEndIdx = i
+		}
+	}
+	if tokenIdx < 0 {
+		t.Fatalf("no agent_token_usage published; got %v", types)
+	}
+	if turnEndIdx < 0 || tokenIdx > turnEndIdx {
+		t.Errorf("agent_token_usage should precede turn_end; types = %v", types)
+	}
+}
+
+func TestPromptNoProviderUsageNoTokenEvent(t *testing.T) {
+	// The default fake result carries no usage, so no agent_token_usage is emitted.
+	mgr := &fakeManager{openID: "sess-1", promptResult: acp.PromptResult{StopReason: "end_turn"}}
+	svc, store := newService(t, mgr)
+	startSession(t, svc)
+
+	if _, err := svc.Prompt(context.Background(), api.AgentPromptParams{SessionID: "sess-1", Text: "hi"}); err != nil {
+		t.Fatalf("Prompt: %v", err)
+	}
+	evs, _, _ := store.Read("session:sess-1", 0, 10)
+	for _, e := range evs {
+		if e.Type == "agent_token_usage" {
+			t.Error("no usage reported, but agent_token_usage was emitted")
+		}
+	}
+}
+
 func TestPromptEmptyTurnEmitsNoUserPrompt(t *testing.T) {
 	// A turn with no text and no attachments records no user_prompt (avoids noise);
 	// usage and turn_end still flow.

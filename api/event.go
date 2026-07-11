@@ -88,6 +88,8 @@ var EventDefs = []EventDef{
 	{Type: "turn_end", Scope: ScopeSession, Payload: TurnEnd{}, Summary: "The agent's turn ended."},
 	{Type: "user_prompt", Scope: ScopeSession, Payload: UserPrompt{}, Summary: "The user's prompt content for a turn, emitted as the turn starts so a replay/resume sees the human side of the conversation (the session stream otherwise carries only agent output). Text only; attachment blob content is not persisted, just counted."},
 	{Type: "agent_prompt_usage", Scope: ScopeSession, Payload: AgentPromptUsage{}, Summary: "The size of the prompt input the daemon composed for a turn: bytes and an approximate, model-agnostic token estimate. Measures only client-side prompt content, not the agent-owned system prompt/history."},
+	{Type: "agent_context_usage", Scope: ScopeSession, Payload: AgentContextUsage{}, Summary: "The agent's context-window fullness (tokens used of the window size), from the provider's usage_update. The authoritative signal for context-window management (e.g. compaction triggering), distinct from a single turn's spend. Carries cost when the provider reports it."},
+	{Type: "agent_token_usage", Scope: ScopeSession, Payload: AgentTokenUsage{}, Summary: "The provider's authoritative token accounting for one completed turn, from the session/prompt result (input/output/cached/reasoning/total). Supersedes the agent_prompt_usage estimate; includes a per-model breakdown when the provider supplies one."},
 	{Type: "approval_requested", Scope: ScopeSession, Payload: ApprovalRequested{}, Summary: "A mutating action is awaiting approval."},
 	{Type: "approval_resolved", Scope: ScopeSession, Payload: ApprovalResolved{}, Summary: "A pending approval was resolved."},
 	{Type: "agent_error", Scope: ScopeSession, Payload: AgentError{}, Summary: "A session's turn failed (e.g. its provider process exited mid-turn)."},
@@ -189,6 +191,68 @@ type AgentPromptUsage struct {
 	// Approximate flags that TokensApprox is a heuristic, not a provider-reported
 	// count. It is always true.
 	Approximate bool `json:"approximate"`
+}
+
+// UsageCost is a monetary cost a provider attaches to usage (e.g. Claude reports
+// a cumulative session cost). Amount is in Currency's units.
+type UsageCost struct {
+	Amount   float64 `json:"amount"`
+	Currency string  `json:"currency"`
+}
+
+// AgentContextUsage reports how full the agent's context window is for a session,
+// from the provider's usage_update notification. Codex and Claude both emit the
+// same {used, size} shape, so it is provider-agnostic. This is the authoritative
+// signal for context-window management — a compaction trigger watches
+// UsedTokens/WindowTokens — as opposed to a single turn's spend (AgentTokenUsage).
+// It is cumulative and updates through a session as context grows.
+type AgentContextUsage struct {
+	SessionID SessionID `json:"session_id"`
+	// UsedTokens is how many tokens of the window are currently in use.
+	UsedTokens int `json:"used_tokens"`
+	// WindowTokens is the context window size in tokens (0 if the provider omits
+	// it).
+	WindowTokens int `json:"window_tokens"`
+	// Cost is the session's cumulative cost when the provider reports it (Claude);
+	// nil when unreported.
+	Cost *UsageCost `json:"cost,omitempty"`
+}
+
+// AgentTokenUsage reports the provider's authoritative token accounting for one
+// completed turn, taken from the session/prompt result. It supersedes the
+// daemon's agent_prompt_usage estimate (which measures only client-composed input
+// and cannot see the agent-owned system prompt/history). Fields a provider does
+// not report are zero. ModelUsage carries the per-model breakdown when the
+// provider supplies one (e.g. Codex _meta.quota.model_usage).
+type AgentTokenUsage struct {
+	SessionID SessionID `json:"session_id"`
+	// InputTokens and OutputTokens are the turn's non-cached input and generated
+	// output tokens.
+	InputTokens  int `json:"input_tokens"`
+	OutputTokens int `json:"output_tokens"`
+	// CachedReadTokens and CachedWriteTokens are prompt-cache read/write tokens when
+	// the provider distinguishes them (Claude reports both; Codex reports reads).
+	CachedReadTokens  int `json:"cached_read_tokens,omitempty"`
+	CachedWriteTokens int `json:"cached_write_tokens,omitempty"`
+	// ReasoningTokens is reasoning/thinking output tokens when reported separately
+	// (Codex thoughtTokens/reasoningOutputTokens).
+	ReasoningTokens int `json:"reasoning_tokens,omitempty"`
+	// TotalTokens is the provider's own total for the turn.
+	TotalTokens int `json:"total_tokens"`
+	// ModelUsage is the per-model breakdown when the provider supplies one; nil
+	// otherwise.
+	ModelUsage []ModelTokenUsage `json:"model_usage,omitempty"`
+}
+
+// ModelTokenUsage is one model's share of a turn's token usage, for providers
+// that route a turn across models and report per-model counts.
+type ModelTokenUsage struct {
+	Model            string `json:"model"`
+	InputTokens      int    `json:"input_tokens,omitempty"`
+	OutputTokens     int    `json:"output_tokens,omitempty"`
+	CachedReadTokens int    `json:"cached_read_tokens,omitempty"`
+	ReasoningTokens  int    `json:"reasoning_tokens,omitempty"`
+	TotalTokens      int    `json:"total_tokens,omitempty"`
 }
 
 // ApprovalRequested signals that a mutating action is awaiting approval.
