@@ -252,20 +252,7 @@ func (m *Manager) Open(ctx context.Context, key Key, params NewSessionParams) (*
 	// configOptions (newer path) supplement/override the legacy fields per axis;
 	// a provider may send both (claude: legacy modes + a "model" config option).
 	for _, opt := range res.ConfigOptions {
-		switch canonicalCategory(opt.Category) {
-		case configCategoryModel:
-			s.CurrentModelID = opt.CurrentValue
-			s.AvailableModels = toAPIModelsFromOptions(opt.Options)
-			s.modelConfigID = opt.ID
-		case configCategoryMode:
-			s.CurrentModeID = opt.CurrentValue
-			s.AvailableModes = toAPIModesFromOptions(opt.Options)
-			s.modeConfigID = opt.ID
-		case configCategoryThoughtLevel:
-			s.CurrentThoughtLevelID = opt.CurrentValue
-			s.AvailableThoughtLevels = toAPIThoughtLevelsFromOptions(opt.Options)
-			s.thoughtConfigID = opt.ID
-		}
+		applySessionConfigOption(s, opt)
 	}
 	m.mu.Lock()
 	m.sessions[s.ID] = s
@@ -398,13 +385,8 @@ func (m *Manager) configID(sessionID api.SessionID, category string) string {
 	if s == nil {
 		return ""
 	}
-	switch category {
-	case configCategoryMode:
-		return s.modeConfigID
-	case configCategoryModel:
-		return s.modelConfigID
-	case configCategoryThoughtLevel:
-		return s.thoughtConfigID
+	if axis, ok := configAxisForCategory(category); ok {
+		return axis.configID(s)
 	}
 	return ""
 }

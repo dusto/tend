@@ -190,50 +190,37 @@ func parseUpdate(params json.RawMessage) (sessionUpdate, bool) {
 // otherwise dropped here (a config_option_update is fully consumed).
 func (n *Normalizer) handleConfigOptionUpdate(sessionID string, update json.RawMessage) {
 	var u struct {
-		ConfigOptions []struct {
-			ID           string          `json:"id"`
-			Category     string          `json:"category"`
-			CurrentValue json.RawMessage `json:"currentValue"`
-		} `json:"configOptions"`
+		ConfigOptions []configOptionUpdate `json:"configOptions"`
 	}
 	if err := json.Unmarshal(update, &u); err != nil {
 		return
 	}
 	sid := api.SessionID(sessionID)
 	for _, opt := range u.ConfigOptions {
-		// Only single-value selectors map to a daemon axis; a boolean toggle's
-		// currentValue is not a string, so it is skipped.
-		var value string
-		if json.Unmarshal(opt.CurrentValue, &value) != nil {
-			continue
-		}
-		switch canonicalCategory(opt.Category) {
-		case configCategoryModel:
-			if n.configSink != nil {
-				n.configSink.SetSessionModel(sid, value)
-			}
-			n.publish(sessionEvent(sessionID, "agent_model_updated", api.AgentModelUpdated{
-				SessionID:      sid,
-				CurrentModelID: value,
-			}))
-		case configCategoryMode:
-			if n.configSink != nil {
-				n.configSink.SetSessionMode(sid, value)
-			}
-			n.publish(sessionEvent(sessionID, "agent_mode_updated", api.AgentModeUpdated{
-				SessionID:     sid,
-				CurrentModeID: value,
-			}))
-		case configCategoryThoughtLevel:
-			if n.configSink != nil {
-				n.configSink.SetSessionThoughtLevel(sid, value)
-			}
-			n.publish(sessionEvent(sessionID, "agent_thought_level_updated", api.AgentThoughtLevelUpdated{
-				SessionID:             sid,
-				CurrentThoughtLevelID: value,
-			}))
-		}
+		n.handleConfigAxisUpdate(sid, opt)
 	}
+}
+
+type configOptionUpdate struct {
+	Category     string          `json:"category"`
+	CurrentValue json.RawMessage `json:"currentValue"`
+}
+
+func (n *Normalizer) handleConfigAxisUpdate(sessionID api.SessionID, opt configOptionUpdate) {
+	axis, ok := configAxisForCategory(opt.Category)
+	if !ok {
+		return
+	}
+	// Only single-value selectors map to a daemon axis; a boolean toggle's
+	// currentValue is not a string, so it is skipped.
+	var value string
+	if json.Unmarshal(opt.CurrentValue, &value) != nil {
+		return
+	}
+	if n.configSink != nil {
+		axis.write(n.configSink, sessionID, value)
+	}
+	n.publish(axis.event(sessionID, value))
 }
 
 // parseAvailableCommands converts an ACP available_commands_update into the
