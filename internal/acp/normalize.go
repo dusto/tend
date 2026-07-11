@@ -62,11 +62,12 @@ type Normalizer struct {
 	modeSink   ModeSink       // optional
 	cmdSink    CommandSink    // optional
 	configSink ConfigSink     // optional
+	steps      []updateStep
 }
 
 // NewNormalizer returns a Normalizer that publishes through pub. parse may be nil.
 func NewNormalizer(pub Publisher, parse MetadataParser) *Normalizer {
-	return &Normalizer{pub: pub, parse: parse}
+	return &Normalizer{pub: pub, parse: parse, steps: defaultUpdateSteps()}
 }
 
 // SetModeSink wires the authoritative session state that agent-driven mode
@@ -128,58 +129,57 @@ func (n *Normalizer) PublishUserPrompt(prompt api.UserPrompt) {
 }
 
 func (n *Normalizer) handleUpdate(params json.RawMessage) {
+	update, ok := parseUpdate(params)
+	if !ok {
+		return
+	}
+	flow := &updateFlow{}
+	for _, step := range n.steps {
+		if step.match != nil && !step.match(update) {
+			continue
+		}
+		if step.run(n, flow, update) == updateStop {
+			return
+		}
+	}
+}
+
+type sessionUpdate struct {
+	SessionID string
+	Kind      string
+	Raw       json.RawMessage
+}
+
+type updateFlow struct {
+	handled bool
+}
+
+type updateStepResult int
+
+const (
+	updateContinue updateStepResult = iota
+	updateStop
+)
+
+type updateStep struct {
+	name  string
+	match func(sessionUpdate) bool
+	run   func(*Normalizer, *updateFlow, sessionUpdate) updateStepResult
+}
+
+func parseUpdate(params json.RawMessage) (sessionUpdate, bool) {
 	var env struct {
 		SessionID string          `json:"sessionId"`
 		Update    json.RawMessage `json:"update"`
 	}
 	if err := json.Unmarshal(params, &env); err != nil || env.SessionID == "" {
-		return
+		return sessionUpdate{}, false
 	}
 	var kind struct {
 		SessionUpdate string `json:"sessionUpdate"`
 	}
 	_ = json.Unmarshal(env.Update, &kind)
-
-	// The agent's advertised commands are handed to the slash aggregator, which
-	// owns storing them and emitting the merged slash_commands_updated event (the
-	// daemon commands are not visible here). Without a sink wired, fall through so
-	// the update is still preserved as a provider_notification.
-	if kind.SessionUpdate == "available_commands_update" && n.cmdSink != nil {
-		n.cmdSink.SetSessionCommands(api.SessionID(env.SessionID), parseAvailableCommands(env.Update))
-		return
-	}
-
-	// A config_option_update carries the provider's full configOptions set with
-	// their current values. It can move several axes at once, so it does not fit
-	// mapUpdate's single-event shape: record each recognized selector on the
-	// registry and emit its matching update event.
-	if kind.SessionUpdate == "config_option_update" {
-		n.handleConfigOptionUpdate(env.SessionID, env.Update)
-		return
-	}
-
-	if ev, ok := mapUpdate(env.SessionID, kind.SessionUpdate, env.Update); ok {
-		// An agent-driven mode change must also update the authoritative session
-		// state, not just stream the event — session.list reads the registry, so
-		// without this a later list or reconnect reports a stale current mode.
-		if kind.SessionUpdate == "current_mode_update" && n.modeSink != nil {
-			var u struct {
-				CurrentModeID string `json:"currentModeId"`
-			}
-			_ = json.Unmarshal(env.Update, &u)
-			n.modeSink.SetSessionMode(api.SessionID(env.SessionID), u.CurrentModeID)
-		}
-		n.publish(ev)
-		return
-	}
-	method := SessionUpdateMethod + ":" + kind.SessionUpdate
-	if n.parse != nil {
-		if ev, ok := n.parse(env.SessionID, method, env.Update); ok {
-			n.publish(ev)
-			return
-		}
-	}
-	n.preserve(env.SessionID, method, env.Update)
+	return sessionUpdate{SessionID: env.SessionID, Kind: kind.SessionUpdate, Raw: env.Update}, true
 }
 
 // handleConfigOptionUpdate processes an ACP config_option_update: for each
@@ -266,59 +266,163 @@ func parseAvailableCommands(update json.RawMessage) []api.SlashCommand {
 	return out
 }
 
-// mapUpdate translates a recognized ACP session update into a TEND event.
-func mapUpdate(sessionID, kind string, update json.RawMessage) (api.Event, bool) {
-	switch kind {
-	case "agent_message_chunk":
+func defaultUpdateSteps() []updateStep {
+	return []updateStep{
+		availableCommandsStep(),
+		configOptionStep(),
+		currentModeSinkStep(),
+		agentMessageChunkStep(),
+		agentThoughtChunkStep(),
+		toolCallStep(),
+		toolCallUpdateStep(),
+		planStep(),
+		currentModeEventStep(),
+		contextUsageStep(),
+		metadataParserStep(),
+		preserveUnhandledStep(),
+	}
+}
+
+func kindIs(kind string) func(sessionUpdate) bool {
+	return func(update sessionUpdate) bool {
+		return update.Kind == kind
+	}
+}
+
+func availableCommandsStep() updateStep {
+	return updateStep{
+		name:  "available_commands",
+		match: kindIs("available_commands_update"),
+		run: func(n *Normalizer, flow *updateFlow, update sessionUpdate) updateStepResult {
+			// The agent's advertised commands are handed to the slash aggregator, which
+			// owns storing them and emitting the merged slash_commands_updated event (the
+			// daemon commands are not visible here). Without a sink wired, fall through so
+			// the update is still preserved as a provider_notification.
+			if n.cmdSink == nil {
+				return updateContinue
+			}
+			n.cmdSink.SetSessionCommands(api.SessionID(update.SessionID), parseAvailableCommands(update.Raw))
+			flow.handled = true
+			return updateStop
+		},
+	}
+}
+
+func configOptionStep() updateStep {
+	return updateStep{
+		name:  "config_option",
+		match: kindIs("config_option_update"),
+		run: func(n *Normalizer, flow *updateFlow, update sessionUpdate) updateStepResult {
+			// A config_option_update carries the provider's full configOptions set with
+			// their current values. It can move several axes at once, so it owns its
+			// multi-event emission instead of going through a single mapped event.
+			n.handleConfigOptionUpdate(update.SessionID, update.Raw)
+			flow.handled = true
+			return updateStop
+		},
+	}
+}
+
+func currentModeSinkStep() updateStep {
+	return updateStep{
+		name:  "current_mode_sink",
+		match: kindIs("current_mode_update"),
+		run: func(n *Normalizer, _ *updateFlow, update sessionUpdate) updateStepResult {
+			// An agent-driven mode change must also update the authoritative session
+			// state, not just stream the event — session.list reads the registry, so
+			// without this a later list or reconnect reports a stale current mode.
+			if n.modeSink == nil {
+				return updateContinue
+			}
+			var u struct {
+				CurrentModeID string `json:"currentModeId"`
+			}
+			_ = json.Unmarshal(update.Raw, &u)
+			n.modeSink.SetSessionMode(api.SessionID(update.SessionID), u.CurrentModeID)
+			return updateContinue
+		},
+	}
+}
+
+func agentMessageChunkStep() updateStep {
+	return publishStep("agent_message_chunk", func(update sessionUpdate) api.Event {
 		var u struct {
 			Content struct {
 				Text string `json:"text"`
 			} `json:"content"`
 		}
-		_ = json.Unmarshal(update, &u)
-		return sessionEvent(sessionID, "agent_message_chunk", api.AgentMessageChunk{
-			SessionID: api.SessionID(sessionID),
+		_ = json.Unmarshal(update.Raw, &u)
+		return sessionEvent(update.SessionID, "agent_message_chunk", api.AgentMessageChunk{
+			SessionID: api.SessionID(update.SessionID),
 			Text:      u.Content.Text,
-		}), true
-	case "agent_thought_chunk":
+		})
+	})
+}
+
+func agentThoughtChunkStep() updateStep {
+	return publishStep("agent_thought_chunk", func(update sessionUpdate) api.Event {
 		var u struct {
 			Content struct {
 				Text string `json:"text"`
 			} `json:"content"`
 		}
-		_ = json.Unmarshal(update, &u)
-		return sessionEvent(sessionID, "agent_thought_chunk", api.AgentThoughtChunk{
-			SessionID: api.SessionID(sessionID),
+		_ = json.Unmarshal(update.Raw, &u)
+		return sessionEvent(update.SessionID, "agent_thought_chunk", api.AgentThoughtChunk{
+			SessionID: api.SessionID(update.SessionID),
 			Text:      u.Content.Text,
-		}), true
-	case "tool_call":
+		})
+	})
+}
+
+func toolCallStep() updateStep {
+	return publishStep("tool_call", func(update sessionUpdate) api.Event {
 		var u struct {
 			ToolCallID string          `json:"toolCallId"`
 			Title      string          `json:"title"`
 			RawInput   json.RawMessage `json:"rawInput"`
 		}
-		_ = json.Unmarshal(update, &u)
-		return sessionEvent(sessionID, "tool_call", api.ToolCall{
-			SessionID:  api.SessionID(sessionID),
+		_ = json.Unmarshal(update.Raw, &u)
+		return sessionEvent(update.SessionID, "tool_call", api.ToolCall{
+			SessionID:  api.SessionID(update.SessionID),
 			ToolCallID: u.ToolCallID,
 			Name:       u.Title,
 			RawInput:   u.RawInput,
-		}), true
-	case "tool_call_update", "tool_call_complete":
-		var u struct {
-			ToolCallID string `json:"toolCallId"`
-			Status     string `json:"status"`
-		}
-		_ = json.Unmarshal(update, &u)
-		if kind == "tool_call_complete" && u.Status == "" {
-			u.Status = "completed"
-		}
-		return sessionEvent(sessionID, "tool_call_update", api.ToolCallUpdate{
-			SessionID:  api.SessionID(sessionID),
-			ToolCallID: u.ToolCallID,
-			Status:     u.Status,
-		}), true
-	case "plan":
+		})
+	})
+}
+
+func toolCallUpdateStep() updateStep {
+	return updateStep{
+		name: "tool_call_update",
+		match: func(update sessionUpdate) bool {
+			return update.Kind == "tool_call_update" || update.Kind == "tool_call_complete"
+		},
+		run: func(n *Normalizer, flow *updateFlow, update sessionUpdate) updateStepResult {
+			n.publish(mapToolCallUpdate(update))
+			flow.handled = true
+			return updateContinue
+		},
+	}
+}
+
+func mapToolCallUpdate(update sessionUpdate) api.Event {
+	var u struct {
+		ToolCallID string `json:"toolCallId"`
+		Status     string `json:"status"`
+	}
+	_ = json.Unmarshal(update.Raw, &u)
+	if update.Kind == "tool_call_complete" && u.Status == "" {
+		u.Status = "completed"
+	}
+	return sessionEvent(update.SessionID, "tool_call_update", api.ToolCallUpdate{
+		SessionID:  api.SessionID(update.SessionID),
+		ToolCallID: u.ToolCallID,
+		Status:     u.Status,
+	})
+}
+
+func planStep() updateStep {
+	return publishStep("plan", func(update sessionUpdate) api.Event {
 		var u struct {
 			Entries []struct {
 				Content  string `json:"content"`
@@ -326,25 +430,33 @@ func mapUpdate(sessionID, kind string, update json.RawMessage) (api.Event, bool)
 				Status   string `json:"status"`
 			} `json:"entries"`
 		}
-		_ = json.Unmarshal(update, &u)
+		_ = json.Unmarshal(update.Raw, &u)
 		entries := make([]api.PlanEntry, len(u.Entries))
 		for i, e := range u.Entries {
 			entries[i] = api.PlanEntry{Content: e.Content, Priority: e.Priority, Status: e.Status}
 		}
-		return sessionEvent(sessionID, "agent_plan", api.AgentPlan{
-			SessionID: api.SessionID(sessionID),
+		return sessionEvent(update.SessionID, "agent_plan", api.AgentPlan{
+			SessionID: api.SessionID(update.SessionID),
 			Entries:   entries,
-		}), true
-	case "current_mode_update":
+		})
+	})
+}
+
+func currentModeEventStep() updateStep {
+	return publishStep("current_mode_update", func(update sessionUpdate) api.Event {
 		var u struct {
 			CurrentModeID string `json:"currentModeId"`
 		}
-		_ = json.Unmarshal(update, &u)
-		return sessionEvent(sessionID, "agent_mode_updated", api.AgentModeUpdated{
-			SessionID:     api.SessionID(sessionID),
+		_ = json.Unmarshal(update.Raw, &u)
+		return sessionEvent(update.SessionID, "agent_mode_updated", api.AgentModeUpdated{
+			SessionID:     api.SessionID(update.SessionID),
 			CurrentModeID: u.CurrentModeID,
-		}), true
-	case "usage_update":
+		})
+	})
+}
+
+func contextUsageStep() updateStep {
+	return publishStep("usage_update", func(update sessionUpdate) api.Event {
 		// Context-window fullness. Codex and Claude emit the same {used, size} shape;
 		// Claude also attaches a cumulative cost.
 		var u struct {
@@ -355,18 +467,59 @@ func mapUpdate(sessionID, kind string, update json.RawMessage) (api.Event, bool)
 				Currency string  `json:"currency"`
 			} `json:"cost"`
 		}
-		_ = json.Unmarshal(update, &u)
+		_ = json.Unmarshal(update.Raw, &u)
 		ctxUsage := api.AgentContextUsage{
-			SessionID:    api.SessionID(sessionID),
+			SessionID:    api.SessionID(update.SessionID),
 			UsedTokens:   u.Used,
 			WindowTokens: u.Size,
 		}
 		if u.Cost != nil {
 			ctxUsage.Cost = &api.UsageCost{Amount: u.Cost.Amount, Currency: u.Cost.Currency}
 		}
-		return sessionEvent(sessionID, "agent_context_usage", ctxUsage), true
+		return sessionEvent(update.SessionID, "agent_context_usage", ctxUsage)
+	})
+}
+
+func publishStep(kind string, mapEvent func(sessionUpdate) api.Event) updateStep {
+	return updateStep{
+		name:  kind,
+		match: kindIs(kind),
+		run: func(n *Normalizer, flow *updateFlow, update sessionUpdate) updateStepResult {
+			n.publish(mapEvent(update))
+			flow.handled = true
+			return updateContinue
+		},
 	}
-	return api.Event{}, false
+}
+
+func metadataParserStep() updateStep {
+	return updateStep{
+		name: "metadata_parser",
+		run: func(n *Normalizer, flow *updateFlow, update sessionUpdate) updateStepResult {
+			if flow.handled || n.parse == nil {
+				return updateContinue
+			}
+			method := SessionUpdateMethod + ":" + update.Kind
+			if ev, ok := n.parse(update.SessionID, method, update.Raw); ok {
+				n.publish(ev)
+				flow.handled = true
+				return updateStop
+			}
+			return updateContinue
+		},
+	}
+}
+
+func preserveUnhandledStep() updateStep {
+	return updateStep{
+		name: "preserve_unhandled",
+		run: func(n *Normalizer, flow *updateFlow, update sessionUpdate) updateStepResult {
+			if !flow.handled {
+				n.preserve(update.SessionID, SessionUpdateMethod+":"+update.Kind, update.Raw)
+			}
+			return updateStop
+		},
+	}
 }
 
 // PublishTokenUsage parses the provider's authoritative token usage from a
