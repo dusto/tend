@@ -98,7 +98,7 @@ func TestMaybeCompactNoUsageReportedIsNoOp(t *testing.T) {
 	}
 }
 
-func TestMaybeCompactForwardsProviderCommand(t *testing.T) {
+func TestMaybeCompactForwardsProviderCommandAndCompactsTranscript(t *testing.T) {
 	reg, id := newSession(t)
 	sess, _ := reg.Get(id)
 	sess.SetContextUsage(90, 100) // 0.9 fullness, over 0.85
@@ -109,22 +109,60 @@ func TestMaybeCompactForwardsProviderCommand(t *testing.T) {
 	s := NewService(reg, pr, tr, fakeRanger{ok: true, from: 1, to: 10}, 0.85, 0)
 	s.MaybeCompact(context.Background(), id)
 
+	// Both sides shrink: the agent's own context via /compact AND the daemon
+	// transcript, so a later resume does not re-inflate what the agent dropped.
 	if pr.count() != 1 {
 		t.Fatalf("want one forwarded /compact, got %d", pr.count())
 	}
 	if got := pr.prompts[0].Text; got != "/compact" {
 		t.Fatalf("forwarded text = %q, want /compact", got)
 	}
-	if len(tr.calls) != 0 {
-		t.Fatalf("provider command present: fallback must not run, got %d compacts", len(tr.calls))
+	if len(tr.calls) != 1 {
+		t.Fatalf("provider command present: transcript must still compact, got %d", len(tr.calls))
 	}
 }
 
-func TestMaybeCompactFallsBackToTranscript(t *testing.T) {
+func TestMaybeCompactPrefersCompactOverClear(t *testing.T) {
 	reg, id := newSession(t)
 	sess, _ := reg.Get(id)
 	sess.SetContextUsage(90, 100)
-	// No provider /compact command advertised.
+	// Advertised out of preference order: /clear listed first, /compact second.
+	sess.SetProviderCommands([]api.SlashCommand{{Name: "clear"}, {Name: "compact"}})
+
+	pr := &fakePrompter{}
+	tr := &fakeTranscript{}
+	s := NewService(reg, pr, tr, fakeRanger{ok: false}, 0.85, 0)
+	s.MaybeCompact(context.Background(), id)
+
+	if pr.count() != 1 || pr.prompts[0].Text != "/compact" {
+		t.Fatalf("want /compact preferred over /clear, got %+v", pr.prompts)
+	}
+}
+
+func TestMaybeCompactUsesClearWhenOnlyClear(t *testing.T) {
+	reg, id := newSession(t)
+	sess, _ := reg.Get(id)
+	sess.SetContextUsage(90, 100)
+	sess.SetProviderCommands([]api.SlashCommand{{Name: "clear"}})
+
+	pr := &fakePrompter{}
+	tr := &fakeTranscript{}
+	s := NewService(reg, pr, tr, fakeRanger{ok: true, from: 1, to: 10}, 0.85, 0)
+	s.MaybeCompact(context.Background(), id)
+
+	if pr.count() != 1 || pr.prompts[0].Text != "/clear" {
+		t.Fatalf("want /clear forwarded, got %+v", pr.prompts)
+	}
+	if len(tr.calls) != 1 {
+		t.Fatalf("transcript should still compact, got %d", len(tr.calls))
+	}
+}
+
+func TestMaybeCompactNoProviderCommandStillCompactsTranscript(t *testing.T) {
+	reg, id := newSession(t)
+	sess, _ := reg.Get(id)
+	sess.SetContextUsage(90, 100)
+	// No provider command advertised: only the daemon transcript is compacted.
 
 	pr := &fakePrompter{}
 	tr := &fakeTranscript{}
@@ -135,26 +173,32 @@ func TestMaybeCompactFallsBackToTranscript(t *testing.T) {
 		t.Fatalf("no provider command: must not forward a prompt, got %d", pr.count())
 	}
 	if len(tr.calls) != 1 {
-		t.Fatalf("want one fallback compaction, got %d", len(tr.calls))
+		t.Fatalf("want one transcript compaction, got %d", len(tr.calls))
 	}
 	c := tr.calls[0]
 	if c.from != 3 || c.to != 42 || c.budget != 1500 || c.stream != sess.Stream {
-		t.Fatalf("fallback compacted %+v, want stream=%s [3,42] budget=1500", c, sess.Stream)
+		t.Fatalf("compacted %+v, want stream=%s [3,42] budget=1500", c, sess.Stream)
 	}
 }
 
-func TestMaybeCompactFallbackNoRangeIsNoOp(t *testing.T) {
+func TestMaybeCompactNoRangeSkipsTranscript(t *testing.T) {
 	reg, id := newSession(t)
 	sess, _ := reg.Get(id)
 	sess.SetContextUsage(99, 100)
+	// A provider command is still forwarded; only the transcript step is skipped
+	// when nothing is beyond the retention window.
+	sess.SetProviderCommands([]api.SlashCommand{{Name: "compact"}})
 
 	pr := &fakePrompter{}
 	tr := &fakeTranscript{}
 	s := NewService(reg, pr, tr, fakeRanger{ok: false}, 0.85, 0)
 	s.MaybeCompact(context.Background(), id)
 
+	if pr.count() != 1 {
+		t.Fatalf("provider command should still forward, got %d", pr.count())
+	}
 	if len(tr.calls) != 0 {
-		t.Fatalf("nothing compactable: must not compact, got %d", len(tr.calls))
+		t.Fatalf("nothing compactable: transcript must not compact, got %d", len(tr.calls))
 	}
 }
 
@@ -176,6 +220,9 @@ func TestMaybeCompactReentrancyGuard(t *testing.T) {
 
 	if pr.count() != 1 {
 		t.Fatalf("re-entrant trigger must forward /compact once, got %d", pr.count())
+	}
+	if len(tr.calls) != 1 {
+		t.Fatalf("re-entrant trigger must compact the transcript once, got %d", len(tr.calls))
 	}
 }
 
