@@ -165,6 +165,8 @@ Schemas live under `schemas/` (`methods/<name>.params.json` / `.result.json`, `e
   - Payload: `ProviderStopped`
 - **`slash_commands_updated`** (`session` stream) — A session's merged slash-command set changed (the agent advertised new commands): the full set of provider + daemon commands, replacing the prior set.
   - Payload: `SlashCommandsUpdated`
+- **`summary`** (`session` stream) — A compaction record standing in for a range [from_seq,to_seq] of raw session turns: the condensed text a client renders in place of the collapsed turns. It is a kind=summary record (Event.summary carries the range), served on replay as a range replacement rather than appended live.
+  - Payload: `ContextSummary`
 - **`task_closed`** (`workspace` stream) — A task was closed. Repo-wide: delivered on the workspace stream.
   - Payload: `TaskChange`
 - **`task_commented`** (`workspace` stream) — A comment was added to a task. Repo-wide: delivered on the workspace stream.
