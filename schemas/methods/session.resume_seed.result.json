@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "properties": {
+    "text": {
+      "type": "string"
+    },
+    "summarized": {
+      "type": "boolean"
+    },
+    "source_session_id": {
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "type": "object",
+  "required": [
+    "text",
+    "summarized",
+    "source_session_id"
+  ]
+}

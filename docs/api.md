@@ -36,6 +36,8 @@ Schemas live under `schemas/` (`methods/<name>.params.json` / `.result.json`, `e
   - Params: `SessionSetModelParams` · Result: `SessionSetModelResult`
 - **`session.set_thought_level`** — Set a session's active reasoning/thought level from its available thought levels; emits agent_thought_level_updated. Errors when the provider offers no thought levels.
   - Params: `SessionSetThoughtLevelParams` · Result: `SessionSetThoughtLevelResult`
+- **`session.resume_seed`** — Reconstruct a resume seed from a prior session's durable history (summary records + recent transcript) plus workspace memory, condensed to a budget; the opening-prompt content for a fresh session (works across a daemon restart).
+  - Params: `SessionResumeSeedParams` · Result: `SessionResumeSeedResult`
 - **`provider.list`** — List the configured ACP providers with their enabled state and running-process count for a workspace.
   - Params: `ProviderListParams` · Result: `ProviderListResult`
 - **`provider.start`** — Warm a provider for a workspace: ensure the pool holds at least one process for it; emits provider_started on a spawn.

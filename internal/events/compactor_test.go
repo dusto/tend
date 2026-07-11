@@ -54,6 +54,35 @@ func TestRenderTranscriptRespectsRange(t *testing.T) {
 	}
 }
 
+func TestRenderTranscriptIncludesSummaries(t *testing.T) {
+	sid := api.SessionID("s")
+	recs := []api.Event{
+		{Kind: api.KindSummary, Seq: 1, Type: "summary", Payload: mustJSON(t, api.ContextSummary{SessionID: sid, Text: "earlier: set up the scaffolding"})},
+		{Kind: api.KindEvent, Seq: 4, Type: "agent_message_chunk", Payload: mustJSON(t, api.AgentMessageChunk{SessionID: sid, Text: "now editing "})},
+		{Kind: api.KindEvent, Seq: 5, Type: "tool_call", Payload: mustJSON(t, api.ToolCall{SessionID: sid, Name: "edit"})},
+	}
+	got, condensed := RenderTranscript(recs)
+	if !strings.Contains(got, "earlier: set up the scaffolding") {
+		t.Errorf("summary text should appear in a full render: %q", got)
+	}
+	if !strings.Contains(got, "now editing") || !strings.Contains(got, "[tool: edit]") {
+		t.Errorf("raw transcript should render alongside the summary: %q", got)
+	}
+	if !condensed {
+		t.Error("a render that folded in a summary record should report condensed=true")
+	}
+}
+
+func TestRenderTranscriptRawOnlyNotCondensed(t *testing.T) {
+	sid := api.SessionID("s")
+	recs := []api.Event{
+		{Kind: api.KindEvent, Seq: 1, Type: "agent_message_chunk", Payload: mustJSON(t, api.AgentMessageChunk{SessionID: sid, Text: "just raw turns"})},
+	}
+	if got, condensed := RenderTranscript(recs); condensed {
+		t.Errorf("raw-only render should report condensed=false: %q", got)
+	}
+}
+
 func TestCompactableRange(t *testing.T) {
 	s := newStore(t)
 	s.SetRetention(2)
