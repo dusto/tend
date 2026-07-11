@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -55,6 +56,41 @@ func pairEcho(t *testing.T) (*Conn, *Conn) {
 		t.Fatalf("got %q, want %q", got.Msg, "re:hi")
 	}
 	return a, b
+}
+
+func TestWithInboundTrace(t *testing.T) {
+	var mu sync.Mutex
+	var frames []string
+
+	echo := HandlerFunc(func(_ context.Context, req *Request) (any, error) {
+		return echoParams{Msg: "re:" + string(req.Params)}, nil
+	})
+	// a traces every inbound frame; b echoes a's call.
+	p1, p2 := net.Pipe()
+	a := NewConn(p1, nil, WithInboundTrace(func(raw json.RawMessage) {
+		mu.Lock()
+		frames = append(frames, string(raw))
+		mu.Unlock()
+	}))
+	b := NewConn(p2, echo)
+	t.Cleanup(func() { _ = a.Close(); _ = b.Close() })
+
+	var got echoParams
+	if err := a.Call(testCtx(t), "echo", echoParams{Msg: "hi"}, &got); err != nil {
+		t.Fatalf("call: %v", err)
+	}
+
+	// The response to a's call is an inbound frame, so the trace observed it — this
+	// is the property that lets a debug tap capture an agent's prompt result.
+	mu.Lock()
+	defer mu.Unlock()
+	if len(frames) == 0 {
+		t.Fatal("trace observed no inbound frames")
+	}
+	joined := strings.Join(frames, "\n")
+	if !strings.Contains(joined, `re:{\"msg\":\"hi\"}`) && !strings.Contains(joined, "re:") {
+		t.Errorf("trace did not capture the response frame; got %q", joined)
+	}
 }
 
 func TestBidirectional(t *testing.T) {
