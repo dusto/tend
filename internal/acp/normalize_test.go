@@ -379,6 +379,29 @@ func TestCurrentModeUpdateWritesBackToSink(t *testing.T) {
 	}
 }
 
+func TestUpdateStepsCanShareAKind(t *testing.T) {
+	c := &capture{}
+	sink := &fakeModeSink{}
+	n := NewNormalizer(c, nil)
+	n.SetModeSink(sink)
+
+	notify(n, SessionUpdateMethod, update("s1", map[string]any{
+		"sessionUpdate": "current_mode_update",
+		"currentModeId": "think",
+	}))
+
+	if sink.calls != 1 || sink.modeID != "think" {
+		t.Fatalf("sink = %+v, want one current_mode_update write", sink)
+	}
+	evs := c.events()
+	if len(evs) != 1 {
+		t.Fatalf("events = %+v, want only the mode event", evs)
+	}
+	if evs[0].Type != "agent_mode_updated" {
+		t.Fatalf("event type = %q, want agent_mode_updated", evs[0].Type)
+	}
+}
+
 // fakeCommandSink records the commands handed to it.
 type fakeCommandSink struct {
 	sessionID api.SessionID
