@@ -3,11 +3,20 @@ package events
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 
 	"github.com/dusto/tend/api"
 	"github.com/dusto/tend/internal/summarize"
 )
+
+// plural returns "s" unless n is 1, for simple count labels.
+func plural(n int) string {
+	if n == 1 {
+		return ""
+	}
+	return "s"
+}
 
 // Compactor turns a range of raw session-turn events into a summary record: it
 // reads the range, renders it to a transcript, condenses it with the summarizer,
@@ -102,6 +111,26 @@ func renderTranscript(recs []api.Event, from, to uint64) string {
 // writeTranscriptEvent appends one event's transcript form to b.
 func writeTranscriptEvent(b *strings.Builder, e api.Event) {
 	switch e.Type {
+	case "user_prompt":
+		var p api.UserPrompt
+		if json.Unmarshal(e.Payload, &p) != nil {
+			return
+		}
+		// The human turn, on its own line. An attachment-only turn (no text) still
+		// carries meaning — the user supplied context — so note the count rather
+		// than dropping the turn; a mixed turn appends the count to the text.
+		line := p.Text
+		if p.Attachments > 0 {
+			note := fmt.Sprintf("(%d attachment%s)", p.Attachments, plural(p.Attachments))
+			if line == "" {
+				line = note
+			} else {
+				line += " " + note
+			}
+		}
+		if line != "" {
+			b.WriteString("\n[user] " + line + "\n")
+		}
 	case "agent_message_chunk":
 		var p api.AgentMessageChunk
 		if json.Unmarshal(e.Payload, &p) == nil {

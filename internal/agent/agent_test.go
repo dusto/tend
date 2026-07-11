@@ -266,13 +266,57 @@ func TestPromptCompletesTurn(t *testing.T) {
 	if s, _ := svc.sessions.Get("sess-1"); s.Status() != api.StatusIdle {
 		t.Errorf("status = %q, want idle", s.Status())
 	}
-	// A turn publishes prompt usage (before the send) then turn_end (on completion).
+	// A turn publishes the user prompt then prompt usage (both before the send),
+	// then turn_end (on completion).
+	evs, _, err := store.Read("session:sess-1", 0, 10)
+	if err != nil {
+		t.Fatalf("Read: %v", err)
+	}
+	if len(evs) != 3 || evs[0].Type != "user_prompt" || evs[1].Type != "agent_prompt_usage" || evs[2].Type != "turn_end" {
+		t.Fatalf("events = %+v, want user_prompt, agent_prompt_usage, turn_end", evs)
+	}
+}
+
+func TestPromptEmitsUserPrompt(t *testing.T) {
+	mgr := &fakeManager{openID: "sess-1", promptResult: acp.PromptResult{StopReason: "end_turn"}}
+	svc, store := newService(t, mgr)
+	startSession(t, svc)
+
+	if _, err := svc.Prompt(context.Background(), api.AgentPromptParams{SessionID: "sess-1", Text: "fix the parser"}); err != nil {
+		t.Fatalf("Prompt: %v", err)
+	}
+	evs, _, err := store.Read("session:sess-1", 0, 10)
+	if err != nil {
+		t.Fatalf("Read: %v", err)
+	}
+	if evs[0].Type != "user_prompt" {
+		t.Fatalf("first event = %q, want user_prompt", evs[0].Type)
+	}
+	var up api.UserPrompt
+	if err := json.Unmarshal(evs[0].Payload, &up); err != nil {
+		t.Fatalf("unmarshal user_prompt: %v", err)
+	}
+	if up.SessionID != "sess-1" || up.Text != "fix the parser" {
+		t.Errorf("user_prompt = %+v, want sess-1 / \"fix the parser\"", up)
+	}
+}
+
+func TestPromptEmptyTurnEmitsNoUserPrompt(t *testing.T) {
+	// A turn with no text and no attachments records no user_prompt (avoids noise);
+	// usage and turn_end still flow.
+	mgr := &fakeManager{openID: "sess-1", promptResult: acp.PromptResult{StopReason: "end_turn"}}
+	svc, store := newService(t, mgr)
+	startSession(t, svc)
+
+	if _, err := svc.Prompt(context.Background(), api.AgentPromptParams{SessionID: "sess-1"}); err != nil {
+		t.Fatalf("Prompt: %v", err)
+	}
 	evs, _, err := store.Read("session:sess-1", 0, 10)
 	if err != nil {
 		t.Fatalf("Read: %v", err)
 	}
 	if len(evs) != 2 || evs[0].Type != "agent_prompt_usage" || evs[1].Type != "turn_end" {
-		t.Fatalf("events = %+v, want agent_prompt_usage then turn_end", evs)
+		t.Fatalf("events = %+v, want agent_prompt_usage, turn_end (no user_prompt)", evs)
 	}
 }
 
@@ -288,8 +332,9 @@ func TestPromptEmitsUsage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Read: %v", err)
 	}
+	// evs[0] is the user_prompt; the usage sample follows.
 	var usage api.AgentPromptUsage
-	if err := json.Unmarshal(evs[0].Payload, &usage); err != nil {
+	if err := json.Unmarshal(evs[1].Payload, &usage); err != nil {
 		t.Fatalf("unmarshal usage: %v", err)
 	}
 	if usage.SessionID != "sess-1" || usage.TextChars != 5 || usage.TokensApprox != 2 || !usage.Approximate {

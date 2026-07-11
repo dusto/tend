@@ -518,6 +518,7 @@ func TestResumeSeedEndToEnd(t *testing.T) {
 			t.Fatalf("publish %s: %v", typ, err)
 		}
 	}
+	publish("user_prompt", api.UserPrompt{SessionID: sid, Text: "please fix the parser crash"})
 	publish("agent_message_chunk", api.AgentMessageChunk{SessionID: sid, Text: "investigated the parser bug"})
 	publish("tool_call", api.ToolCall{SessionID: sid, Name: "grep"})
 	publish("turn_end", api.TurnEnd{SessionID: sid})
@@ -532,6 +533,9 @@ func TestResumeSeedEndToEnd(t *testing.T) {
 	}
 	if seed.SourceSessionID != sid {
 		t.Errorf("source session = %q, want %q", seed.SourceSessionID, sid)
+	}
+	if !strings.Contains(seed.Text, "please fix the parser crash") {
+		t.Errorf("seed missing the user's original request:\n%s", seed.Text)
 	}
 	if !strings.Contains(seed.Text, "investigated the parser bug") || !strings.Contains(seed.Text, "[tool: grep]") {
 		t.Errorf("seed missing prior transcript:\n%s", seed.Text)

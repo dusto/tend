@@ -119,6 +119,14 @@ func (n *Normalizer) PublishPromptUsage(usage api.AgentPromptUsage) {
 	n.publish(sessionEvent(string(usage.SessionID), "agent_prompt_usage", usage))
 }
 
+// PublishUserPrompt emits user_prompt for a session: the user's prompt content
+// for the turn, so a replay/resume sees the human side of the conversation. The
+// caller running the turn invokes it once per turn, as the turn starts (before
+// the provider send), so the human turn is recorded ahead of the agent's output.
+func (n *Normalizer) PublishUserPrompt(prompt api.UserPrompt) {
+	n.publish(sessionEvent(string(prompt.SessionID), "user_prompt", prompt))
+}
+
 func (n *Normalizer) handleUpdate(params json.RawMessage) {
 	var env struct {
 		SessionID string          `json:"sessionId"`

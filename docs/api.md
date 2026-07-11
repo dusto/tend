@@ -183,6 +183,8 @@ Schemas live under `schemas/` (`methods/<name>.params.json` / `.result.json`, `e
   - Payload: `ToolCallUpdate`
 - **`turn_end`** (`session` stream) — The agent's turn ended.
   - Payload: `TurnEnd`
+- **`user_prompt`** (`session` stream) — The user's prompt content for a turn, emitted as the turn starts so a replay/resume sees the human side of the conversation (the session stream otherwise carries only agent output). Text only; attachment blob content is not persisted, just counted.
+  - Payload: `UserPrompt`
 
 ## Errors
 

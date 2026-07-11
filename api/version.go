@@ -35,8 +35,10 @@ const (
 	// agent_thought_level_updated session event; 0.8.0 added the
 	// agent_prompt_usage session event; 0.9.0 added the memory_written and
 	// memory_searched workspace events; 0.10.0 added the summary session event
-	// (context compaction: a condensed record replacing a range of raw turns).
-	DaemonToClientVersion = "0.10.0"
+	// (context compaction: a condensed record replacing a range of raw turns);
+	// 0.11.0 added the user_prompt session event (the user's per-turn prompt text,
+	// so a replay/resume sees the human side of the conversation).
+	DaemonToClientVersion = "0.11.0"
 )
 
 // Versions reports the contract version of each method set.

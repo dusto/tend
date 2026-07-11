@@ -25,13 +25,17 @@ func pubEvent(t *testing.T, s *Store, stream api.StreamID, typ string, payload a
 func TestRenderTranscript(t *testing.T) {
 	sid := api.SessionID("s")
 	recs := []api.Event{
-		{Kind: api.KindEvent, Seq: 1, Type: "agent_message_chunk", Payload: mustJSON(t, api.AgentMessageChunk{SessionID: sid, Text: "Hello "})},
-		{Kind: api.KindEvent, Seq: 2, Type: "agent_message_chunk", Payload: mustJSON(t, api.AgentMessageChunk{SessionID: sid, Text: "world"})},
-		{Kind: api.KindEvent, Seq: 3, Type: "tool_call", Payload: mustJSON(t, api.ToolCall{SessionID: sid, Name: "grep"})},
-		{Kind: api.KindEvent, Seq: 4, Type: "turn_end", Payload: mustJSON(t, api.TurnEnd{SessionID: sid})},
-		{Kind: api.KindEvent, Seq: 5, Type: "approval_requested", Payload: nil}, // non-transcript: skipped
+		{Kind: api.KindEvent, Seq: 1, Type: "user_prompt", Payload: mustJSON(t, api.UserPrompt{SessionID: sid, Text: "find the bug"})},
+		{Kind: api.KindEvent, Seq: 2, Type: "agent_message_chunk", Payload: mustJSON(t, api.AgentMessageChunk{SessionID: sid, Text: "Hello "})},
+		{Kind: api.KindEvent, Seq: 3, Type: "agent_message_chunk", Payload: mustJSON(t, api.AgentMessageChunk{SessionID: sid, Text: "world"})},
+		{Kind: api.KindEvent, Seq: 4, Type: "tool_call", Payload: mustJSON(t, api.ToolCall{SessionID: sid, Name: "grep"})},
+		{Kind: api.KindEvent, Seq: 5, Type: "turn_end", Payload: mustJSON(t, api.TurnEnd{SessionID: sid})},
+		{Kind: api.KindEvent, Seq: 6, Type: "approval_requested", Payload: nil}, // non-transcript: skipped
 	}
-	got := renderTranscript(recs, 1, 5)
+	got := renderTranscript(recs, 1, 6)
+	if !strings.Contains(got, "[user] find the bug") {
+		t.Errorf("user prompt should render as a human turn: %q", got)
+	}
 	if !strings.Contains(got, "Hello world") {
 		t.Errorf("message chunks should flow inline: %q", got)
 	}
@@ -70,6 +74,27 @@ func TestRenderTranscriptIncludesSummaries(t *testing.T) {
 	}
 	if !condensed {
 		t.Error("a render that folded in a summary record should report condensed=true")
+	}
+}
+
+func TestRenderTranscriptUserPromptAttachments(t *testing.T) {
+	sid := api.SessionID("s")
+	cases := []struct {
+		name string
+		up   api.UserPrompt
+		want string
+	}{
+		{"attachment-only turn is not dropped", api.UserPrompt{SessionID: sid, Attachments: 2}, "[user] (2 attachments)"},
+		{"single attachment is singular", api.UserPrompt{SessionID: sid, Attachments: 1}, "[user] (1 attachment)"},
+		{"text plus attachments notes the count", api.UserPrompt{SessionID: sid, Text: "look here", Attachments: 1}, "[user] look here (1 attachment)"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			recs := []api.Event{{Kind: api.KindEvent, Seq: 1, Type: "user_prompt", Payload: mustJSON(t, tc.up)}}
+			if got := renderTranscript(recs, 1, 1); got != tc.want {
+				t.Errorf("render = %q, want %q", got, tc.want)
+			}
+		})
 	}
 }
 

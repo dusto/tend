@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"strings"
 	"unicode/utf8"
 
 	"github.com/dusto/tend/api"
@@ -37,6 +38,29 @@ func measurePromptUsage(id api.SessionID, p api.AgentPromptParams) api.AgentProm
 	}
 	u.TokensApprox = approxTokens(u.TextChars)
 	return u
+}
+
+// userPrompt composes the user's prompt content for a turn into a UserPrompt
+// event payload: the text (the plain Text, or the text blocks joined on newlines
+// to mirror promptBlocks) plus a count of non-text attachment blocks, whose
+// content is not persisted. Text blocks are separate ACP blocks, so they are
+// joined with a newline rather than concatenated — otherwise adjacent blocks
+// ("fix"+"parser") would fuse into "fixparser" in the persisted replay input.
+func userPrompt(id api.SessionID, p api.AgentPromptParams) api.UserPrompt {
+	if len(p.Content) == 0 {
+		return api.UserPrompt{SessionID: id, Text: p.Text}
+	}
+	up := api.UserPrompt{SessionID: id}
+	var texts []string
+	for _, c := range p.Content {
+		if c.Type == api.PromptContentText {
+			texts = append(texts, c.Text)
+			continue
+		}
+		up.Attachments++
+	}
+	up.Text = strings.Join(texts, "\n")
+	return up
 }
 
 // approxTokens estimates tokens from a character count, rounding up so any

@@ -52,3 +52,58 @@ func TestMeasurePromptUsageCarriesSessionID(t *testing.T) {
 		t.Errorf("SessionID = %q, want sess-9", got.SessionID)
 	}
 }
+
+func TestUserPrompt(t *testing.T) {
+	tests := []struct {
+		name            string
+		p               api.AgentPromptParams
+		wantText        string
+		wantAttachments int
+	}{
+		{
+			name:     "plain text",
+			p:        api.AgentPromptParams{Text: "fix the parser"},
+			wantText: "fix the parser",
+		},
+		{
+			name: "multiple text blocks join on newlines (no fusing)",
+			p: api.AgentPromptParams{Content: []api.PromptContentBlock{
+				{Type: api.PromptContentText, Text: "fix"},
+				{Type: api.PromptContentText, Text: "parser"},
+			}},
+			wantText: "fix\nparser",
+		},
+		{
+			name: "text plus attachments",
+			p: api.AgentPromptParams{Content: []api.PromptContentBlock{
+				{Type: api.PromptContentText, Text: "look at this"},
+				{Type: api.PromptContentImage, MimeType: "image/png", Data: "AAAA"},
+				{Type: api.PromptContentResourceLink, URI: "file:///x"},
+			}},
+			wantText:        "look at this",
+			wantAttachments: 2,
+		},
+		{
+			name: "attachment-only turn: no text, counted",
+			p: api.AgentPromptParams{Content: []api.PromptContentBlock{
+				{Type: api.PromptContentImage, MimeType: "image/png", Data: "AAAA"},
+			}},
+			wantText:        "",
+			wantAttachments: 1,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := userPrompt("sess-1", tt.p)
+			if got.SessionID != "sess-1" {
+				t.Errorf("SessionID = %q, want sess-1", got.SessionID)
+			}
+			if got.Text != tt.wantText {
+				t.Errorf("Text = %q, want %q", got.Text, tt.wantText)
+			}
+			if got.Attachments != tt.wantAttachments {
+				t.Errorf("Attachments = %d, want %d", got.Attachments, tt.wantAttachments)
+			}
+		})
+	}
+}
