@@ -275,7 +275,7 @@ func TestServiceCachesProviderPerWorkspace(t *testing.T) {
 
 func TestContextRequiresWorkspace(t *testing.T) {
 	svc := newService(&fakeProvider{})
-	if _, err := svc.memContext(context.Background(), api.MemoryContextParams{}); codeOf(t, err) != rpc.CodeInvalidParams {
+	if _, err := svc.Context(context.Background(), api.MemoryContextParams{}); codeOf(t, err) != rpc.CodeInvalidParams {
 		t.Error("missing workspace_id should be invalid params")
 	}
 }
@@ -287,7 +287,7 @@ func TestContextAssemblesSteeringWithinBudget(t *testing.T) {
 		{ID: "s2", Text: "never do Y", Kind: api.MemoryKindSteering},
 	}}
 	svc := newService(p) // nil summarizer -> deterministic fallback
-	res, err := svc.memContext(context.Background(), api.MemoryContextParams{WorkspaceID: "ws", Path: "a/b.go"})
+	res, err := svc.Context(context.Background(), api.MemoryContextParams{WorkspaceID: "ws", Path: "a/b.go"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -317,7 +317,7 @@ func TestContextIncludesQueryNotesAfterSteering(t *testing.T) {
 		},
 	}
 	svc := newService(p)
-	res, err := svc.memContext(context.Background(), api.MemoryContextParams{WorkspaceID: "ws", Query: "thing"})
+	res, err := svc.Context(context.Background(), api.MemoryContextParams{WorkspaceID: "ws", Query: "thing"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -333,7 +333,7 @@ func TestContextCondensesOverBudgetViaSummarizer(t *testing.T) {
 	fs := &fakeSummarizer{reply: "CONDENSED"}
 	p := &fakeProvider{steering: []api.MemoryEntry{{ID: "s1", Text: strings.Repeat("x", 500), Kind: api.MemoryKindSteering}}}
 	svc := newServiceSum(p, fs)
-	res, err := svc.memContext(context.Background(), api.MemoryContextParams{WorkspaceID: "ws", Budget: 50})
+	res, err := svc.Context(context.Background(), api.MemoryContextParams{WorkspaceID: "ws", Budget: 50})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -356,7 +356,7 @@ func TestContextFallbackTruncationReportsSummarized(t *testing.T) {
 		{ID: "s1", Text: strings.Repeat("rule ", 300), Kind: api.MemoryKindSteering},
 	}}
 	svc := newService(p) // nil summarizer -> deterministic fallback
-	res, err := svc.memContext(context.Background(), api.MemoryContextParams{WorkspaceID: "ws", Budget: 100})
+	res, err := svc.Context(context.Background(), api.MemoryContextParams{WorkspaceID: "ws", Budget: 100})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -370,7 +370,7 @@ func TestContextFallbackTruncationReportsSummarized(t *testing.T) {
 
 func TestContextEmptyWhenNothingApplies(t *testing.T) {
 	svc := newService(&fakeProvider{})
-	res, err := svc.memContext(context.Background(), api.MemoryContextParams{WorkspaceID: "ws"})
+	res, err := svc.Context(context.Background(), api.MemoryContextParams{WorkspaceID: "ws"})
 	if err != nil {
 		t.Fatal(err)
 	}

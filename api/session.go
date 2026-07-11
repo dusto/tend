@@ -178,3 +178,47 @@ type SessionClaimParams struct {
 type SessionClaimResult struct {
 	Session SessionInfo `json:"session"`
 }
+
+// SessionResumeSeedParams reconstructs the context needed to resume work from a
+// prior session, so a fresh session can pick up where it left off. The daemon
+// renders the prior session's durable event history — the w1h.9 summary records
+// standing in for compacted turn ranges, plus the recent raw transcript — and
+// combines it with the workspace's applicable memory (steering, and optional
+// query-matched notes), then condenses the whole to a character budget. Because
+// it reads the durable log (not live provider state) and composes context
+// daemon-side, resume works across providers and across a daemon restart, rather
+// than depending on a provider-side session load.
+type SessionResumeSeedParams struct {
+	// SessionID is the prior session whose history seeds the resume. Its event
+	// stream is read from the durable log, so the session need not still be live
+	// (this is the cross-restart path).
+	SessionID SessionID `json:"session_id"`
+	// WorkspaceID is the workspace whose memory (steering + optional notes) joins
+	// the seed. Required, since the prior session's workspace is not re-derived
+	// from the log.
+	WorkspaceID WorkspaceID `json:"workspace_id"`
+	// Path is an optional worktree-relative path for steering glob activation
+	// (same semantics as memory.context/steering). Empty includes only
+	// always-steering.
+	Path string `json:"path,omitempty"`
+	// Query, when set, includes matching notes in the memory portion of the seed
+	// (via the memory context assembly).
+	Query string `json:"query,omitempty"`
+	// Budget is the target character budget for the whole seed; 0 uses the
+	// summarizer's configured default. A seed within budget is returned verbatim.
+	Budget int `json:"budget,omitempty"`
+}
+
+// SessionResumeSeedResult is the assembled resume seed: the opening-prompt
+// content for a fresh session that continues the prior session's work.
+type SessionResumeSeedResult struct {
+	// Text is the resume seed to send as the first turn of a new session. It is
+	// empty when the prior session has no readable history and no memory applies.
+	Text string `json:"text"`
+	// Summarized reports whether the seed was condensed to fit the budget, rather
+	// than returned at its full assembled size — so a caller knows the seed is a
+	// lossy digest, not a verbatim replay of prior context.
+	Summarized bool `json:"summarized"`
+	// SourceSessionID echoes the prior session the seed was reconstructed from.
+	SourceSessionID SessionID `json:"source_session_id"`
+}

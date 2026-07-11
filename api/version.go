@@ -22,8 +22,10 @@ const (
 	// (per-session agent CPU/RSS); 0.19.0 added memory.search/get; 0.20.0 added
 	// memory.write; 0.21.0 added memory.steering (steering activation model);
 	// 0.22.0 added MemoryEntry/MemoryWriteParams.provenance (memory import);
-	// 0.23.0 added memory.context (budget-bounded steering+notes digest).
-	PluginToDaemonVersion = "0.23.0"
+	// 0.23.0 added memory.context (budget-bounded steering+notes digest); 0.24.0
+	// added session.resume_seed (daemon-side context reconstruction: summary +
+	// recent transcript + memory, condensed into a fresh-session seed).
+	PluginToDaemonVersion = "0.24.0"
 	// 0.2.0 added editor.open + editor.diff; 0.3.0 added editor.diagnostics.
 	DaemonToEditorVersion = "0.3.0"
 	// 0.2.0 added the agent_thought_chunk session event; 0.3.0 added the

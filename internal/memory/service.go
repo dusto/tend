@@ -69,7 +69,7 @@ func Register(m *dispatch.Mux, s *Service) error {
 	if err := dispatch.Handle(m, MethodSteering, s.steering); err != nil {
 		return err
 	}
-	return dispatch.Handle(m, MethodContext, s.memContext)
+	return dispatch.Handle(m, MethodContext, s.Context)
 }
 
 func (s *Service) provider(ws api.WorkspaceID) Provider {
@@ -155,11 +155,13 @@ func (s *Service) steering(ctx context.Context, p api.MemorySteeringParams) (api
 	return api.MemorySteeringResult{Entries: entries}, nil
 }
 
-// memContext assembles the steering that applies to the context (plus optional
+// Context assembles the steering that applies to the context (plus optional
 // query-matched notes) and condenses it to a character budget via the
 // summarizer, returning a bounded digest to inject. Assembly order is steering
-// first, then notes; a within-budget assembly is returned verbatim.
-func (s *Service) memContext(ctx context.Context, p api.MemoryContextParams) (api.MemoryContextResult, error) {
+// first, then notes; a within-budget assembly is returned verbatim. It backs
+// memory.context and is reused by session resume to build the memory portion of
+// a resume seed.
+func (s *Service) Context(ctx context.Context, p api.MemoryContextParams) (api.MemoryContextResult, error) {
 	if p.WorkspaceID == "" {
 		return api.MemoryContextResult{}, invalidParams("workspace_id is required")
 	}

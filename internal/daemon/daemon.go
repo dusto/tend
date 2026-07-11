@@ -28,6 +28,7 @@ import (
 	"github.com/dusto/tend/internal/provider"
 	"github.com/dusto/tend/internal/pty"
 	"github.com/dusto/tend/internal/resource"
+	"github.com/dusto/tend/internal/resume"
 	"github.com/dusto/tend/internal/rpc"
 	"github.com/dusto/tend/internal/session"
 	"github.com/dusto/tend/internal/sessions"
@@ -82,6 +83,7 @@ type Server struct {
 	sessSvc *sessions.Service
 	tasks   *tasks.Service
 	memory  *memory.Service
+	resume  *resume.Service
 	panes   *pty.Service
 	ptyMgr  *pty.Manager
 
@@ -168,6 +170,10 @@ func New(ln net.Listener, logPath string, opts ...Option) (*Server, error) {
 	// memory directory; a config-driven factory can replace it, like task sources.
 	// The summarizer condenses assembled context (memory.context) to a budget.
 	s.memory = memory.NewService(o.memoryFactory, s.store, buildSummarizer(o.acp))
+	// session.resume_seed reconstructs a resume seed from a prior session's durable
+	// history (read from the store) plus its workspace memory, condensed by the
+	// summarizer — daemon-side context reconstruction that survives a restart.
+	s.resume = resume.NewService(s.store, s.memory, buildSummarizer(o.acp))
 	s.ptyMgr = pty.NewManager()
 	s.panes = pty.NewService(s.ptyMgr, s.sessions, s.gate, s.store, "")
 
@@ -332,6 +338,9 @@ func (s *Server) newMux() (*dispatch.Mux, func(), error) {
 		return nil, nil, err
 	}
 	if err := memory.Register(mux, s.memory); err != nil {
+		return nil, nil, err
+	}
+	if err := resume.Register(mux, s.resume); err != nil {
 		return nil, nil, err
 	}
 	if err := tasks.Register(mux, s.tasks); err != nil {

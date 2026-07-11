@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net"
 	"os/exec"
@@ -464,5 +465,78 @@ func TestMemoryContextEndToEnd(t *testing.T) {
 	}
 	if !strings.Contains(ctxRes.Text, "Prefer table-driven tests.") {
 		t.Errorf("context text missing steering body:\n%s", ctxRes.Text)
+	}
+}
+
+// TestResumeSeedEndToEnd drives session.resume_seed over a real socket: it seeds
+// a prior session's durable event stream directly on the store (standing in for
+// a completed session), writes an always-steering memory, then asks the daemon
+// to reconstruct a resume seed and checks the seed carries both the prior
+// transcript and the workspace memory. This exercises dispatch registration,
+// schema validation, the 0.24.0 handshake, and the events+memory+summarize
+// composition — all without a live provider, which is the point of daemon-side
+// reconstruction.
+func TestResumeSeedEndToEnd(t *testing.T) {
+	srv, path := newServer(t)
+	go func() { _ = srv.Serve() }()
+	t.Cleanup(srv.Shutdown)
+
+	repo := initRepo(t)
+	client := dial(t, path)
+	if _, err := handshake.Do(testCtx(t), client, api.CurrentVersions()); err != nil {
+		t.Fatalf("handshake: %v", err)
+	}
+
+	var opened api.WorkspaceInfo
+	if err := client.Call(testCtx(t), "workspace.open", api.WorkspaceOpenParams{Dir: repo}, &opened); err != nil {
+		t.Fatalf("workspace.open: %v", err)
+	}
+
+	var written api.MemoryWriteResult
+	if err := client.Call(testCtx(t), "memory.write", api.MemoryWriteParams{
+		WorkspaceID: opened.WorkspaceID,
+		ID:          "house-style",
+		Kind:        api.MemoryKindSteering,
+		Apply:       api.MemoryApplyAlways,
+		Title:       "House style",
+		Text:        "Prefer table-driven tests.",
+	}, &written); err != nil {
+		t.Fatalf("memory.write: %v", err)
+	}
+
+	// Seed a prior session's durable transcript directly on the store, as a
+	// completed session would have left behind.
+	sid := api.SessionID("prior-session")
+	stream := api.SessionStream(sid)
+	publish := func(typ string, payload any) {
+		t.Helper()
+		body, err := json.Marshal(payload)
+		if err != nil {
+			t.Fatalf("marshal %s: %v", typ, err)
+		}
+		if _, err := srv.EventStore().Publish(api.Event{StreamID: stream, Scope: api.ScopeSession, Type: typ, Payload: body}); err != nil {
+			t.Fatalf("publish %s: %v", typ, err)
+		}
+	}
+	publish("agent_message_chunk", api.AgentMessageChunk{SessionID: sid, Text: "investigated the parser bug"})
+	publish("tool_call", api.ToolCall{SessionID: sid, Name: "grep"})
+	publish("turn_end", api.TurnEnd{SessionID: sid})
+
+	var seed api.SessionResumeSeedResult
+	if err := client.Call(testCtx(t), "session.resume_seed", api.SessionResumeSeedParams{
+		SessionID:   sid,
+		WorkspaceID: opened.WorkspaceID,
+		Budget:      4000,
+	}, &seed); err != nil {
+		t.Fatalf("session.resume_seed: %v", err)
+	}
+	if seed.SourceSessionID != sid {
+		t.Errorf("source session = %q, want %q", seed.SourceSessionID, sid)
+	}
+	if !strings.Contains(seed.Text, "investigated the parser bug") || !strings.Contains(seed.Text, "[tool: grep]") {
+		t.Errorf("seed missing prior transcript:\n%s", seed.Text)
+	}
+	if !strings.Contains(seed.Text, "Prefer table-driven tests.") {
+		t.Errorf("seed missing workspace memory:\n%s", seed.Text)
 	}
 }

@@ -51,6 +51,33 @@ func (c *Compactor) Compact(ctx context.Context, streamID api.StreamID, sessionI
 	return c.store.Compact(streamID, api.ScopeSession, from, to, payload)
 }
 
+// RenderTranscript renders a full session read — summary records and raw
+// transcript events, in stream order — into plain text for a resume seed. A
+// summary record (kind=summary) contributes its already-condensed text, standing
+// in for the turns it subsumed; a raw event renders as in a transcript
+// (message/thought inline, tool calls and turn boundaries marked). This is the
+// whole-history counterpart to the range renderer the Compactor uses: pass it a
+// Store.Read result (which already serves summaries in place of compacted
+// ranges), and it yields the prior-context text to condense into a seed.
+func RenderTranscript(recs []api.Event) string {
+	var b strings.Builder
+	for _, e := range recs {
+		switch e.Kind {
+		case api.KindSummary:
+			var p api.ContextSummary
+			if json.Unmarshal(e.Payload, &p) == nil && p.Text != "" {
+				if b.Len() > 0 {
+					b.WriteString("\n")
+				}
+				b.WriteString(p.Text)
+			}
+		case api.KindEvent:
+			writeTranscriptEvent(&b, e)
+		}
+	}
+	return strings.TrimSpace(b.String())
+}
+
 // renderTranscript renders the raw events whose seq is in [from, to] into a plain
 // transcript for summarization: agent message and thought text flows inline;
 // tool calls and turn boundaries are marked on their own lines. Non-transcript
