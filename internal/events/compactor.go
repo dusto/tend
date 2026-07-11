@@ -59,7 +59,12 @@ func (c *Compactor) Compact(ctx context.Context, streamID api.StreamID, sessionI
 // whole-history counterpart to the range renderer the Compactor uses: pass it a
 // Store.Read result (which already serves summaries in place of compacted
 // ranges), and it yields the prior-context text to condense into a seed.
-func RenderTranscript(recs []api.Event) string {
+//
+// condensed is true when at least one summary record contributed text, so the
+// rendered output already contains lossy (previously compacted) context even
+// before any further summarization — a caller that reports whether its result is
+// a digest must OR this in.
+func RenderTranscript(recs []api.Event) (text string, condensed bool) {
 	var b strings.Builder
 	for _, e := range recs {
 		switch e.Kind {
@@ -70,12 +75,13 @@ func RenderTranscript(recs []api.Event) string {
 					b.WriteString("\n")
 				}
 				b.WriteString(p.Text)
+				condensed = true
 			}
 		case api.KindEvent:
 			writeTranscriptEvent(&b, e)
 		}
 	}
-	return strings.TrimSpace(b.String())
+	return strings.TrimSpace(b.String()), condensed
 }
 
 // renderTranscript renders the raw events whose seq is in [from, to] into a plain

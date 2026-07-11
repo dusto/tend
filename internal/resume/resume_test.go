@@ -115,6 +115,35 @@ func TestResumeSeedReportsSummarizedFromMemory(t *testing.T) {
 	}
 }
 
+func summaryRec(t *testing.T, seq uint64, text string) api.Event {
+	t.Helper()
+	b, err := json.Marshal(api.ContextSummary{Text: text})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A summary record is served at from_seq with CursorSeq = to_seq.
+	return api.Event{Kind: api.KindSummary, Seq: seq, CursorSeq: seq, Type: "summary", Payload: b}
+}
+
+func TestResumeSeedReportsSummarizedWhenHistoryHasSummary(t *testing.T) {
+	// A prior transcript summary injects already-condensed context, so the seed is
+	// a digest even when the assembled text fits the budget verbatim.
+	reader := &fakeReader{recs: []api.Event{summaryRec(t, 1, "condensed earlier turns"), msg(t, 5, "recent turn")}}
+	mem := &fakeMem{res: api.MemoryContextResult{Text: "rules", Summarized: false}}
+	s := NewService(reader, mem, nil)
+
+	res, err := s.ResumeSeed(context.Background(), api.SessionResumeSeedParams{SessionID: "s", WorkspaceID: "ws", Budget: 4000})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(res.Text, "condensed earlier turns") {
+		t.Errorf("seed missing the prior summary text: %q", res.Text)
+	}
+	if !res.Summarized {
+		t.Error("a seed that folded in a prior transcript summary must report Summarized")
+	}
+}
+
 func TestResumeSeedTruncatesOverBudget(t *testing.T) {
 	reader := &fakeReader{recs: []api.Event{msg(t, 1, strings.Repeat("history ", 200))}}
 	mem := &fakeMem{res: api.MemoryContextResult{Text: "rules"}}

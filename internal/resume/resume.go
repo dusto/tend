@@ -84,12 +84,16 @@ func (s *Service) ResumeSeed(ctx context.Context, p api.SessionResumeSeedParams)
 	}
 
 	// (a) Prior session history: summary records in place of compacted ranges,
-	// plus the recent raw transcript, rendered to plain text.
+	// plus the recent raw transcript, rendered to plain text. condensed reports
+	// whether a prior summary record already contributed lossy context (so the
+	// seed is a digest even before the final pass below). Note this is the agent's
+	// output transcript — the user's prompt text is not persisted on the stream
+	// (see the contract note on SessionResumeSeedParams).
 	recs, err := readAll(s.reader, api.SessionStream(p.SessionID))
 	if err != nil {
 		return api.SessionResumeSeedResult{}, internalErr(err)
 	}
-	transcript := events.RenderTranscript(recs)
+	transcript, condensed := events.RenderTranscript(recs)
 
 	// (b) Workspace memory context. It is bounded to the summarizer's own default
 	// (Budget 0) rather than the seed budget, so the memory portion cannot consume
@@ -119,9 +123,10 @@ func (s *Service) ResumeSeed(ctx context.Context, p api.SessionResumeSeedParams)
 	}
 	return api.SessionResumeSeedResult{
 		Text: res.Text,
-		// The seed is a digest when the final pass reduced it OR the memory portion
-		// was already condensed on the way in.
-		Summarized:      res.Summarized || memRes.Summarized,
+		// The seed is a digest when any part of it is lossy: the final pass reduced
+		// it, the memory portion was already condensed on the way in, or the rendered
+		// history already folded in a prior transcript summary.
+		Summarized:      res.Summarized || memRes.Summarized || condensed,
 		SourceSessionID: p.SessionID,
 	}, nil
 }
