@@ -52,6 +52,16 @@ type ConfigSink interface {
 	SetSessionThoughtLevel(sessionID api.SessionID, thoughtLevelID string)
 }
 
+// UsageSink records the agent's latest reported context-window fullness (ACP
+// usage_update) on the authoritative session state, so the compaction trigger
+// can read it after a turn. The streamed agent_context_usage event alone is not
+// enough: the trigger inspects the session, not the event stream.
+// *session.Registry satisfies this. Optional: nil means usage events are
+// published but not recorded on the session.
+type UsageSink interface {
+	SetSessionContextUsage(sessionID api.SessionID, used, window int)
+}
+
 // Normalizer is the inbound handler installed on an ACP process: it converts the
 // agent's session/update notifications into TEND events on the session's stream,
 // and preserves anything it does not recognize as a provider_notification so no
@@ -62,6 +72,7 @@ type Normalizer struct {
 	modeSink   ModeSink       // optional
 	cmdSink    CommandSink    // optional
 	configSink ConfigSink     // optional
+	usageSink  UsageSink      // optional
 	steps      []updateStep
 }
 
@@ -89,6 +100,13 @@ func (n *Normalizer) SetCommandSink(sink CommandSink) {
 // any ACP process is handling notifications.
 func (n *Normalizer) SetConfigSink(sink ConfigSink) {
 	n.configSink = sink
+}
+
+// SetUsageSink wires the authoritative session state that agent-reported context
+// usage is written back to. Set once at daemon wiring, before any ACP process is
+// handling notifications.
+func (n *Normalizer) SetUsageSink(sink UsageSink) {
+	n.usageSink = sink
 }
 
 // Handle implements rpc.Handler. It processes inbound notifications; inbound
@@ -264,6 +282,7 @@ func defaultUpdateSteps() []updateStep {
 		toolCallUpdateStep(),
 		planStep(),
 		currentModeEventStep(),
+		contextUsageSinkStep(),
 		contextUsageStep(),
 		metadataParserStep(),
 		preserveUnhandledStep(),
@@ -440,6 +459,30 @@ func currentModeEventStep() updateStep {
 			CurrentModeID: u.CurrentModeID,
 		})
 	})
+}
+
+// contextUsageSinkStep records the agent's reported context-window fullness on
+// the authoritative session state, mirroring currentModeSinkStep: it runs before
+// contextUsageStep (which publishes the event) and continues, so a usage_update
+// both updates the session and streams its event. The trigger inspects the
+// session, not the stream, so without this write-back it could not act.
+func contextUsageSinkStep() updateStep {
+	return updateStep{
+		name:  "usage_sink",
+		match: kindIs("usage_update"),
+		run: func(n *Normalizer, _ *updateFlow, update sessionUpdate) updateStepResult {
+			if n.usageSink == nil {
+				return updateContinue
+			}
+			var u struct {
+				Used int `json:"used"`
+				Size int `json:"size"`
+			}
+			_ = json.Unmarshal(update.Raw, &u)
+			n.usageSink.SetSessionContextUsage(api.SessionID(update.SessionID), u.Used, u.Size)
+			return updateContinue
+		},
+	}
 }
 
 func contextUsageStep() updateStep {

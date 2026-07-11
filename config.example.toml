@@ -119,3 +119,21 @@ enabled = false
 # [summarize.acp]
 # provider = "claude"          # an enabled [[acp.providers]] id
 # model    = ""                # optional: pin a model on the summarizer session
+
+# The [compact] section configures the post-turn agent context-window compaction
+# trigger. When a session's reported context fullness crosses the threshold, TEND
+# forwards the provider's /compact command (when the provider advertises one, e.g.
+# Claude) — which shrinks the agent's OWN context — or, when it does not, falls
+# back to summarizing the daemon transcript (the [summarize] backend) into a
+# summary record. It is off by default: /compact spends a turn and mutates the
+# provider's context, so it is opt-in. The trigger only fires for providers that
+# report context usage (usage_update); providers that do not are inert.
+#
+#   enabled   = turn the trigger on (default false)
+#   threshold = context-window fullness fraction, (0,1] (default 0.85)
+#   budget    = character budget for the summarizer fallback (0 = summarizer default)
+
+# [compact]
+# enabled   = true
+# threshold = 0.85
+# budget    = 0

@@ -53,6 +53,12 @@ type Session struct {
 	// process, written by the daemon's periodic sampler. Nil until first sampled
 	// (or when the process is gone or the platform is unsupported).
 	resourceUsage *api.SessionResourceUsage
+	// contextUsed/contextWindow are the agent's most-recent reported context-window
+	// fullness (ACP usage_update), written by the normalizer. contextWindow is 0
+	// until the provider reports usage (many providers never do); a 0 window means
+	// "unknown", so the compaction trigger cannot act.
+	contextUsed   int
+	contextWindow int
 	// Editor binding: owner is the client currently serving editor-local calls
 	// ("" when headless); expectedEditor is the editor identity auto-bind matches,
 	// recorded when the binding is claimed and retained across disconnects so the
@@ -239,6 +245,24 @@ func (s *Session) ResourceUsage() *api.SessionResourceUsage {
 	}
 	u := *s.resourceUsage
 	return &u
+}
+
+// SetContextUsage records the agent's latest reported context-window fullness
+// (ACP usage_update: used and total window tokens). A non-positive window is
+// stored as-is; ContextUsage reports it as unknown.
+func (s *Session) SetContextUsage(used, window int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.contextUsed, s.contextWindow = used, window
+}
+
+// ContextUsage returns the agent's latest context-window fullness and whether it
+// is known. ok is false until the provider has reported a positive window, so a
+// caller cannot mistake "no data" for an empty context.
+func (s *Session) ContextUsage() (used, window int, ok bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.contextUsed, s.contextWindow, s.contextWindow > 0
 }
 
 // Owner returns the session's editor-binding owner and whether one is bound.

@@ -18,6 +18,7 @@ import (
 	"github.com/dusto/tend/internal/agent"
 	"github.com/dusto/tend/internal/approvals"
 	"github.com/dusto/tend/internal/client"
+	"github.com/dusto/tend/internal/compaction"
 	"github.com/dusto/tend/internal/dispatch"
 	"github.com/dusto/tend/internal/editor"
 	"github.com/dusto/tend/internal/events"
@@ -187,6 +188,9 @@ func New(ln net.Listener, logPath string, opts ...Option) (*Server, error) {
 	// Agent-driven config-option changes (config_option_update) likewise write
 	// back the current model/mode/thought-level so session.list stays accurate.
 	norm.SetConfigSink(s.sessions)
+	// Agent-reported context-window usage (usage_update) is recorded on the session
+	// so the post-turn compaction trigger can read the latest fullness.
+	norm.SetUsageSink(s.sessions)
 	s.pool = acp.NewPool(spawnProvider(o.acp, norm), s.store, acp.Options{Max: maxProcsPerProvider})
 	s.acpMgr = acp.NewManager(s.pool)
 	s.agent = agent.NewService(s.sessions, s.acpMgr, norm)
@@ -201,6 +205,18 @@ func New(ln net.Listener, logPath string, opts ...Option) (*Server, error) {
 	// agent (s.agent), so it is built after both.
 	s.slash = slash.NewService(s.sessions, s.tasks, s.agent, s.store)
 	norm.SetCommandSink(s.slash)
+	// Post-turn agent context-window compaction trigger (opt-in via [compact]).
+	// When enabled, after a turn it reads the session's reported context fullness
+	// and, past the threshold, forwards the provider /compact or falls back to
+	// summarizing the transcript. It forwards through the agent service (a turn),
+	// so it is wired after s.agent and set as the agent's trigger.
+	if o.acp != nil && o.acp.Compact.Enabled {
+		compactor := events.NewCompactor(s.store, buildSummarizer(o.acp))
+		s.agent.SetCompactionTrigger(compaction.NewService(
+			s.sessions, s.agent, compactor, s.store,
+			o.acp.Compact.EffectiveThreshold(), o.acp.Compact.Budget,
+		))
+	}
 
 	if _, _, err := s.newMux(); err != nil {
 		s.resources.Close()
