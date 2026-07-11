@@ -42,6 +42,22 @@ func run() error {
 		return err
 	}
 
+	// Optional ACP wire trace: when TEND_ACP_TRACE names a file, every inbound
+	// frame from every provider process is appended to it as JSON lines. It is a
+	// debug tap for learning an agent's exact output (e.g. where it reports token
+	// usage); off unless the env var is set. Best-effort: a bad path logs and
+	// continues rather than failing startup.
+	if tracePath := os.Getenv("TEND_ACP_TRACE"); tracePath != "" {
+		tf, terr := os.OpenFile(tracePath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+		if terr != nil {
+			slog.Warn("tendd: could not open ACP trace file; tracing off", "path", tracePath, "err", terr)
+		} else {
+			defer func() { _ = tf.Close() }()
+			acp.SetTraceWriter(tf)
+			slog.Warn("tendd: ACP wire tracing ON; capturing raw provider frames", "path", tracePath)
+		}
+	}
+
 	cfgPath := acp.ConfigPath()
 	cfg, loaded, err := acp.Load(cfgPath)
 	if err != nil {

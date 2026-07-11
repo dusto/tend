@@ -1,12 +1,15 @@
 package acp
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"io"
 	"net"
 	"os"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -218,6 +221,68 @@ func TestInitializeAgentError(t *testing.T) {
 	if !errors.As(err, &rerr) || rerr.Message != "boom" {
 		t.Fatalf("Initialize err = %v, want rpc.Error boom", err)
 	}
+}
+
+// TestTraceWriterCapturesInboundFrames verifies the debug tap: with a trace
+// writer set, every inbound frame from a provider is written to it, so an
+// operator can capture an agent's exact wire output (e.g. where it reports token
+// usage).
+func TestTraceWriterCapturesInboundFrames(t *testing.T) {
+	var buf syncBuffer
+	SetTraceWriter(&buf)
+	t.Cleanup(func() { SetTraceWriter(nil) })
+
+	served := make(chan struct{}, 1)
+	h := rpc.HandlerFunc(func(_ context.Context, req *rpc.Request) (any, error) {
+		if req.Notification {
+			select {
+			case served <- struct{}{}:
+			default:
+			}
+		}
+		return nil, nil
+	})
+	a, b := net.Pipe()
+	agentConn := rpc.NewConn(a, nil)
+	c := newClient(b, h) // installs the trace hook because a writer is set
+	t.Cleanup(func() { _ = c.Close(); _ = agentConn.Close() })
+
+	if err := agentConn.Notify(testCtx(t, 2*time.Second), "session/update", map[string]string{"sessionId": "s7"}); err != nil {
+		t.Fatalf("agent Notify: %v", err)
+	}
+	select {
+	case <-served:
+	case <-time.After(2 * time.Second):
+		t.Fatal("notification was not handled")
+	}
+
+	// The trace ran before dispatch (same read-loop goroutine), so by the time the
+	// handler signalled, the frame was written. Assert the raw frame was captured.
+	line := buf.String()
+	if !strings.Contains(line, "session/update") || !strings.Contains(line, "s7") {
+		t.Errorf("trace did not capture the raw frame; got %q", line)
+	}
+	if !strings.Contains(line, `"dir":"in"`) || !strings.Contains(line, `"provider":"in-process"`) {
+		t.Errorf("trace envelope missing provider/direction; got %q", line)
+	}
+}
+
+// syncBuffer is a minimal concurrency-safe buffer for capturing trace output.
+type syncBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (s *syncBuffer) Write(p []byte) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.buf.Write(p)
+}
+
+func (s *syncBuffer) String() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.buf.String()
 }
 
 // TestHandlesInboundNotification verifies the client dispatches notifications

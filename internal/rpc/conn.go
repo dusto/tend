@@ -50,6 +50,8 @@ type Conn struct {
 	writeSem chan struct{} // cap-1 semaphore guarding enc; allows ctx-aware acquisition
 	enc      *json.Encoder
 
+	trace func(json.RawMessage) // optional inbound-frame observer (debug)
+
 	ctx    context.Context
 	cancel context.CancelFunc
 	done   chan struct{}
@@ -61,10 +63,22 @@ type Conn struct {
 	closeErr error
 }
 
+// ConnOption configures a Conn at construction.
+type ConnOption func(*Conn)
+
+// WithInboundTrace installs a hook called with the raw JSON of every inbound
+// frame (notifications, requests, and responses) before it is dispatched. It is
+// a debugging/observability tap — e.g. capturing an ACP agent's exact wire
+// output to learn where it reports token usage. The hook must not block; it runs
+// on the read loop. A nil fn is ignored, leaving the zero-overhead fast path.
+func WithInboundTrace(fn func(json.RawMessage)) ConnOption {
+	return func(c *Conn) { c.trace = fn }
+}
+
 // NewConn starts a JSON-RPC peer over rwc, dispatching inbound traffic to h
 // (which may be nil to reject all inbound calls with method-not-found). The
 // read loop runs until rwc errors or Close is called.
-func NewConn(rwc io.ReadWriteCloser, h Handler) *Conn {
+func NewConn(rwc io.ReadWriteCloser, h Handler, opts ...ConnOption) *Conn {
 	ctx, cancel := context.WithCancel(context.Background())
 	c := &Conn{
 		rwc:      rwc,
@@ -76,6 +90,9 @@ func NewConn(rwc io.ReadWriteCloser, h Handler) *Conn {
 		cancel:   cancel,
 		done:     make(chan struct{}),
 		pending:  make(map[int64]chan *message),
+	}
+	for _, opt := range opts {
+		opt(c)
 	}
 	go c.readLoop()
 	return c
@@ -208,7 +225,21 @@ func (c *Conn) err() error {
 func (c *Conn) readLoop() {
 	for {
 		var m message
-		if err := c.dec.Decode(&m); err != nil {
+		if c.trace != nil {
+			// Decode once into raw so the observer sees the exact bytes, then into the
+			// message. A frame that decodes as JSON but not as a message still closes
+			// the connection, matching the untraced path.
+			var raw json.RawMessage
+			if err := c.dec.Decode(&raw); err != nil {
+				c.closeWith(err)
+				return
+			}
+			c.trace(raw)
+			if err := json.Unmarshal(raw, &m); err != nil {
+				c.closeWith(err)
+				return
+			}
+		} else if err := c.dec.Decode(&m); err != nil {
 			c.closeWith(err)
 			return
 		}

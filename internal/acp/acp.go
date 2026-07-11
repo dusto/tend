@@ -7,12 +7,79 @@ import (
 	"fmt"
 	"io"
 	"os/exec"
+	"sync"
+	"time"
 
 	"github.com/dusto/tend/internal/rpc"
 )
 
 // ProtocolVersion is the ACP protocol version this client speaks.
 const ProtocolVersion = 1
+
+// trace is the process-wide inbound-frame sink, nil unless SetTraceWriter
+// installed one. It is read on every Spawn; guarded so a debug enable and a
+// concurrent spawn do not race.
+var (
+	traceMu sync.Mutex
+	trace   *frameTracer
+)
+
+// frameTracer serializes raw inbound ACP frames to a writer as newline-delimited
+// JSON envelopes, so a single file can capture every provider's wire output.
+type frameTracer struct {
+	mu sync.Mutex
+	w  io.Writer
+}
+
+// SetTraceWriter installs (or clears, with a nil writer) a sink that receives
+// every inbound ACP frame from every provider process the client spawns, for
+// debugging where an agent reports token usage / metadata on the wire. It is a
+// process-global debug switch, meant to be set once at startup before providers
+// spawn; frames from spawns after the call are captured. Passing nil disables it.
+func SetTraceWriter(w io.Writer) {
+	traceMu.Lock()
+	defer traceMu.Unlock()
+	if w == nil {
+		trace = nil
+		return
+	}
+	trace = &frameTracer{w: w}
+}
+
+// traceHook returns an inbound-frame observer for a provider, or nil when
+// tracing is off. Each frame is written as {ts, provider, dir:"in", frame:<raw>}.
+func traceHook(provider string) func(json.RawMessage) {
+	traceMu.Lock()
+	t := trace
+	traceMu.Unlock()
+	if t == nil {
+		return nil
+	}
+	return func(frame json.RawMessage) {
+		env := struct {
+			TS       time.Time       `json:"ts"`
+			Provider string          `json:"provider"`
+			Dir      string          `json:"dir"`
+			Frame    json.RawMessage `json:"frame"`
+		}{time.Now(), provider, "in", frame}
+		b, err := json.Marshal(env)
+		if err != nil {
+			return
+		}
+		t.mu.Lock()
+		defer t.mu.Unlock()
+		_, _ = t.w.Write(append(b, '\n'))
+	}
+}
+
+// newConn builds the rpc.Conn for a client, installing the inbound trace when a
+// debug sink is set. provider labels the frames in a shared trace.
+func newConn(rwc io.ReadWriteCloser, h rpc.Handler, provider string) *rpc.Conn {
+	if hook := traceHook(provider); hook != nil {
+		return rpc.NewConn(rwc, h, rpc.WithInboundTrace(hook))
+	}
+	return rpc.NewConn(rwc, h)
+}
 
 // Command describes how to launch an ACP provider process. It is
 // provider-agnostic: the registry/pool supplies these fields from config.
@@ -59,7 +126,7 @@ func Spawn(c Command, h rpc.Handler) (*Client, error) {
 		_ = stdout.Close()
 		return nil, fmt.Errorf("acp: start %q: %w", c.Path, err)
 	}
-	return &Client{conn: rpc.NewConn(&procStdio{r: stdout, w: stdin}, h), cmd: cmd}, nil
+	return &Client{conn: newConn(&procStdio{r: stdout, w: stdin}, h, c.Path), cmd: cmd}, nil
 }
 
 // SpawnAndInitialize spawns the process and runs the initialize handshake,
@@ -83,7 +150,7 @@ func SpawnAndInitialize(ctx context.Context, c Command, params InitializeParams,
 // newClient wraps an existing stdio stream as a Client, for tests that drive a
 // fake ACP peer in-process.
 func newClient(rwc io.ReadWriteCloser, h rpc.Handler) *Client {
-	return &Client{conn: rpc.NewConn(rwc, h)}
+	return &Client{conn: newConn(rwc, h, "in-process")}
 }
 
 // Initialize performs the ACP initialize handshake, blocking until the agent
