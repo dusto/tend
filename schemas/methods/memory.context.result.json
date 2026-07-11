@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "properties": {
+    "text": {
+      "type": "string"
+    },
+    "included": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "summarized": {
+      "type": "boolean"
+    }
+  },
+  "additionalProperties": false,
+  "type": "object",
+  "required": [
+    "text",
+    "summarized"
+  ]
+}

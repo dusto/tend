@@ -4,10 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/dusto/tend/api"
 	"github.com/dusto/tend/internal/rpc"
+	"github.com/dusto/tend/internal/summarize"
 )
 
 // fakeProvider is an in-memory provider for service tests.
@@ -60,11 +62,29 @@ func (e *fakeEmitter) Publish(ev api.Event) (api.Event, error) {
 }
 
 func newService(p Provider) *Service {
-	return NewService(func(api.WorkspaceID) Provider { return p }, nil)
+	return NewService(func(api.WorkspaceID) Provider { return p }, nil, nil)
 }
 
 func newServiceEmit(p Provider, emit Emitter) *Service {
-	return NewService(func(api.WorkspaceID) Provider { return p }, emit)
+	return NewService(func(api.WorkspaceID) Provider { return p }, emit, nil)
+}
+
+func newServiceSum(p Provider, sum summarize.Summarizer) *Service {
+	return NewService(func(api.WorkspaceID) Provider { return p }, nil, sum)
+}
+
+// fakeSummarizer records its request and returns a canned condensed result, so a
+// test can assert what was assembled and that condensation was invoked.
+type fakeSummarizer struct {
+	reply string
+	got   summarize.Request
+	calls int
+}
+
+func (f *fakeSummarizer) Summarize(_ context.Context, req summarize.Request) (summarize.Result, error) {
+	f.calls++
+	f.got = req
+	return summarize.Result{Text: f.reply, Summarized: true}, nil
 }
 
 func codeOf(t *testing.T, err error) int {
@@ -244,11 +264,117 @@ func TestServiceCachesProviderPerWorkspace(t *testing.T) {
 	svc := NewService(func(api.WorkspaceID) Provider {
 		built++
 		return &fakeProvider{}
-	}, nil)
+	}, nil, nil)
 	for range 3 {
 		_, _ = svc.search(context.Background(), api.MemorySearchParams{WorkspaceID: "ws1", Query: "q"})
 	}
 	if built != 1 {
 		t.Errorf("provider built %d times, want 1 (cached per workspace)", built)
+	}
+}
+
+func TestContextRequiresWorkspace(t *testing.T) {
+	svc := newService(&fakeProvider{})
+	if _, err := svc.memContext(context.Background(), api.MemoryContextParams{}); codeOf(t, err) != rpc.CodeInvalidParams {
+		t.Error("missing workspace_id should be invalid params")
+	}
+}
+
+func TestContextAssemblesSteeringWithinBudget(t *testing.T) {
+	// Steering only, small enough to pass through the fallback verbatim.
+	p := &fakeProvider{steering: []api.MemoryEntry{
+		{ID: "s1", Title: "Rule one", Text: "always do X", Kind: api.MemoryKindSteering},
+		{ID: "s2", Text: "never do Y", Kind: api.MemoryKindSteering},
+	}}
+	svc := newService(p) // nil summarizer -> deterministic fallback
+	res, err := svc.memContext(context.Background(), api.MemoryContextParams{WorkspaceID: "ws", Path: "a/b.go"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.steerPath != "a/b.go" {
+		t.Errorf("steering path = %q, want the passed path", p.steerPath)
+	}
+	if res.Summarized {
+		t.Error("within-budget assembly should not be summarized")
+	}
+	if len(res.Included) != 2 || res.Included[0] != "s1" || res.Included[1] != "s2" {
+		t.Errorf("included = %v, want [s1 s2]", res.Included)
+	}
+	for _, want := range []string{"Rule one", "always do X", "# Steering: s2", "never do Y"} {
+		if !strings.Contains(res.Text, want) {
+			t.Errorf("assembled text missing %q:\n%s", want, res.Text)
+		}
+	}
+}
+
+func TestContextIncludesQueryNotesAfterSteering(t *testing.T) {
+	p := &fakeProvider{
+		steering: []api.MemoryEntry{{ID: "s1", Text: "steer", Kind: api.MemoryKindSteering}},
+		hits:     []api.MemoryHit{{ID: "n1"}, {ID: "gone"}},
+		entries: map[api.MemoryID]api.MemoryEntry{
+			"n1": {ID: "n1", Title: "Note one", Text: "note body", Kind: api.MemoryKindNote},
+			// "gone" is a hit but absent from entries: Get fails and it is skipped.
+		},
+	}
+	svc := newService(p)
+	res, err := svc.memContext(context.Background(), api.MemoryContextParams{WorkspaceID: "ws", Query: "thing"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Included) != 2 || res.Included[0] != "s1" || res.Included[1] != "n1" {
+		t.Errorf("included = %v, want [s1 n1] (steering before notes, missing note skipped)", res.Included)
+	}
+	if !strings.Contains(res.Text, "# Note: Note one") || !strings.Contains(res.Text, "note body") {
+		t.Errorf("assembled text missing the note:\n%s", res.Text)
+	}
+}
+
+func TestContextCondensesOverBudgetViaSummarizer(t *testing.T) {
+	fs := &fakeSummarizer{reply: "CONDENSED"}
+	p := &fakeProvider{steering: []api.MemoryEntry{{ID: "s1", Text: strings.Repeat("x", 500), Kind: api.MemoryKindSteering}}}
+	svc := newServiceSum(p, fs)
+	res, err := svc.memContext(context.Background(), api.MemoryContextParams{WorkspaceID: "ws", Budget: 50})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fs.calls != 1 {
+		t.Fatalf("summarizer calls = %d, want 1", fs.calls)
+	}
+	if fs.got.Purpose != summarize.PurposeMemory || fs.got.TargetChars != 50 {
+		t.Errorf("summarize request = %+v, want memory purpose + budget 50", fs.got)
+	}
+	if !res.Summarized || res.Text != "CONDENSED" {
+		t.Errorf("got %+v, want condensed output", res)
+	}
+}
+
+func TestContextFallbackTruncationReportsSummarized(t *testing.T) {
+	// The default install has no configured backend, so over-budget context is
+	// truncated by the fallback. That is a reduction, so Summarized must be true —
+	// a caller must be able to tell a digest from the full context.
+	p := &fakeProvider{steering: []api.MemoryEntry{
+		{ID: "s1", Text: strings.Repeat("rule ", 300), Kind: api.MemoryKindSteering},
+	}}
+	svc := newService(p) // nil summarizer -> deterministic fallback
+	res, err := svc.memContext(context.Background(), api.MemoryContextParams{WorkspaceID: "ws", Budget: 100})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.Summarized {
+		t.Error("fallback-truncated context must report Summarized=true, not false")
+	}
+	if n := len([]rune(res.Text)); n > 100 {
+		t.Errorf("truncated text is %d runes, over budget 100", n)
+	}
+}
+
+func TestContextEmptyWhenNothingApplies(t *testing.T) {
+	svc := newService(&fakeProvider{})
+	res, err := svc.memContext(context.Background(), api.MemoryContextParams{WorkspaceID: "ws"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Text != "" || len(res.Included) != 0 || res.Summarized {
+		t.Errorf("empty context should be blank, got %+v", res)
 	}
 }

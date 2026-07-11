@@ -76,6 +76,9 @@ func TestFallbackTruncatesOverBudget(t *testing.T) {
 	if !strings.Contains(res.Text, "truncated") {
 		t.Errorf("expected an elision marker, got %q", res.Text)
 	}
+	if !res.Summarized {
+		t.Error("a truncated (reduced) result must report Summarized=true")
+	}
 }
 
 func TestFallbackRequestBudgetOverridesDefault(t *testing.T) {
@@ -126,8 +129,8 @@ func TestCompleterSummarizerFallsBackOnError(t *testing.T) {
 	if err != nil {
 		t.Fatalf("a backend error must degrade, not fail: %v", err)
 	}
-	if res.Summarized {
-		t.Error("degraded result should report Summarized=false")
+	if !res.Summarized {
+		t.Error("a degraded-to-truncation result reduced the content, so Summarized=true")
 	}
 	if n := len([]rune(res.Text)); n > 20 {
 		t.Errorf("degraded result over budget: %d runes", n)
