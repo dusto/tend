@@ -102,6 +102,11 @@ func renderTranscript(recs []api.Event, from, to uint64) string {
 // writeTranscriptEvent appends one event's transcript form to b.
 func writeTranscriptEvent(b *strings.Builder, e api.Event) {
 	switch e.Type {
+	case "user_prompt":
+		var p api.UserPrompt
+		if json.Unmarshal(e.Payload, &p) == nil && p.Text != "" {
+			b.WriteString("\n[user] " + p.Text + "\n") // the human turn, on its own line
+		}
 	case "agent_message_chunk":
 		var p api.AgentMessageChunk
 		if json.Unmarshal(e.Payload, &p) == nil {

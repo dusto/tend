@@ -189,12 +189,12 @@ type SessionClaimResult struct {
 // daemon-side, resume works across providers and across a daemon restart, rather
 // than depending on a provider-side session load.
 //
-// Scope: the rendered history is the AGENT's output (its messages, thoughts,
-// tool calls, and turn boundaries). The user's original prompt text is not
-// persisted on the event stream today, so it is not in the seed unless the agent
-// restated it; the seed is therefore agent-output plus memory, a lossy briefing
-// rather than a full conversation replay. Pass Query (and rely on task-bound
-// notes) to reintroduce the goal until user prompts are persisted (tend-fa5.12).
+// Scope: the rendered history is both sides of the conversation — the user's
+// per-turn prompts (user_prompt events) and the agent's output (messages,
+// thoughts, tool calls, turn boundaries) — condensed with memory into a lossy
+// briefing, not a verbatim replay. A session recorded before user_prompt events
+// existed carries only the agent's side; pass Query to reintroduce the goal from
+// task-bound notes in that case.
 type SessionResumeSeedParams struct {
 	// SessionID is the prior session whose history seeds the resume. Its event
 	// stream is read from the durable log, so the session need not still be live

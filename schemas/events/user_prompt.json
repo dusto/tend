@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "properties": {
+    "session_id": {
+      "type": "string"
+    },
+    "text": {
+      "type": "string"
+    },
+    "attachments": {
+      "type": "integer"
+    }
+  },
+  "additionalProperties": false,
+  "type": "object",
+  "required": [
+    "session_id",
+    "text"
+  ]
+}

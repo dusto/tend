@@ -25,13 +25,17 @@ func pubEvent(t *testing.T, s *Store, stream api.StreamID, typ string, payload a
 func TestRenderTranscript(t *testing.T) {
 	sid := api.SessionID("s")
 	recs := []api.Event{
-		{Kind: api.KindEvent, Seq: 1, Type: "agent_message_chunk", Payload: mustJSON(t, api.AgentMessageChunk{SessionID: sid, Text: "Hello "})},
-		{Kind: api.KindEvent, Seq: 2, Type: "agent_message_chunk", Payload: mustJSON(t, api.AgentMessageChunk{SessionID: sid, Text: "world"})},
-		{Kind: api.KindEvent, Seq: 3, Type: "tool_call", Payload: mustJSON(t, api.ToolCall{SessionID: sid, Name: "grep"})},
-		{Kind: api.KindEvent, Seq: 4, Type: "turn_end", Payload: mustJSON(t, api.TurnEnd{SessionID: sid})},
-		{Kind: api.KindEvent, Seq: 5, Type: "approval_requested", Payload: nil}, // non-transcript: skipped
+		{Kind: api.KindEvent, Seq: 1, Type: "user_prompt", Payload: mustJSON(t, api.UserPrompt{SessionID: sid, Text: "find the bug"})},
+		{Kind: api.KindEvent, Seq: 2, Type: "agent_message_chunk", Payload: mustJSON(t, api.AgentMessageChunk{SessionID: sid, Text: "Hello "})},
+		{Kind: api.KindEvent, Seq: 3, Type: "agent_message_chunk", Payload: mustJSON(t, api.AgentMessageChunk{SessionID: sid, Text: "world"})},
+		{Kind: api.KindEvent, Seq: 4, Type: "tool_call", Payload: mustJSON(t, api.ToolCall{SessionID: sid, Name: "grep"})},
+		{Kind: api.KindEvent, Seq: 5, Type: "turn_end", Payload: mustJSON(t, api.TurnEnd{SessionID: sid})},
+		{Kind: api.KindEvent, Seq: 6, Type: "approval_requested", Payload: nil}, // non-transcript: skipped
 	}
-	got := renderTranscript(recs, 1, 5)
+	got := renderTranscript(recs, 1, 6)
+	if !strings.Contains(got, "[user] find the bug") {
+		t.Errorf("user prompt should render as a human turn: %q", got)
+	}
 	if !strings.Contains(got, "Hello world") {
 		t.Errorf("message chunks should flow inline: %q", got)
 	}

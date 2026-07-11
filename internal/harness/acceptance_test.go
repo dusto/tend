@@ -142,15 +142,15 @@ func TestM0AcceptanceScenario(t *testing.T) {
 	}
 
 	// Reconnect mid-turn — the turn is still held (running), so the session
-	// stream carries seqs 1..7 (agent_prompt_usage + four turn updates + the
-	// approval pair) but not yet turn_end. A fresh connection resumes from a
-	// cursor behind the tail and replays (2, tail] = seqs 3..7; a Deduper seeded
-	// with the first delivery drops every redelivered record.
+	// stream carries seqs 1..8 (user_prompt + agent_prompt_usage + four turn
+	// updates + the approval pair) but not yet turn_end. A fresh connection
+	// resumes from a cursor behind the tail and replays (2, tail] = seqs 3..8; a
+	// Deduper seeded with the first delivery drops every redelivered record.
 	//
-	// Wait for the held-turn tail (1..7) to be fully delivered to the original
+	// Wait for the held-turn tail (1..8) to be fully delivered to the original
 	// connection first, so the Deduper seed and the replay extent are
 	// deterministic (the approval-pair delivery is async after file.patch).
-	if !c.WaitEventCount(started.StreamID, 7, 3*time.Second) {
+	if !c.WaitEventCount(started.StreamID, 8, 3*time.Second) {
 		t.Fatalf("held-turn events not fully delivered; got %v", c.EventTypes(started.StreamID))
 	}
 	dd := events.NewDeduper()
@@ -159,19 +159,19 @@ func TestM0AcceptanceScenario(t *testing.T) {
 	}
 	rc := dial(t, sock)
 	mustCall(t, rc, "events.subscribe", api.EventsSubscribeParams{StreamID: started.StreamID, LastSeq: 2}, &api.EventsSubscribeResult{})
-	if !rc.WaitEventCount(started.StreamID, 5, 3*time.Second) {
+	if !rc.WaitEventCount(started.StreamID, 6, 3*time.Second) {
 		t.Fatalf("mid-turn replay incomplete; got %v", rc.EventTypes(started.StreamID))
 	}
 	for _, ev := range rc.Events(started.StreamID) {
-		if ev.Seq < 3 || ev.Seq > 7 {
-			t.Errorf("replay redelivered seq %d, want only (2, tail] = 3..7", ev.Seq)
+		if ev.Seq < 3 || ev.Seq > 8 {
+			t.Errorf("replay redelivered seq %d, want only (2, tail] = 3..8", ev.Seq)
 		}
 		if dd.Fresh(ev) {
 			t.Errorf("redelivered seq %d should dedup as already-seen", ev.Seq)
 		}
 	}
 
-	// Now release the held turn: turn_end (seq 8) is published while the
+	// Now release the held turn: turn_end (seq 9) is published while the
 	// reconnected client is live-subscribed, so it must arrive on rc exactly
 	// once as a fresh record — the "no missing or duplicated events across a
 	// mid-turn reconnect" guarantee.
@@ -181,15 +181,15 @@ func TestM0AcceptanceScenario(t *testing.T) {
 	if err := <-turnDone; err != nil {
 		t.Fatalf("agent.prompt: %v", err)
 	}
-	if !rc.WaitEventCount(started.StreamID, 6, 3*time.Second) {
+	if !rc.WaitEventCount(started.StreamID, 7, 3*time.Second) {
 		t.Fatalf("reconnected client did not receive the live turn_end; got %v", rc.EventTypes(started.StreamID))
 	}
 	var turnEnds int
 	for _, ev := range rc.Events(started.StreamID) {
 		if ev.Type == "turn_end" {
 			turnEnds++
-			if ev.Seq != 8 {
-				t.Errorf("turn_end seq = %d, want 8", ev.Seq)
+			if ev.Seq != 9 {
+				t.Errorf("turn_end seq = %d, want 9", ev.Seq)
 			}
 			if !dd.Fresh(ev) {
 				t.Errorf("live turn_end should be fresh on the reconnected client, not a duplicate")
@@ -200,7 +200,7 @@ func TestM0AcceptanceScenario(t *testing.T) {
 		t.Errorf("reconnected client received turn_end %d times, want exactly once", turnEnds)
 	}
 	// The original connection sees the completed turn too, ending in turn_end.
-	if !c.WaitEventCount(started.StreamID, 8, 3*time.Second) {
+	if !c.WaitEventCount(started.StreamID, 9, 3*time.Second) {
 		t.Fatalf("original client turn did not complete; got %v", c.EventTypes(started.StreamID))
 	}
 	if types := c.EventTypes(started.StreamID); types[len(types)-1] != "turn_end" {

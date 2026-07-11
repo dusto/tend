@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"strings"
 	"unicode/utf8"
 
 	"github.com/dusto/tend/api"
@@ -37,6 +38,27 @@ func measurePromptUsage(id api.SessionID, p api.AgentPromptParams) api.AgentProm
 	}
 	u.TokensApprox = approxTokens(u.TextChars)
 	return u
+}
+
+// userPrompt composes the user's prompt content for a turn into a UserPrompt
+// event payload: the text (the plain Text, or the concatenated text blocks, to
+// mirror promptBlocks) plus a count of non-text attachment blocks, whose content
+// is not persisted. It parallels measurePromptUsage's block handling.
+func userPrompt(id api.SessionID, p api.AgentPromptParams) api.UserPrompt {
+	if len(p.Content) == 0 {
+		return api.UserPrompt{SessionID: id, Text: p.Text}
+	}
+	up := api.UserPrompt{SessionID: id}
+	var text strings.Builder
+	for _, c := range p.Content {
+		if c.Type == api.PromptContentText {
+			text.WriteString(c.Text)
+			continue
+		}
+		up.Attachments++
+	}
+	up.Text = text.String()
+	return up
 }
 
 // approxTokens estimates tokens from a character count, rounding up so any

@@ -280,6 +280,13 @@ func (s *Service) Prompt(ctx context.Context, p api.AgentPromptParams) (api.Agen
 	defer s.clearInflight(p.SessionID)
 	defer cancel()
 
+	// Record the user's prompt content on the session stream so a replay/resume
+	// sees the human side of the conversation (the stream otherwise carries only
+	// agent output). Emitted before the send, ahead of the agent's response, and
+	// skipped for an empty turn (no text, no attachments) to avoid noise records.
+	if up := userPrompt(p.SessionID, p); up.Text != "" || up.Attachments > 0 {
+		s.norm.PublishUserPrompt(up)
+	}
 	// Report the size of the prompt input composed for this turn, before the send
 	// (so it is reported even if the send fails). It is the only context the
 	// daemon authoritatively knows: the agent owns its system prompt and history.

@@ -84,11 +84,10 @@ func (s *Service) ResumeSeed(ctx context.Context, p api.SessionResumeSeedParams)
 	}
 
 	// (a) Prior session history: summary records in place of compacted ranges,
-	// plus the recent raw transcript, rendered to plain text. condensed reports
-	// whether a prior summary record already contributed lossy context (so the
-	// seed is a digest even before the final pass below). Note this is the agent's
-	// output transcript — the user's prompt text is not persisted on the stream
-	// (see the contract note on SessionResumeSeedParams).
+	// plus the recent raw transcript, rendered to plain text — both the user's
+	// prompts and the agent's output. condensed reports whether a prior summary
+	// record already contributed lossy context (so the seed is a digest even
+	// before the final pass below).
 	recs, err := readAll(s.reader, api.SessionStream(p.SessionID))
 	if err != nil {
 		return api.SessionResumeSeedResult{}, internalErr(err)

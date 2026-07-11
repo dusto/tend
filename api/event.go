@@ -86,6 +86,7 @@ var EventDefs = []EventDef{
 	{Type: "tool_call", Scope: ScopeSession, Payload: ToolCall{}, Summary: "An agent tool call started."},
 	{Type: "tool_call_update", Scope: ScopeSession, Payload: ToolCallUpdate{}, Summary: "Progress update for a tool call."},
 	{Type: "turn_end", Scope: ScopeSession, Payload: TurnEnd{}, Summary: "The agent's turn ended."},
+	{Type: "user_prompt", Scope: ScopeSession, Payload: UserPrompt{}, Summary: "The user's prompt content for a turn, emitted as the turn starts so a replay/resume sees the human side of the conversation (the session stream otherwise carries only agent output). Text only; attachment blob content is not persisted, just counted."},
 	{Type: "agent_prompt_usage", Scope: ScopeSession, Payload: AgentPromptUsage{}, Summary: "The size of the prompt input the daemon composed for a turn: bytes and an approximate, model-agnostic token estimate. Measures only client-side prompt content, not the agent-owned system prompt/history."},
 	{Type: "approval_requested", Scope: ScopeSession, Payload: ApprovalRequested{}, Summary: "A mutating action is awaiting approval."},
 	{Type: "approval_resolved", Scope: ScopeSession, Payload: ApprovalResolved{}, Summary: "A pending approval was resolved."},
@@ -143,6 +144,25 @@ type ToolCallUpdate struct {
 // TurnEnd signals that the agent's turn has ended.
 type TurnEnd struct {
 	SessionID SessionID `json:"session_id"`
+}
+
+// UserPrompt is the user's prompt content for one turn, emitted on the session
+// stream as the turn starts so a replay or resume sees the user's side of the
+// conversation — the stream otherwise carries only the agent's output. The
+// daemon composes Text from the turn's prompt (the plain text, or the
+// concatenated text blocks). Attachment blocks (resource links, images, audio)
+// are counted in Attachments but their content is deliberately NOT persisted to
+// the durable log: their bytes (base64 blobs) are not the request text a replay
+// needs, and keeping them out bounds the log. So this persists the user's text,
+// nothing more.
+type UserPrompt struct {
+	SessionID SessionID `json:"session_id"`
+	// Text is the composed text prompt content for the turn (may be empty when the
+	// turn carried only attachments).
+	Text string `json:"text"`
+	// Attachments is the number of non-text blocks in the turn whose content is not
+	// persisted here.
+	Attachments int `json:"attachments,omitempty"`
 }
 
 // AgentPromptUsage reports the size of the prompt input the daemon composed for
