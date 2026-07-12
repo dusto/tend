@@ -59,6 +59,9 @@ type Session struct {
 	// "unknown", so the compaction trigger cannot act.
 	contextUsed   int
 	contextWindow int
+	// label is a user-assigned, human-facing name for the session, independent of
+	// its task. Empty until set via session.rename; a rename may clear it.
+	label string
 	// Editor binding: owner is the client currently serving editor-local calls
 	// ("" when headless); expectedEditor is the editor identity auto-bind matches,
 	// recorded when the binding is claimed and retained across disconnects so the
@@ -263,6 +266,21 @@ func (s *Session) ContextUsage() (used, window int, ok bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.contextUsed, s.contextWindow, s.contextWindow > 0
+}
+
+// SetLabel sets the session's user-facing label, replacing any prior value. An
+// empty string clears it.
+func (s *Session) SetLabel(label string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.label = label
+}
+
+// Label returns the session's user-facing label, or "" when unset.
+func (s *Session) Label() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.label
 }
 
 // Owner returns the session's editor-binding owner and whether one is bound.

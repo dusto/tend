@@ -27,6 +27,9 @@
         "pending": {
           "$ref": "#/$defs/SessionPending"
         },
+        "label": {
+          "type": "string"
+        },
         "editor_bound": {
           "type": "boolean"
         },

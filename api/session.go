@@ -83,6 +83,11 @@ type SessionInfo struct {
 	StreamID     StreamID        `json:"stream_id"`
 	Status       SessionStatus   `json:"status"`
 	Pending      *SessionPending `json:"pending,omitempty"`
+	// Label is a user-assigned, human-facing name for the session, independent of
+	// its task. Empty when unset. It gives task-less (conversation) sessions a
+	// readable identity in lists and switchers where they would otherwise show
+	// only a raw session/stream id. Set via session.rename.
+	Label string `json:"label,omitempty"`
 	// EditorBound is true when this client (the caller) currently holds the
 	// session's editor binding, so editor-local tools route to it.
 	EditorBound bool `json:"editor_bound"`
@@ -152,6 +157,22 @@ type SessionSetThoughtLevelParams struct {
 type SessionSetThoughtLevelResult struct {
 	SessionID             SessionID `json:"session_id"`
 	CurrentThoughtLevelID string    `json:"current_thought_level_id"`
+}
+
+// MaxSessionLabelLen bounds a session label's length in bytes. A rename beyond
+// it is rejected; the empty label (a clear) is always allowed.
+const MaxSessionLabelLen = 200
+
+// SessionRenameParams sets or clears a session's user-facing label. An empty
+// Label clears it. The label is independent of the session's task.
+type SessionRenameParams struct {
+	SessionID SessionID `json:"session_id"`
+	Label     string    `json:"label"`
+}
+
+// SessionRenameResult returns the session's updated listed view after the rename.
+type SessionRenameResult struct {
+	Session SessionInfo `json:"session"`
 }
 
 // SessionListParams lists the daemon's sessions. WorkspaceID, when set, filters

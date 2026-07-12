@@ -8,6 +8,7 @@
 package sessions
 
 import (
+	"encoding/json"
 	"sort"
 
 	"github.com/dusto/tend/api"
@@ -17,20 +18,30 @@ import (
 
 // Method names.
 const (
-	MethodList  = "session.list"
-	MethodClaim = "session.claim"
+	MethodList   = "session.list"
+	MethodClaim  = "session.claim"
+	MethodRename = "session.rename"
 )
+
+// Publisher receives daemon-side session events (session.rename emits
+// session_renamed). *events.Store satisfies it. Optional: nil skips the event
+// but still records the label on the session.
+type Publisher interface {
+	Publish(api.Event) (api.Event, error)
+}
 
 // Service backs the session.* methods over the session registry and the editor
 // binder. It is safe for concurrent use (its state is the shared registries').
 type Service struct {
 	sessions *session.Registry
 	binder   *editor.Binder
+	pub      Publisher
 }
 
-// NewService returns a Service reading sessions and driving binder.
-func NewService(sessions *session.Registry, binder *editor.Binder) *Service {
-	return &Service{sessions: sessions, binder: binder}
+// NewService returns a Service reading sessions and driving binder. pub receives
+// session-change events (session_renamed) and may be nil.
+func NewService(sessions *session.Registry, binder *editor.Binder, pub Publisher) *Service {
+	return &Service{sessions: sessions, binder: binder, pub: pub}
 }
 
 // info builds the listed view of one session as seen by the client caller
@@ -45,6 +56,7 @@ func info(s *session.Session, caller api.ClientID) api.SessionInfo {
 		WorktreeRoot: s.WorktreeRoot,
 		StreamID:     s.Stream,
 		Status:       s.Status(),
+		Label:        s.Label(),
 		EditorBound:  bound && owner == caller,
 	}
 	if s.HasTask() {
@@ -91,4 +103,30 @@ func (svc *Service) Claim(caller api.ClientID, p api.SessionClaimParams) (api.Se
 		return api.SessionClaimResult{}, editor.ErrNoSession
 	}
 	return api.SessionClaimResult{Session: info(s, caller)}, nil
+}
+
+// Rename sets or clears a session's user-facing label and returns its updated
+// view. An empty label clears it; a label longer than api.MaxSessionLabelLen is
+// rejected. On success it emits session_renamed so attached clients see the
+// change. The label is daemon-side session state (it does not touch the
+// provider), so this needs no editor binding.
+func (svc *Service) Rename(caller api.ClientID, p api.SessionRenameParams) (api.SessionRenameResult, error) {
+	if len(p.Label) > api.MaxSessionLabelLen {
+		return api.SessionRenameResult{}, errLabelTooLong
+	}
+	s, ok := svc.sessions.Get(p.SessionID)
+	if !ok {
+		return api.SessionRenameResult{}, editor.ErrNoSession
+	}
+	s.SetLabel(p.Label)
+	if svc.pub != nil {
+		raw, _ := json.Marshal(api.SessionRenamed(p))
+		_, _ = svc.pub.Publish(api.Event{
+			StreamID: s.Stream,
+			Scope:    api.ScopeSession,
+			Type:     "session_renamed",
+			Payload:  raw,
+		})
+	}
+	return api.SessionRenameResult{Session: info(s, caller)}, nil
 }
