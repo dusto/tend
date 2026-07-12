@@ -21,6 +21,8 @@ const (
 	MethodList   = "session.list"
 	MethodClaim  = "session.claim"
 	MethodRename = "session.rename"
+	MethodAttach = "session.attach"
+	MethodDetach = "session.detach"
 )
 
 // Publisher receives daemon-side session events (session.rename emits
@@ -129,4 +131,37 @@ func (svc *Service) Rename(caller api.ClientID, p api.SessionRenameParams) (api.
 		})
 	}
 	return api.SessionRenameResult{Session: info(s, caller)}, nil
+}
+
+// Attach makes caller follow a session: the session's prompts (approval/
+// clarification) and waiting_* status are delivered to attached clients. It does
+// not claim the editor binding — any registered client (editor, or a read-only
+// tail) may attach. An unregistered caller or an unknown session is rejected.
+// Attaching is idempotent.
+func (svc *Service) Attach(caller api.ClientID, p api.SessionAttachParams) (api.SessionAttachResult, error) {
+	if caller == "" {
+		return api.SessionAttachResult{}, errNotRegistered
+	}
+	s, ok := svc.sessions.Get(p.SessionID)
+	if !ok {
+		return api.SessionAttachResult{}, editor.ErrNoSession
+	}
+	s.Attach(caller)
+	return api.SessionAttachResult(p), nil
+}
+
+// Detach stops caller following a session. It does not end the session.
+// Detaching a client that is not attached is a no-op success. An unregistered
+// caller (which could never have attached) and an unknown session are rejected,
+// keeping the contract symmetric with Attach.
+func (svc *Service) Detach(caller api.ClientID, p api.SessionDetachParams) (api.SessionDetachResult, error) {
+	if caller == "" {
+		return api.SessionDetachResult{}, errNotRegistered
+	}
+	s, ok := svc.sessions.Get(p.SessionID)
+	if !ok {
+		return api.SessionDetachResult{}, editor.ErrNoSession
+	}
+	s.Detach(caller)
+	return api.SessionDetachResult(p), nil
 }

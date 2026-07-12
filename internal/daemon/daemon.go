@@ -157,7 +157,7 @@ func New(ln net.Listener, logPath string, opts ...Option) (*Server, error) {
 	s.binder = editor.NewBinder(s.sessions, s.clients)
 	s.gate = approvals.NewGate(s.store, approvals.Options{
 		TTL:      approvalTTL,
-		Prompter: &promptBroadcaster{clients: s.clients},
+		Prompter: &promptBroadcaster{clients: s.clients, sessions: s.sessions},
 	})
 	editors := editor.NewService(s.binder, s.clients)
 	s.files = files.NewService(s.sessions, editors, s.gate, files.Options{})
@@ -336,9 +336,10 @@ func (s *Server) newMux() (*dispatch.Mux, func(), error) {
 	if err := lsp.Register(mux, s.lsp); err != nil {
 		return nil, nil, err
 	}
-	// session.list/claim resolve the calling client through this connection's
-	// cc.Self() (empty when unregistered), so the listing reports editor binding
-	// relative to the caller and claim binds it.
+	// session.* methods resolve the calling client through this connection's
+	// cc.Self() (empty when unregistered): list reports editor binding relative to
+	// the caller, claim binds it, and attach/detach scope the caller's prompt
+	// following.
 	if err := sessions.Register(mux, s.sessSvc, func() api.ClientID {
 		if self, ok := cc.Self(); ok {
 			return self.ID
@@ -379,12 +380,14 @@ func (s *Server) newMux() (*dispatch.Mux, func(), error) {
 	}
 	// On disconnect, drop the identity (ownership-checked) and, only if this
 	// connection was the live owner of its client id, release the editor bindings
-	// it held so those sessions go headless. A stale connection whose id already
-	// reconnected on another connection removes nothing and releases nothing.
+	// it held (so those sessions go headless) and detach it from every session it
+	// was following. A stale connection whose id already reconnected on another
+	// connection removes nothing, releases nothing, and detaches nothing.
 	cleanup := func() {
 		self, _ := cc.Self()
 		if cc.Close() {
 			s.binder.ReleaseClient(self.ID)
+			s.sessions.DetachClient(self.ID)
 		}
 	}
 	return mux, cleanup, nil

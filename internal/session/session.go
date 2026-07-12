@@ -62,6 +62,10 @@ type Session struct {
 	// label is a user-assigned, human-facing name for the session, independent of
 	// its task. Empty until set via session.rename; a rename may clear it.
 	label string
+	// attached is the set of clients following this session's prompts and
+	// waiting_* status (session.attach). Empty means no client has attached; prompt
+	// delivery then falls back to every connected client (the pre-attach default).
+	attached map[api.ClientID]struct{}
 	// Editor binding: owner is the client currently serving editor-local calls
 	// ("" when headless); expectedEditor is the editor identity auto-bind matches,
 	// recorded when the binding is claimed and retained across disconnects so the
@@ -281,6 +285,37 @@ func (s *Session) Label() string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.label
+}
+
+// Attach adds client to the set following this session's prompts and status.
+// It is idempotent.
+func (s *Session) Attach(client api.ClientID) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.attached == nil {
+		s.attached = make(map[api.ClientID]struct{})
+	}
+	s.attached[client] = struct{}{}
+}
+
+// Detach removes client from the following set. Detaching a client that is not
+// attached is a no-op.
+func (s *Session) Detach(client api.ClientID) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.attached, client)
+}
+
+// AttachedClients returns the clients currently following this session, in
+// unspecified order. Empty means none have attached.
+func (s *Session) AttachedClients() []api.ClientID {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make([]api.ClientID, 0, len(s.attached))
+	for c := range s.attached {
+		out = append(out, c)
+	}
+	return out
 }
 
 // Owner returns the session's editor-binding owner and whether one is bound.

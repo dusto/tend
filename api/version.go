@@ -25,8 +25,10 @@ const (
 	// 0.23.0 added memory.context (budget-bounded steering+notes digest); 0.24.0
 	// added session.resume_seed (daemon-side context reconstruction: summary +
 	// recent transcript + memory, condensed into a fresh-session seed); 0.25.0
-	// added session.rename (+ SessionInfo.label: user-assigned session labels).
-	PluginToDaemonVersion = "0.25.0"
+	// added session.rename (+ SessionInfo.label: user-assigned session labels);
+	// 0.26.0 added session.attach/detach (scope a session's prompt + waiting_*
+	// delivery to attached clients).
+	PluginToDaemonVersion = "0.26.0"
 	// 0.2.0 added editor.open + editor.diff; 0.3.0 added editor.diagnostics.
 	DaemonToEditorVersion = "0.3.0"
 	// 0.2.0 added the agent_thought_chunk session event; 0.3.0 added the

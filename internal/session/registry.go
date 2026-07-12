@@ -91,6 +91,17 @@ func (r *Registry) SetSessionContextUsage(id api.SessionID, used, window int) {
 	}
 }
 
+// DetachClient removes clientID from every session's attached set. It is the
+// disconnect hook: a client that drops stops following all sessions it was
+// attached to (the sessions keep running). Mirrors editor.Binder.ReleaseClient.
+func (r *Registry) DetachClient(clientID api.ClientID) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, s := range r.sessions {
+		s.Detach(clientID)
+	}
+}
+
 // List returns the live sessions in unspecified order.
 func (r *Registry) List() []*Session {
 	r.mu.Lock()
