@@ -49,10 +49,19 @@ func Register(m *dispatch.Mux, s *Service) error {
 	}); err != nil {
 		return err
 	}
-	return dispatch.Handle(m, MethodHover, func(ctx context.Context, p api.LSPHoverParams) (api.LSPHoverResult, error) {
+	if err := dispatch.Handle(m, MethodHover, func(ctx context.Context, p api.LSPHoverParams) (api.LSPHoverResult, error) {
 		res, err := s.Hover(ctx, p)
 		if err != nil {
 			return api.LSPHoverResult{}, toRPCError(err)
+		}
+		return res, nil
+	}); err != nil {
+		return err
+	}
+	return dispatch.Handle(m, MethodCodeActions, func(ctx context.Context, p api.LSPCodeActionsParams) (api.LSPCodeActionsResult, error) {
+		res, err := s.CodeActions(ctx, p)
+		if err != nil {
+			return api.LSPCodeActionsResult{}, toRPCError(err)
 		}
 		return res, nil
 	})

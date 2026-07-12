@@ -28,12 +28,13 @@ const (
 	// added session.rename (+ SessionInfo.label: user-assigned session labels);
 	// 0.26.0 added session.attach/detach (scope a session's prompt + waiting_*
 	// delivery to attached clients); 0.27.0 added lsp.symbols/definition/
-	// references/hover (editor-fronted code navigation).
-	PluginToDaemonVersion = "0.27.0"
+	// references/hover (editor-fronted code navigation); 0.28.0 added
+	// lsp.code_actions (list-only; apply via file.apply_change_set).
+	PluginToDaemonVersion = "0.28.0"
 	// 0.2.0 added editor.open + editor.diff; 0.3.0 added editor.diagnostics; 0.4.0
 	// added editor.symbols/definition/references/hover (LSP navigation reverse
-	// methods).
-	DaemonToEditorVersion = "0.4.0"
+	// methods); 0.5.0 added editor.code_actions.
+	DaemonToEditorVersion = "0.5.0"
 	// 0.2.0 added the agent_thought_chunk session event; 0.3.0 added the
 	// agent_mode_updated and agent_model_updated session events; 0.4.0 added the
 	// provider_started workspace event; 0.5.0 added the agent_plan session event;

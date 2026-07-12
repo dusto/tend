@@ -21,6 +21,7 @@ const (
 	MethodDefinition    = "editor.definition"
 	MethodReferences    = "editor.references"
 	MethodHover         = "editor.hover"
+	MethodCodeActions   = "editor.code_actions"
 )
 
 // Service routes editor-local calls to a session's editor-binding owner. Each
@@ -152,6 +153,18 @@ func (s *Service) Hover(ctx context.Context, sessionID api.SessionID, p api.Edit
 	}
 	var res api.EditorHoverResult
 	err = caller.Call(ctx, MethodHover, p, &res)
+	return res, err
+}
+
+// CodeActions returns editor-fresh code actions for a range from the bound
+// editor, each edit-carrying action already resolved into change-set targets.
+func (s *Service) CodeActions(ctx context.Context, sessionID api.SessionID, p api.EditorCodeActionsParams) (api.EditorCodeActionsResult, error) {
+	caller, err := s.editorCaller(sessionID)
+	if err != nil {
+		return api.EditorCodeActionsResult{}, err
+	}
+	var res api.EditorCodeActionsResult
+	err = caller.Call(ctx, MethodCodeActions, p, &res)
 	return res, err
 }
 

@@ -145,3 +145,43 @@ type LSPHoverResult struct {
 	Contents string `json:"contents"`
 	Range    *Range `json:"range,omitempty"`
 }
+
+// CodeActionKind is an LSP code-action kind as its dotted string (e.g.
+// "quickfix", "refactor.extract", "source.organizeImports"), or empty when the
+// server does not categorize the action.
+type CodeActionKind string
+
+// CodeAction is one action available for a range: a titled, kinded proposal.
+// Edit reports whether the action carries file edits (Changes) applyable through
+// file.apply_change_set; a command-only action (Edit false, empty Changes) is
+// listed for visibility but cannot be applied through the change-set path.
+// Changes are ready to submit to file.apply_change_set as-is — including each
+// target's Base — so lsp.code_actions stays list-only and the mutation is
+// reviewed as a normal file edit.
+type CodeAction struct {
+	Title   string         `json:"title"`
+	Kind    CodeActionKind `json:"kind,omitempty"`
+	Edit    bool           `json:"edit"`
+	Changes []FileChange   `json:"changes,omitempty"`
+}
+
+// LSPCodeActionsParams requests the code actions available for a range in a file
+// through the session's bound editor. Empty URI means the current buffer. Range
+// is the span to act on (start==end for a point). Only, when set, filters to
+// actions whose kind matches one of the given LSP CodeActionKind prefixes. The
+// editor gathers any diagnostics overlapping the range as LSP action context.
+type LSPCodeActionsParams struct {
+	SessionID SessionID        `json:"session_id"`
+	URI       string           `json:"uri,omitempty"`
+	Range     Range            `json:"range"`
+	Only      []CodeActionKind `json:"only,omitempty"`
+}
+
+// LSPCodeActionsResult lists the available code actions. Open mirrors the other
+// LSP tools. This is list-only: nothing is applied. To apply an action, submit
+// its Changes to file.apply_change_set (reviewed and gated as a file edit).
+type LSPCodeActionsResult struct {
+	URI     string       `json:"uri"`
+	Open    bool         `json:"open"`
+	Actions []CodeAction `json:"actions"`
+}
