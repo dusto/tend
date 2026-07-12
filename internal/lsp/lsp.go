@@ -21,6 +21,7 @@ const (
 	MethodDefinition  = "lsp.definition"
 	MethodReferences  = "lsp.references"
 	MethodHover       = "lsp.hover"
+	MethodCodeActions = "lsp.code_actions"
 )
 
 // ErrNoSession reports that no session has the given id.
@@ -36,6 +37,7 @@ type editorClient interface {
 	Definition(ctx context.Context, sessionID api.SessionID, p api.EditorDefinitionParams) (api.EditorDefinitionResult, error)
 	References(ctx context.Context, sessionID api.SessionID, p api.EditorReferencesParams) (api.EditorReferencesResult, error)
 	Hover(ctx context.Context, sessionID api.SessionID, p api.EditorHoverParams) (api.EditorHoverResult, error)
+	CodeActions(ctx context.Context, sessionID api.SessionID, p api.EditorCodeActionsParams) (api.EditorCodeActionsResult, error)
 }
 
 // Service implements the LSP tools over the editor reverse-RPC. It is safe for
@@ -166,6 +168,34 @@ func (s *Service) Hover(ctx context.Context, p api.LSPHoverParams) (api.LSPHover
 		return api.LSPHoverResult{}, err
 	}
 	return api.LSPHoverResult(res), nil
+}
+
+// CodeActions lists the editor-fresh code actions available for a range. It is
+// list-only: each edit-carrying action includes change-set-ready edits, but
+// nothing is applied here — the caller submits a chosen action's Changes to
+// file.apply_change_set (which gates and reviews it as a file edit, and
+// re-enforces the worktree boundary on every target). The input file is
+// worktree-bounded exactly as the other LSP tools.
+func (s *Service) CodeActions(ctx context.Context, p api.LSPCodeActionsParams) (api.LSPCodeActionsResult, error) {
+	sess, ok := s.sessions.Get(p.SessionID)
+	if !ok {
+		return api.LSPCodeActionsResult{}, ErrNoSession
+	}
+	uri, skip, err := s.resolveTarget(ctx, sess, p.URI)
+	if err != nil {
+		return api.LSPCodeActionsResult{}, err
+	}
+	if skip {
+		return api.LSPCodeActionsResult{Actions: []api.CodeAction{}}, nil
+	}
+	res, err := s.editors.CodeActions(ctx, p.SessionID, api.EditorCodeActionsParams{URI: uri, Range: p.Range, Only: p.Only})
+	if err != nil {
+		return api.LSPCodeActionsResult{}, err
+	}
+	if res.Actions == nil {
+		res.Actions = []api.CodeAction{}
+	}
+	return api.LSPCodeActionsResult(res), nil
 }
 
 // resolveTarget resolves the file a query targets and enforces the worktree

@@ -26,6 +26,7 @@ type fakeEditor struct {
 	symbols    []api.DocumentSymbol
 	locations  []api.Location
 	hover      string
+	actions    []api.CodeAction
 	navErr     error
 	queriedURI string
 }
@@ -72,6 +73,14 @@ func (f *fakeEditor) Hover(_ context.Context, _ api.SessionID, p api.EditorHover
 		return api.EditorHoverResult{}, f.navErr
 	}
 	return api.EditorHoverResult{URI: p.URI, Open: f.open, Contents: f.hover}, nil
+}
+
+func (f *fakeEditor) CodeActions(_ context.Context, _ api.SessionID, p api.EditorCodeActionsParams) (api.EditorCodeActionsResult, error) {
+	f.queriedURI = p.URI
+	if f.navErr != nil {
+		return api.EditorCodeActionsResult{}, f.navErr
+	}
+	return api.EditorCodeActionsResult{URI: p.URI, Open: f.open, Actions: f.actions}, nil
 }
 
 func diag(sev api.DiagnosticSeverity, msg string) api.Diagnostic {
@@ -403,6 +412,72 @@ func TestNavigationHeadlessUnavailable(t *testing.T) {
 	}
 	if _, err := svc.Symbols(context.Background(), api.LSPSymbolsParams{SessionID: "s1"}); !errors.Is(err, editor.ErrEditorUnavailable) {
 		t.Errorf("symbols empty-uri headless err = %v, want ErrEditorUnavailable", err)
+	}
+}
+
+func TestCodeActionsListsWithChangeSetReadyEdits(t *testing.T) {
+	// An edit-carrying action arrives with change-set-ready targets (URI + Base +
+	// edits), so the caller can hand its Changes straight to file.apply_change_set.
+	tick := int64(7)
+	ed := &fakeEditor{open: true, actions: []api.CodeAction{
+		{
+			Title: "Organize Imports", Kind: "source.organizeImports", Edit: true,
+			Changes: []api.FileChange{{
+				URI:  "file:///repo/a.go",
+				Base: api.FileBase{ChangedTick: &tick},
+				Kind: api.FileChangePatch,
+				Edits: []api.TextEdit{{
+					Range: api.Range{Start: api.Position{Line: 0}, End: api.Position{Line: 1}}, NewText: "",
+				}},
+			}},
+		},
+		// A command-only action is listed for visibility but is not applyable.
+		{Title: "Run generator", Kind: "source", Edit: false},
+	}}
+	svc, root := newSvc(t, ed)
+	uri := fileURI(filepath.Join(root, "a.go"))
+
+	res, err := svc.CodeActions(context.Background(), api.LSPCodeActionsParams{
+		SessionID: "s1", URI: uri, Range: api.Range{Start: api.Position{Line: 0}, End: api.Position{Line: 5}},
+	})
+	if err != nil {
+		t.Fatalf("CodeActions: %v", err)
+	}
+	if res.URI != uri || !res.Open || len(res.Actions) != 2 {
+		t.Fatalf("result = %+v", res)
+	}
+	edit := res.Actions[0]
+	if !edit.Edit || len(edit.Changes) != 1 || edit.Changes[0].Base.ChangedTick == nil {
+		t.Errorf("edit action = %+v, want change-set-ready with a base", edit)
+	}
+	if res.Actions[1].Edit || len(res.Actions[1].Changes) != 0 {
+		t.Errorf("command action = %+v, want no applyable changes", res.Actions[1])
+	}
+}
+
+func TestCodeActionsResultIsNonNilSlice(t *testing.T) {
+	svc, root := newSvc(t, &fakeEditor{open: true})
+	res, err := svc.CodeActions(context.Background(), api.LSPCodeActionsParams{
+		SessionID: "s1", URI: fileURI(filepath.Join(root, "a.go")),
+	})
+	if err != nil {
+		t.Fatalf("CodeActions: %v", err)
+	}
+	if res.Actions == nil {
+		t.Error("Actions should be a non-nil slice so it marshals as []")
+	}
+}
+
+func TestCodeActionsOutsideWorktreeRejected(t *testing.T) {
+	ed := &fakeEditor{open: true}
+	svc, _ := newSvc(t, ed)
+	if _, err := svc.CodeActions(context.Background(), api.LSPCodeActionsParams{
+		SessionID: "s1", URI: "file:///etc/passwd",
+	}); !errors.Is(err, worktree.ErrOutsideWorkspace) {
+		t.Errorf("err = %v, want ErrOutsideWorkspace", err)
+	}
+	if ed.queriedURI != "" {
+		t.Errorf("editor queried for an out-of-worktree uri: %q", ed.queriedURI)
 	}
 }
 

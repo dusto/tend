@@ -90,6 +90,8 @@ Schemas live under `schemas/` (`methods/<name>.params.json` / `.result.json`, `e
   - Params: `LSPReferencesParams` · Result: `LSPReferencesResult`
 - **`lsp.hover`** — Editor-fresh hover info (markdown) for the symbol at a position via the bound editor; empty uri means the current buffer. Input uri is worktree-bounded.
   - Params: `LSPHoverParams` · Result: `LSPHoverResult`
+- **`lsp.code_actions`** — List the editor-fresh code actions available for a range (list-only, not approval-gated); each edit-carrying action includes change-set-ready edits. Apply a chosen action by submitting its changes to file.apply_change_set (reviewed as a file edit).
+  - Params: `LSPCodeActionsParams` · Result: `LSPCodeActionsResult`
 - **`approval.list`** — List pending approvals (self-contained payloads), optionally filtered by session.
   - Params: `ApprovalListParams` · Result: `ApprovalListResult`
 - **`approval.respond`** — Resolve a pending approval (approve/deny); returns an ack. Only prompt-capable clients may call it.
@@ -141,6 +143,8 @@ Schemas live under `schemas/` (`methods/<name>.params.json` / `.result.json`, `e
   - Params: `EditorReferencesParams` · Result: `EditorReferencesResult`
 - **`editor.hover`** — Return editor-fresh hover info (markdown) for the symbol at a position from the open buffer's LSP.
   - Params: `EditorHoverParams` · Result: `EditorHoverResult`
+- **`editor.code_actions`** — Return the code actions for a range from the open buffer's LSP, each edit-carrying action resolved into change-set targets (with base filled).
+  - Params: `EditorCodeActionsParams` · Result: `EditorCodeActionsResult`
 
 ### daemon → attached client
 

@@ -1,0 +1,139 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$defs": {
+    "CodeAction": {
+      "properties": {
+        "title": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "edit": {
+          "type": "boolean"
+        },
+        "changes": {
+          "items": {
+            "$ref": "#/$defs/FileChange"
+          },
+          "type": "array"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "title",
+        "edit"
+      ]
+    },
+    "FileBase": {
+      "properties": {
+        "content_hash": {
+          "type": "string"
+        },
+        "changedtick": {
+          "type": "integer"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object"
+    },
+    "FileChange": {
+      "properties": {
+        "uri": {
+          "type": "string"
+        },
+        "base": {
+          "$ref": "#/$defs/FileBase"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "edits": {
+          "items": {
+            "$ref": "#/$defs/TextEdit"
+          },
+          "type": "array"
+        },
+        "content": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "uri",
+        "base"
+      ]
+    },
+    "Position": {
+      "properties": {
+        "line": {
+          "type": "integer"
+        },
+        "byte_col": {
+          "type": "integer"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "line",
+        "byte_col"
+      ]
+    },
+    "Range": {
+      "properties": {
+        "start": {
+          "$ref": "#/$defs/Position"
+        },
+        "end": {
+          "$ref": "#/$defs/Position"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "start",
+        "end"
+      ]
+    },
+    "TextEdit": {
+      "properties": {
+        "range": {
+          "$ref": "#/$defs/Range"
+        },
+        "new_text": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "range",
+        "new_text"
+      ]
+    }
+  },
+  "properties": {
+    "uri": {
+      "type": "string"
+    },
+    "open": {
+      "type": "boolean"
+    },
+    "actions": {
+      "items": {
+        "$ref": "#/$defs/CodeAction"
+      },
+      "type": "array"
+    }
+  },
+  "additionalProperties": false,
+  "type": "object",
+  "required": [
+    "uri",
+    "open",
+    "actions"
+  ]
+}

@@ -172,3 +172,20 @@ type EditorHoverResult struct {
 	Contents string `json:"contents"`
 	Range    *Range `json:"range,omitempty"`
 }
+
+// EditorCodeActionsParams requests the code actions for a range from the bound
+// editor. The editor assembles the LSP action context (overlapping diagnostics)
+// and resolves each action's edits into change-set form.
+type EditorCodeActionsParams struct {
+	URI   string           `json:"uri"`
+	Range Range            `json:"range"`
+	Only  []CodeActionKind `json:"only,omitempty"`
+}
+
+// EditorCodeActionsResult returns the editor's code actions for the range, each
+// with its edits already translated to change-set targets (with Base filled).
+type EditorCodeActionsResult struct {
+	URI     string       `json:"uri"`
+	Open    bool         `json:"open"`
+	Actions []CodeAction `json:"actions"`
+}
