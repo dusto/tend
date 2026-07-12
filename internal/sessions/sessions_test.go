@@ -288,13 +288,16 @@ func TestAttachAndDetach(t *testing.T) {
 	}
 }
 
-func TestAttachRejectsUnregisteredCaller(t *testing.T) {
+func TestAttachAndDetachRejectUnregisteredCaller(t *testing.T) {
 	svc, sess, _, _ := fixture(t)
 	sess.Create("s1", "codex", "ws1", ref("ws1", "t1"), "/repo")
 	// An empty caller (a connection with no registered identity) cannot receive
-	// prompt delivery, so it cannot attach.
+	// prompt delivery, so it cannot attach — and detach is symmetric.
 	if _, err := svc.Attach("", api.SessionAttachParams{SessionID: "s1"}); !errors.Is(err, errNotRegistered) {
 		t.Errorf("attach with empty caller err = %v, want errNotRegistered", err)
+	}
+	if _, err := svc.Detach("", api.SessionDetachParams{SessionID: "s1"}); !errors.Is(err, errNotRegistered) {
+		t.Errorf("detach with empty caller err = %v, want errNotRegistered", err)
 	}
 }
 

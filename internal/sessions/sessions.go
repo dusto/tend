@@ -151,9 +151,13 @@ func (svc *Service) Attach(caller api.ClientID, p api.SessionAttachParams) (api.
 }
 
 // Detach stops caller following a session. It does not end the session.
-// Detaching a client that is not attached is a no-op success. An unknown session
-// is still rejected, so a client learns it named a session that is gone.
+// Detaching a client that is not attached is a no-op success. An unregistered
+// caller (which could never have attached) and an unknown session are rejected,
+// keeping the contract symmetric with Attach.
 func (svc *Service) Detach(caller api.ClientID, p api.SessionDetachParams) (api.SessionDetachResult, error) {
+	if caller == "" {
+		return api.SessionDetachResult{}, errNotRegistered
+	}
 	s, ok := svc.sessions.Get(p.SessionID)
 	if !ok {
 		return api.SessionDetachResult{}, editor.ErrNoSession
