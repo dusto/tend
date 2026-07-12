@@ -265,6 +265,49 @@ func TestRenameUnknownSession(t *testing.T) {
 	}
 }
 
+func TestAttachAndDetach(t *testing.T) {
+	svc, sess, _, _ := fixture(t)
+	s := sess.Create("s1", "codex", "ws1", ref("ws1", "t1"), "/repo")
+
+	if _, err := svc.Attach("cli", api.SessionAttachParams{SessionID: "s1"}); err != nil {
+		t.Fatalf("Attach: %v", err)
+	}
+	got := s.AttachedClients()
+	if len(got) != 1 || got[0] != "cli" {
+		t.Errorf("attached = %v, want [cli]", got)
+	}
+	if _, err := svc.Detach("cli", api.SessionDetachParams{SessionID: "s1"}); err != nil {
+		t.Fatalf("Detach: %v", err)
+	}
+	if len(s.AttachedClients()) != 0 {
+		t.Errorf("attached after detach = %v, want empty", s.AttachedClients())
+	}
+	// Detaching again is a no-op success.
+	if _, err := svc.Detach("cli", api.SessionDetachParams{SessionID: "s1"}); err != nil {
+		t.Errorf("idempotent detach err = %v, want nil", err)
+	}
+}
+
+func TestAttachRejectsUnregisteredCaller(t *testing.T) {
+	svc, sess, _, _ := fixture(t)
+	sess.Create("s1", "codex", "ws1", ref("ws1", "t1"), "/repo")
+	// An empty caller (a connection with no registered identity) cannot receive
+	// prompt delivery, so it cannot attach.
+	if _, err := svc.Attach("", api.SessionAttachParams{SessionID: "s1"}); !errors.Is(err, errNotRegistered) {
+		t.Errorf("attach with empty caller err = %v, want errNotRegistered", err)
+	}
+}
+
+func TestAttachAndDetachUnknownSession(t *testing.T) {
+	svc, _, _, _ := fixture(t)
+	if _, err := svc.Attach("ed", api.SessionAttachParams{SessionID: "nope"}); !errors.Is(err, editor.ErrNoSession) {
+		t.Errorf("attach unknown err = %v, want ErrNoSession", err)
+	}
+	if _, err := svc.Detach("ed", api.SessionDetachParams{SessionID: "nope"}); !errors.Is(err, editor.ErrNoSession) {
+		t.Errorf("detach unknown err = %v, want ErrNoSession", err)
+	}
+}
+
 func TestListReportsModesAndModels(t *testing.T) {
 	svc, sess, _, _ := fixture(t)
 	s := sess.Create("s1", "codex", "ws1", ref("ws1", "t1"), "/repo")

@@ -47,6 +47,47 @@ func TestLabelRoundTrip(t *testing.T) {
 	}
 }
 
+func TestAttachRoundTrip(t *testing.T) {
+	s := newSession(t)
+	if len(s.AttachedClients()) != 0 {
+		t.Errorf("new session should have no attached clients, got %v", s.AttachedClients())
+	}
+	s.Attach("ed")
+	s.Attach("cli")
+	s.Attach("ed") // idempotent
+	if got := len(s.AttachedClients()); got != 2 {
+		t.Errorf("attached = %d, want 2 (attach is idempotent)", got)
+	}
+	s.Detach("ed")
+	got := s.AttachedClients()
+	if len(got) != 1 || got[0] != "cli" {
+		t.Errorf("after detach = %v, want [cli]", got)
+	}
+	// Detaching a client that is not attached is a no-op.
+	s.Detach("nobody")
+	if len(s.AttachedClients()) != 1 {
+		t.Errorf("detaching a non-attached client changed the set: %v", s.AttachedClients())
+	}
+}
+
+func TestDetachClientRemovesFromAllSessions(t *testing.T) {
+	r := NewRegistry()
+	a := r.Create("s1", "codex", "ws1", api.TaskRef{}, "/a")
+	b := r.Create("s2", "codex", "ws1", api.TaskRef{}, "/b")
+	a.Attach("cli")
+	a.Attach("ed")
+	b.Attach("cli")
+
+	// A disconnecting client is dropped from every session it followed.
+	r.DetachClient("cli")
+	if got := a.AttachedClients(); len(got) != 1 || got[0] != "ed" {
+		t.Errorf("s1 attached = %v, want [ed] (cli detached)", got)
+	}
+	if got := b.AttachedClients(); len(got) != 0 {
+		t.Errorf("s2 attached = %v, want empty (cli detached)", got)
+	}
+}
+
 func TestResourceUsageRoundTrip(t *testing.T) {
 	s := newSession(t)
 	if s.ResourceUsage() != nil {

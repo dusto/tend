@@ -175,6 +175,29 @@ type SessionRenameResult struct {
 	Session SessionInfo `json:"session"`
 }
 
+// SessionAttachParams makes the calling client follow a session: its prompts
+// (approval/clarification) and waiting_* status are delivered to attached
+// clients. Attaching does not claim the editor binding.
+type SessionAttachParams struct {
+	SessionID SessionID `json:"session_id"`
+}
+
+// SessionAttachResult acknowledges an attach.
+type SessionAttachResult struct {
+	SessionID SessionID `json:"session_id"`
+}
+
+// SessionDetachParams stops the calling client following a session. It does not
+// end the session; detaching an already-detached client is a no-op.
+type SessionDetachParams struct {
+	SessionID SessionID `json:"session_id"`
+}
+
+// SessionDetachResult acknowledges a detach.
+type SessionDetachResult struct {
+	SessionID SessionID `json:"session_id"`
+}
+
 // SessionListParams lists the daemon's sessions. WorkspaceID, when set, filters
 // to one workspace; empty lists all.
 type SessionListParams struct {

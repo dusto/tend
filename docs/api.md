@@ -40,6 +40,10 @@ Schemas live under `schemas/` (`methods/<name>.params.json` / `.result.json`, `e
   - Params: `SessionResumeSeedParams` · Result: `SessionResumeSeedResult`
 - **`session.rename`** — Set or clear a session's user-facing label (independent of its task); an empty label clears it, an over-long one errors. Emits session_renamed so attached clients see the change.
   - Params: `SessionRenameParams` · Result: `SessionRenameResult`
+- **`session.attach`** — Make the calling client follow a session: its prompts (approval/clarification) and waiting_* status are delivered to attached clients. Does not claim the editor binding. Until any client attaches, a session's prompts broadcast to all clients.
+  - Params: `SessionAttachParams` · Result: `SessionAttachResult`
+- **`session.detach`** — Stop the calling client following a session (does not end the session). Detaching an already-detached client is a no-op.
+  - Params: `SessionDetachParams` · Result: `SessionDetachResult`
 - **`provider.list`** — List the configured ACP providers with their enabled state and running-process count for a workspace.
   - Params: `ProviderListParams` · Result: `ProviderListResult`
 - **`provider.start`** — Warm a provider for a workspace: ensure the pool holds at least one process for it; emits provider_started on a spawn.
