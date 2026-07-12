@@ -1,0 +1,88 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$defs": {
+    "DocumentSymbol": {
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "detail": {
+          "type": "string"
+        },
+        "container_name": {
+          "type": "string"
+        },
+        "range": {
+          "$ref": "#/$defs/Range"
+        },
+        "selection_range": {
+          "$ref": "#/$defs/Range"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "name",
+        "kind",
+        "range",
+        "selection_range"
+      ]
+    },
+    "Position": {
+      "properties": {
+        "line": {
+          "type": "integer"
+        },
+        "byte_col": {
+          "type": "integer"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "line",
+        "byte_col"
+      ]
+    },
+    "Range": {
+      "properties": {
+        "start": {
+          "$ref": "#/$defs/Position"
+        },
+        "end": {
+          "$ref": "#/$defs/Position"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "start",
+        "end"
+      ]
+    }
+  },
+  "properties": {
+    "uri": {
+      "type": "string"
+    },
+    "open": {
+      "type": "boolean"
+    },
+    "symbols": {
+      "items": {
+        "$ref": "#/$defs/DocumentSymbol"
+      },
+      "type": "array"
+    }
+  },
+  "additionalProperties": false,
+  "type": "object",
+  "required": [
+    "uri",
+    "open",
+    "symbols"
+  ]
+}

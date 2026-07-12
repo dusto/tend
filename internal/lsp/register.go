@@ -13,10 +13,46 @@ import (
 
 // Register installs the LSP methods on m, backed by s.
 func Register(m *dispatch.Mux, s *Service) error {
-	return dispatch.Handle(m, MethodDiagnostics, func(ctx context.Context, p api.LSPDiagnosticsParams) (api.LSPDiagnosticsResult, error) {
+	if err := dispatch.Handle(m, MethodDiagnostics, func(ctx context.Context, p api.LSPDiagnosticsParams) (api.LSPDiagnosticsResult, error) {
 		res, err := s.Diagnostics(ctx, p)
 		if err != nil {
 			return api.LSPDiagnosticsResult{}, toRPCError(err)
+		}
+		return res, nil
+	}); err != nil {
+		return err
+	}
+	if err := dispatch.Handle(m, MethodSymbols, func(ctx context.Context, p api.LSPSymbolsParams) (api.LSPSymbolsResult, error) {
+		res, err := s.Symbols(ctx, p)
+		if err != nil {
+			return api.LSPSymbolsResult{}, toRPCError(err)
+		}
+		return res, nil
+	}); err != nil {
+		return err
+	}
+	if err := dispatch.Handle(m, MethodDefinition, func(ctx context.Context, p api.LSPDefinitionParams) (api.LSPDefinitionResult, error) {
+		res, err := s.Definition(ctx, p)
+		if err != nil {
+			return api.LSPDefinitionResult{}, toRPCError(err)
+		}
+		return res, nil
+	}); err != nil {
+		return err
+	}
+	if err := dispatch.Handle(m, MethodReferences, func(ctx context.Context, p api.LSPReferencesParams) (api.LSPReferencesResult, error) {
+		res, err := s.References(ctx, p)
+		if err != nil {
+			return api.LSPReferencesResult{}, toRPCError(err)
+		}
+		return res, nil
+	}); err != nil {
+		return err
+	}
+	return dispatch.Handle(m, MethodHover, func(ctx context.Context, p api.LSPHoverParams) (api.LSPHoverResult, error) {
+		res, err := s.Hover(ctx, p)
+		if err != nil {
+			return api.LSPHoverResult{}, toRPCError(err)
 		}
 		return res, nil
 	})

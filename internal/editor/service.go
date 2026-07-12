@@ -17,6 +17,10 @@ const (
 	MethodOpen          = "editor.open"
 	MethodDiff          = "editor.diff"
 	MethodDiagnostics   = "editor.diagnostics"
+	MethodSymbols       = "editor.symbols"
+	MethodDefinition    = "editor.definition"
+	MethodReferences    = "editor.references"
+	MethodHover         = "editor.hover"
 )
 
 // Service routes editor-local calls to a session's editor-binding owner. Each
@@ -101,6 +105,53 @@ func (s *Service) Diagnostics(ctx context.Context, sessionID api.SessionID, p ap
 	}
 	var res api.EditorDiagnosticsResult
 	err = caller.Call(ctx, MethodDiagnostics, p, &res)
+	return res, err
+}
+
+// Symbols returns editor-fresh document symbols for a file from the bound editor.
+func (s *Service) Symbols(ctx context.Context, sessionID api.SessionID, p api.EditorSymbolsParams) (api.EditorSymbolsResult, error) {
+	caller, err := s.editorCaller(sessionID)
+	if err != nil {
+		return api.EditorSymbolsResult{}, err
+	}
+	var res api.EditorSymbolsResult
+	err = caller.Call(ctx, MethodSymbols, p, &res)
+	return res, err
+}
+
+// Definition returns editor-fresh definition location(s) for the symbol at a
+// position from the bound editor.
+func (s *Service) Definition(ctx context.Context, sessionID api.SessionID, p api.EditorDefinitionParams) (api.EditorDefinitionResult, error) {
+	caller, err := s.editorCaller(sessionID)
+	if err != nil {
+		return api.EditorDefinitionResult{}, err
+	}
+	var res api.EditorDefinitionResult
+	err = caller.Call(ctx, MethodDefinition, p, &res)
+	return res, err
+}
+
+// References returns editor-fresh reference locations for the symbol at a
+// position from the bound editor.
+func (s *Service) References(ctx context.Context, sessionID api.SessionID, p api.EditorReferencesParams) (api.EditorReferencesResult, error) {
+	caller, err := s.editorCaller(sessionID)
+	if err != nil {
+		return api.EditorReferencesResult{}, err
+	}
+	var res api.EditorReferencesResult
+	err = caller.Call(ctx, MethodReferences, p, &res)
+	return res, err
+}
+
+// Hover returns editor-fresh hover info for the symbol at a position from the
+// bound editor.
+func (s *Service) Hover(ctx context.Context, sessionID api.SessionID, p api.EditorHoverParams) (api.EditorHoverResult, error) {
+	caller, err := s.editorCaller(sessionID)
+	if err != nil {
+		return api.EditorHoverResult{}, err
+	}
+	var res api.EditorHoverResult
+	err = caller.Call(ctx, MethodHover, p, &res)
 	return res, err
 }
 

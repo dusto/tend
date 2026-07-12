@@ -116,3 +116,59 @@ type EditorDiagnosticsResult struct {
 	Open        bool         `json:"open"`
 	Diagnostics []Diagnostic `json:"diagnostics"`
 }
+
+// EditorSymbolsParams requests a file's document symbols from the bound editor.
+type EditorSymbolsParams struct {
+	URI string `json:"uri"`
+}
+
+// EditorSymbolsResult returns the editor's document symbols for the file. Open
+// is true when the file is an open buffer with attached LSP; false means nothing
+// live and Symbols is empty.
+type EditorSymbolsResult struct {
+	URI     string           `json:"uri"`
+	Open    bool             `json:"open"`
+	Symbols []DocumentSymbol `json:"symbols"`
+}
+
+// EditorDefinitionParams requests the definition of the symbol at Position.
+type EditorDefinitionParams struct {
+	URI      string   `json:"uri"`
+	Position Position `json:"position"`
+}
+
+// EditorDefinitionResult returns the definition location(s). Open reports
+// whether the queried file was a live buffer.
+type EditorDefinitionResult struct {
+	URI       string     `json:"uri"`
+	Open      bool       `json:"open"`
+	Locations []Location `json:"locations"`
+}
+
+// EditorReferencesParams requests references to the symbol at Position.
+type EditorReferencesParams struct {
+	URI                string   `json:"uri"`
+	Position           Position `json:"position"`
+	IncludeDeclaration bool     `json:"include_declaration,omitempty"`
+}
+
+// EditorReferencesResult returns the reference locations.
+type EditorReferencesResult struct {
+	URI       string     `json:"uri"`
+	Open      bool       `json:"open"`
+	Locations []Location `json:"locations"`
+}
+
+// EditorHoverParams requests hover info for the symbol at Position.
+type EditorHoverParams struct {
+	URI      string   `json:"uri"`
+	Position Position `json:"position"`
+}
+
+// EditorHoverResult returns hover contents (markdown) and the range they cover.
+type EditorHoverResult struct {
+	URI      string `json:"uri"`
+	Open     bool   `json:"open"`
+	Contents string `json:"contents"`
+	Range    *Range `json:"range,omitempty"`
+}
