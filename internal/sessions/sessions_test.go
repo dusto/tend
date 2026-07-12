@@ -1,7 +1,9 @@
 package sessions
 
 import (
+	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/dusto/tend/api"
@@ -18,7 +20,18 @@ func fixture(t *testing.T) (*Service, *session.Registry, *client.Registry, *edit
 	clients := client.NewRegistry()
 	clients.Register("ed", client.Capabilities{Role: api.RoleEditor}, nil)
 	binder := editor.NewBinder(sess, clients)
-	return NewService(sess, binder), sess, clients, binder
+	return NewService(sess, binder, nil), sess, clients, binder
+}
+
+// fakePublisher captures published events so a test can assert what a session.*
+// method emitted.
+type fakePublisher struct {
+	events []api.Event
+}
+
+func (p *fakePublisher) Publish(ev api.Event) (api.Event, error) {
+	p.events = append(p.events, ev)
+	return ev, nil
 }
 
 func ref(ws, id string) api.TaskRef {
@@ -174,6 +187,82 @@ func mustGet(t *testing.T, r *session.Registry, id api.SessionID) *session.Sessi
 		t.Fatalf("session %s missing", id)
 	}
 	return s
+}
+
+func TestRenameSetsLabelEmitsEventAndReportsInList(t *testing.T) {
+	sess := session.NewRegistry()
+	clients := client.NewRegistry()
+	clients.Register("ed", client.Capabilities{Role: api.RoleEditor}, nil)
+	binder := editor.NewBinder(sess, clients)
+	pub := &fakePublisher{}
+	svc := NewService(sess, binder, pub)
+	sess.Create("s1", "codex", "ws1", ref("ws1", "t1"), "/repo")
+
+	res, err := svc.Rename("ed", api.SessionRenameParams{SessionID: "s1", Label: "auth spike"})
+	if err != nil {
+		t.Fatalf("Rename: %v", err)
+	}
+	if res.Session.Label != "auth spike" {
+		t.Errorf("result label = %q, want %q", res.Session.Label, "auth spike")
+	}
+	// The label is recorded on the session and shows up in a subsequent list.
+	if got := svc.List("ed", api.SessionListParams{}).Sessions[0].Label; got != "auth spike" {
+		t.Errorf("listed label = %q, want %q", got, "auth spike")
+	}
+	// A session_renamed event was emitted on the session stream.
+	if len(pub.events) != 1 {
+		t.Fatalf("published %d events, want 1", len(pub.events))
+	}
+	ev := pub.events[0]
+	if ev.Type != "session_renamed" || ev.StreamID != api.SessionStream("s1") {
+		t.Errorf("event = %s on %s, want session_renamed on session stream", ev.Type, ev.StreamID)
+	}
+	var got api.SessionRenamed
+	if err := json.Unmarshal(ev.Payload, &got); err != nil {
+		t.Fatalf("payload: %v", err)
+	}
+	if got.SessionID != "s1" || got.Label != "auth spike" {
+		t.Errorf("payload = %+v, want s1/auth spike", got)
+	}
+}
+
+func TestRenameEmptyLabelClears(t *testing.T) {
+	svc, sess, _, _ := fixture(t)
+	s := sess.Create("s1", "codex", "ws1", ref("ws1", "t1"), "/repo")
+	s.SetLabel("old")
+
+	res, err := svc.Rename("ed", api.SessionRenameParams{SessionID: "s1", Label: ""})
+	if err != nil {
+		t.Fatalf("Rename clear: %v", err)
+	}
+	if res.Session.Label != "" {
+		t.Errorf("label = %q, want cleared", res.Session.Label)
+	}
+	if s.Label() != "" {
+		t.Errorf("session label = %q, want cleared", s.Label())
+	}
+}
+
+func TestRenameRejectsOverlongLabel(t *testing.T) {
+	svc, sess, _, _ := fixture(t)
+	sess.Create("s1", "codex", "ws1", ref("ws1", "t1"), "/repo")
+
+	long := strings.Repeat("x", api.MaxSessionLabelLen+1)
+	if _, err := svc.Rename("ed", api.SessionRenameParams{SessionID: "s1", Label: long}); !errors.Is(err, errLabelTooLong) {
+		t.Errorf("overlong rename err = %v, want errLabelTooLong", err)
+	}
+	// A label exactly at the limit is accepted.
+	atLimit := strings.Repeat("x", api.MaxSessionLabelLen)
+	if _, err := svc.Rename("ed", api.SessionRenameParams{SessionID: "s1", Label: atLimit}); err != nil {
+		t.Errorf("at-limit rename err = %v, want nil", err)
+	}
+}
+
+func TestRenameUnknownSession(t *testing.T) {
+	svc, _, _, _ := fixture(t)
+	if _, err := svc.Rename("ed", api.SessionRenameParams{SessionID: "nope", Label: "x"}); !errors.Is(err, editor.ErrNoSession) {
+		t.Errorf("rename unknown err = %v, want ErrNoSession", err)
+	}
 }
 
 func TestListReportsModesAndModels(t *testing.T) {

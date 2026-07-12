@@ -162,7 +162,7 @@ func New(ln net.Listener, logPath string, opts ...Option) (*Server, error) {
 	editors := editor.NewService(s.binder, s.clients)
 	s.files = files.NewService(s.sessions, editors, s.gate, files.Options{})
 	s.lsp = lsp.NewService(s.sessions, editors)
-	s.sessSvc = sessions.NewService(s.sessions, s.binder)
+	s.sessSvc = sessions.NewService(s.sessions, s.binder, s.store)
 	// Task provider per workspace. The default factory is the in-memory fake (for
 	// tests and zero-config runs); tendd installs the config-resolved factory. The
 	// task.* contract and event bridge are independent of the backend.

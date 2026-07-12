@@ -10,6 +10,9 @@ import (
 	"github.com/dusto/tend/internal/rpc"
 )
 
+// errLabelTooLong reports a session.rename label exceeding api.MaxSessionLabelLen.
+var errLabelTooLong = errors.New("session: label too long")
+
 // Register installs the session.* methods on m. caller resolves the calling
 // connection's client id (empty when the connection has not registered an
 // identity) — session.list reports editor binding relative to it, and
@@ -21,21 +24,30 @@ func Register(m *dispatch.Mux, s *Service, caller func() api.ClientID) error {
 	}); err != nil {
 		return err
 	}
-	return dispatch.Handle(m, MethodClaim, func(_ context.Context, p api.SessionClaimParams) (api.SessionClaimResult, error) {
+	if err := dispatch.Handle(m, MethodClaim, func(_ context.Context, p api.SessionClaimParams) (api.SessionClaimResult, error) {
 		res, err := s.Claim(caller(), p)
 		if err != nil {
 			return api.SessionClaimResult{}, toRPCError(err)
 		}
 		return res, nil
+	}); err != nil {
+		return err
+	}
+	return dispatch.Handle(m, MethodRename, func(_ context.Context, p api.SessionRenameParams) (api.SessionRenameResult, error) {
+		res, err := s.Rename(caller(), p)
+		if err != nil {
+			return api.SessionRenameResult{}, toRPCError(err)
+		}
+		return res, nil
 	})
 }
 
-// toRPCError maps a claim error to its JSON-RPC error. A headless/non-editor
-// caller or a missing session are client errors (invalid params); the editor
-// binding's own "not an editor" maps the same way.
+// toRPCError maps a session.* error to its JSON-RPC error. A headless/non-editor
+// caller, a missing session, or an over-long label are client errors (invalid
+// params); the editor binding's own "not an editor" maps the same way.
 func toRPCError(err error) error {
 	switch {
-	case errors.Is(err, editor.ErrNoSession), errors.Is(err, editor.ErrNotEditor), errors.Is(err, editor.ErrEditorUnavailable):
+	case errors.Is(err, editor.ErrNoSession), errors.Is(err, editor.ErrNotEditor), errors.Is(err, editor.ErrEditorUnavailable), errors.Is(err, errLabelTooLong):
 		return &rpc.Error{Code: rpc.CodeInvalidParams, Message: err.Error()}
 	default:
 		return &rpc.Error{Code: rpc.CodeInternalError, Message: err.Error()}

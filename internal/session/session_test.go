@@ -31,6 +31,22 @@ func TestContextUsageRoundTrip(t *testing.T) {
 	}
 }
 
+func TestLabelRoundTrip(t *testing.T) {
+	s := newSession(t)
+	if s.Label() != "" {
+		t.Errorf("new session label = %q, want empty", s.Label())
+	}
+	s.SetLabel("auth spike")
+	if s.Label() != "auth spike" {
+		t.Errorf("label = %q, want %q", s.Label(), "auth spike")
+	}
+	// A rename can clear the label.
+	s.SetLabel("")
+	if s.Label() != "" {
+		t.Errorf("label = %q, want cleared", s.Label())
+	}
+}
+
 func TestResourceUsageRoundTrip(t *testing.T) {
 	s := newSession(t)
 	if s.ResourceUsage() != nil {

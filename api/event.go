@@ -99,6 +99,7 @@ var EventDefs = []EventDef{
 	{Type: "agent_mode_updated", Scope: ScopeSession, Payload: AgentModeUpdated{}, Summary: "A session's active mode (behavior/permission mode) changed, by a client set or the agent itself."},
 	{Type: "agent_model_updated", Scope: ScopeSession, Payload: AgentModelUpdated{}, Summary: "A session's active model changed."},
 	{Type: "agent_thought_level_updated", Scope: ScopeSession, Payload: AgentThoughtLevelUpdated{}, Summary: "A session's active reasoning/thought level changed."},
+	{Type: "session_renamed", Scope: ScopeSession, Payload: SessionRenamed{}, Summary: "A session's user-facing label was set or cleared (session.rename)."},
 	{Type: "agent_plan", Scope: ScopeSession, Payload: AgentPlan{}, Summary: "The agent's tactical per-turn plan (its todo list): the full set of entries with their status, replacing any prior plan for the turn."},
 	{Type: "slash_commands_updated", Scope: ScopeSession, Payload: SlashCommandsUpdated{}, Summary: "A session's merged slash-command set changed (the agent advertised new commands): the full set of provider + daemon commands, replacing the prior set."},
 	{Type: "task_created", Scope: ScopeWorkspace, Payload: TaskChange{}, Summary: "A task was created. Repo-wide: delivered on the workspace stream."},
@@ -316,6 +317,13 @@ type AgentModelUpdated struct {
 type AgentThoughtLevelUpdated struct {
 	SessionID             SessionID `json:"session_id"`
 	CurrentThoughtLevelID string    `json:"current_thought_level_id"`
+}
+
+// SessionRenamed signals that a session's user-facing label was set or cleared
+// (session.rename). Label is the new value; empty means the label was cleared.
+type SessionRenamed struct {
+	SessionID SessionID `json:"session_id"`
+	Label     string    `json:"label"`
 }
 
 // AgentPlan is the agent's tactical per-turn plan (its todo list). Each plan

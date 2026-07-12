@@ -24,8 +24,9 @@ const (
 	// 0.22.0 added MemoryEntry/MemoryWriteParams.provenance (memory import);
 	// 0.23.0 added memory.context (budget-bounded steering+notes digest); 0.24.0
 	// added session.resume_seed (daemon-side context reconstruction: summary +
-	// recent transcript + memory, condensed into a fresh-session seed).
-	PluginToDaemonVersion = "0.24.0"
+	// recent transcript + memory, condensed into a fresh-session seed); 0.25.0
+	// added session.rename (+ SessionInfo.label: user-assigned session labels).
+	PluginToDaemonVersion = "0.25.0"
 	// 0.2.0 added editor.open + editor.diff; 0.3.0 added editor.diagnostics.
 	DaemonToEditorVersion = "0.3.0"
 	// 0.2.0 added the agent_thought_chunk session event; 0.3.0 added the
@@ -39,8 +40,10 @@ const (
 	// 0.11.0 added the user_prompt session event (the user's per-turn prompt text,
 	// so a replay/resume sees the human side of the conversation); 0.12.0 added the
 	// agent_context_usage and agent_token_usage session events (provider-reported
-	// context-window fullness and authoritative per-turn token accounting).
-	DaemonToClientVersion = "0.12.0"
+	// context-window fullness and authoritative per-turn token accounting);
+	// 0.13.0 added the session_renamed session event (user-assigned label set or
+	// cleared).
+	DaemonToClientVersion = "0.13.0"
 )
 
 // Versions reports the contract version of each method set.

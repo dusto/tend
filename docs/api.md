@@ -38,6 +38,8 @@ Schemas live under `schemas/` (`methods/<name>.params.json` / `.result.json`, `e
   - Params: `SessionSetThoughtLevelParams` · Result: `SessionSetThoughtLevelResult`
 - **`session.resume_seed`** — Reconstruct a resume seed from a prior session's durable history (summary records + recent transcript) plus workspace memory, condensed to a budget; the opening-prompt content for a fresh session (works across a daemon restart).
   - Params: `SessionResumeSeedParams` · Result: `SessionResumeSeedResult`
+- **`session.rename`** — Set or clear a session's user-facing label (independent of its task); an empty label clears it, an over-long one errors. Emits session_renamed so attached clients see the change.
+  - Params: `SessionRenameParams` · Result: `SessionRenameResult`
 - **`provider.list`** — List the configured ACP providers with their enabled state and running-process count for a workspace.
   - Params: `ProviderListParams` · Result: `ProviderListResult`
 - **`provider.start`** — Warm a provider for a workspace: ensure the pool holds at least one process for it; emits provider_started on a spawn.
@@ -169,6 +171,8 @@ Schemas live under `schemas/` (`methods/<name>.params.json` / `.result.json`, `e
   - Payload: `ProviderStarted`
 - **`provider_stopped`** (`workspace` stream) — A provider process left the pool (exit or crash). Repo-wide: delivered on the workspace stream.
   - Payload: `ProviderStopped`
+- **`session_renamed`** (`session` stream) — A session's user-facing label was set or cleared (session.rename).
+  - Payload: `SessionRenamed`
 - **`slash_commands_updated`** (`session` stream) — A session's merged slash-command set changed (the agent advertised new commands): the full set of provider + daemon commands, replacing the prior set.
   - Payload: `SlashCommandsUpdated`
 - **`summary`** (`session` stream) — A compaction record standing in for a range [from_seq,to_seq] of raw session turns: the condensed text a client renders in place of the collapsed turns. It is a kind=summary record (Event.summary carries the range), served on replay as a range replacement rather than appended live.
