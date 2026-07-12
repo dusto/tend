@@ -65,6 +65,10 @@ var Methods = []Method{
 	{Name: "file.apply_change_set", Direction: PluginToDaemon, Params: FileApplyChangeSetParams{}, Result: FileApplyChangeSetResult{}, Summary: "Apply a multi-file change set as one approved unit (best-effort atomic: preflight, disk writes, editor buffers last, with partial-failure reporting)."},
 	{Name: "file.diff", Direction: PluginToDaemon, Params: FileDiffParams{}, Result: FileDiffResult{}, Summary: "Fetch a change set's captured before/after snapshots for review (read-only, not task-gated)."},
 	{Name: "lsp.diagnostics", Direction: PluginToDaemon, Params: LSPDiagnosticsParams{}, Result: LSPDiagnosticsResult{}, Summary: "Editor-fresh LSP diagnostics for a file via the session's bound editor (session-scoped, not approval-gated); empty uri means the editor's current buffer."},
+	{Name: "lsp.symbols", Direction: PluginToDaemon, Params: LSPSymbolsParams{}, Result: LSPSymbolsResult{}, Summary: "Editor-fresh document symbols (outline) for a file via the session's bound editor; empty uri means the current buffer. Input uri is worktree-bounded."},
+	{Name: "lsp.definition", Direction: PluginToDaemon, Params: LSPDefinitionParams{}, Result: LSPDefinitionResult{}, Summary: "Editor-fresh definition location(s) of the symbol at a position via the bound editor; empty uri means the current buffer. Result locations may point outside the worktree (dependency/stdlib)."},
+	{Name: "lsp.references", Direction: PluginToDaemon, Params: LSPReferencesParams{}, Result: LSPReferencesResult{}, Summary: "Editor-fresh reference locations of the symbol at a position via the bound editor; include_declaration adds the declaration. Input uri is worktree-bounded."},
+	{Name: "lsp.hover", Direction: PluginToDaemon, Params: LSPHoverParams{}, Result: LSPHoverResult{}, Summary: "Editor-fresh hover info (markdown) for the symbol at a position via the bound editor; empty uri means the current buffer. Input uri is worktree-bounded."},
 	{Name: "approval.list", Direction: PluginToDaemon, Params: ApprovalListParams{}, Result: ApprovalListResult{}, Summary: "List pending approvals (self-contained payloads), optionally filtered by session."},
 	{Name: "approval.respond", Direction: PluginToDaemon, Params: ApprovalRespondParams{}, Result: ApprovalRespondResult{}, Summary: "Resolve a pending approval (approve/deny); returns an ack. Only prompt-capable clients may call it."},
 	{Name: "task.create", Direction: PluginToDaemon, Params: TaskCreateParams{}, Result: Task{}, Summary: "Create a task in a workspace's provider."},
@@ -87,6 +91,10 @@ var Methods = []Method{
 	{Name: "editor.open", Direction: DaemonToEditor, Params: EditorOpenParams{}, Result: EditorOpenResult{}, Summary: "Open files in editor buffers for in-place review (read-only affordance)."},
 	{Name: "editor.diff", Direction: DaemonToEditor, Params: EditorDiffParams{}, Result: EditorDiffResult{}, Summary: "Render a change set's captured before/after snapshots in the editor's diff view."},
 	{Name: "editor.diagnostics", Direction: DaemonToEditor, Params: EditorDiagnosticsParams{}, Result: EditorDiagnosticsResult{}, Summary: "Return editor-fresh LSP diagnostics for a file (open buffers); the daemon filters by severity."},
+	{Name: "editor.symbols", Direction: DaemonToEditor, Params: EditorSymbolsParams{}, Result: EditorSymbolsResult{}, Summary: "Return editor-fresh document symbols (outline) for a file from its open buffer's LSP."},
+	{Name: "editor.definition", Direction: DaemonToEditor, Params: EditorDefinitionParams{}, Result: EditorDefinitionResult{}, Summary: "Return editor-fresh definition location(s) of the symbol at a position from the open buffer's LSP."},
+	{Name: "editor.references", Direction: DaemonToEditor, Params: EditorReferencesParams{}, Result: EditorReferencesResult{}, Summary: "Return editor-fresh reference locations of the symbol at a position from the open buffer's LSP."},
+	{Name: "editor.hover", Direction: DaemonToEditor, Params: EditorHoverParams{}, Result: EditorHoverResult{}, Summary: "Return editor-fresh hover info (markdown) for the symbol at a position from the open buffer's LSP."},
 
 	// daemon -> attached client
 	{Name: "event.push", Direction: DaemonToClient, Params: EventPushParams{}, Result: nil, Summary: "Deliver an event on a subscribed stream (at-least-once; clients dedup by (stream_id, seq, kind))."},

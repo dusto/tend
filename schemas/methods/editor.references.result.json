@@ -1,0 +1,74 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$defs": {
+    "Location": {
+      "properties": {
+        "uri": {
+          "type": "string"
+        },
+        "range": {
+          "$ref": "#/$defs/Range"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "uri",
+        "range"
+      ]
+    },
+    "Position": {
+      "properties": {
+        "line": {
+          "type": "integer"
+        },
+        "byte_col": {
+          "type": "integer"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "line",
+        "byte_col"
+      ]
+    },
+    "Range": {
+      "properties": {
+        "start": {
+          "$ref": "#/$defs/Position"
+        },
+        "end": {
+          "$ref": "#/$defs/Position"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "start",
+        "end"
+      ]
+    }
+  },
+  "properties": {
+    "uri": {
+      "type": "string"
+    },
+    "open": {
+      "type": "boolean"
+    },
+    "locations": {
+      "items": {
+        "$ref": "#/$defs/Location"
+      },
+      "type": "array"
+    }
+  },
+  "additionalProperties": false,
+  "type": "object",
+  "required": [
+    "uri",
+    "open",
+    "locations"
+  ]
+}

@@ -23,6 +23,10 @@ type fakeEditor struct {
 	open       bool
 	diags      []api.Diagnostic
 	diagErr    error
+	symbols    []api.DocumentSymbol
+	locations  []api.Location
+	hover      string
+	navErr     error
 	queriedURI string
 }
 
@@ -36,6 +40,38 @@ func (f *fakeEditor) Diagnostics(_ context.Context, _ api.SessionID, p api.Edito
 		return api.EditorDiagnosticsResult{}, f.diagErr
 	}
 	return api.EditorDiagnosticsResult{URI: p.URI, Open: f.open, Diagnostics: f.diags}, nil
+}
+
+func (f *fakeEditor) Symbols(_ context.Context, _ api.SessionID, p api.EditorSymbolsParams) (api.EditorSymbolsResult, error) {
+	f.queriedURI = p.URI
+	if f.navErr != nil {
+		return api.EditorSymbolsResult{}, f.navErr
+	}
+	return api.EditorSymbolsResult{URI: p.URI, Open: f.open, Symbols: f.symbols}, nil
+}
+
+func (f *fakeEditor) Definition(_ context.Context, _ api.SessionID, p api.EditorDefinitionParams) (api.EditorDefinitionResult, error) {
+	f.queriedURI = p.URI
+	if f.navErr != nil {
+		return api.EditorDefinitionResult{}, f.navErr
+	}
+	return api.EditorDefinitionResult{URI: p.URI, Open: f.open, Locations: f.locations}, nil
+}
+
+func (f *fakeEditor) References(_ context.Context, _ api.SessionID, p api.EditorReferencesParams) (api.EditorReferencesResult, error) {
+	f.queriedURI = p.URI
+	if f.navErr != nil {
+		return api.EditorReferencesResult{}, f.navErr
+	}
+	return api.EditorReferencesResult{URI: p.URI, Open: f.open, Locations: f.locations}, nil
+}
+
+func (f *fakeEditor) Hover(_ context.Context, _ api.SessionID, p api.EditorHoverParams) (api.EditorHoverResult, error) {
+	f.queriedURI = p.URI
+	if f.navErr != nil {
+		return api.EditorHoverResult{}, f.navErr
+	}
+	return api.EditorHoverResult{URI: p.URI, Open: f.open, Contents: f.hover}, nil
 }
 
 func diag(sev api.DiagnosticSeverity, msg string) api.Diagnostic {
@@ -233,6 +269,150 @@ func TestDiagnosticsCurrentBufferOutsideWorktreeIsEmpty(t *testing.T) {
 	}
 	if ed.queriedURI != "" {
 		t.Errorf("editor was queried for an out-of-worktree current buffer: %q", ed.queriedURI)
+	}
+}
+
+func TestSymbolsEditorFresh(t *testing.T) {
+	ed := &fakeEditor{open: true, symbols: []api.DocumentSymbol{
+		{Name: "Server", Kind: "struct"},
+		{Name: "Serve", Kind: "method", ContainerName: "Server"},
+	}}
+	svc, root := newSvc(t, ed)
+	uri := fileURI(filepath.Join(root, "a.go"))
+
+	res, err := svc.Symbols(context.Background(), api.LSPSymbolsParams{SessionID: "s1", URI: uri})
+	if err != nil {
+		t.Fatalf("Symbols: %v", err)
+	}
+	if res.URI != uri || !res.Open || len(res.Symbols) != 2 || res.Symbols[1].ContainerName != "Server" {
+		t.Fatalf("result = %+v", res)
+	}
+	if ed.queriedURI != uri {
+		t.Errorf("queried uri = %q, want requested", ed.queriedURI)
+	}
+}
+
+func TestSymbolsEmptyURIResolvesCurrentBuffer(t *testing.T) {
+	ed := &fakeEditor{open: true}
+	svc, root := newSvc(t, ed)
+	cur := fileURI(filepath.Join(root, "cur.go"))
+	ed.current = api.EditorCurrentBufferResult{URI: cur}
+
+	if _, err := svc.Symbols(context.Background(), api.LSPSymbolsParams{SessionID: "s1"}); err != nil {
+		t.Fatalf("Symbols: %v", err)
+	}
+	if ed.queriedURI != cur {
+		t.Errorf("queried uri = %q, want current buffer", ed.queriedURI)
+	}
+}
+
+func TestSymbolsResultIsNonNilSlice(t *testing.T) {
+	svc, root := newSvc(t, &fakeEditor{open: true})
+	res, err := svc.Symbols(context.Background(), api.LSPSymbolsParams{
+		SessionID: "s1", URI: fileURI(filepath.Join(root, "a.go")),
+	})
+	if err != nil {
+		t.Fatalf("Symbols: %v", err)
+	}
+	if res.Symbols == nil {
+		t.Error("Symbols should be a non-nil slice so it marshals as []")
+	}
+}
+
+func TestDefinitionReturnsLocationsIncludingOutsideWorktree(t *testing.T) {
+	// A definition may resolve into a dependency/stdlib outside the worktree; the
+	// input file is bounded, but result locations are read-only metadata and are
+	// returned as-is (not filtered or refused).
+	dep := "file:///usr/lib/go/src/fmt/print.go"
+	ed := &fakeEditor{open: true, locations: []api.Location{{URI: dep}}}
+	svc, root := newSvc(t, ed)
+
+	res, err := svc.Definition(context.Background(), api.LSPDefinitionParams{
+		SessionID: "s1", URI: fileURI(filepath.Join(root, "a.go")),
+		Position: api.Position{Line: 3, ByteCol: 5},
+	})
+	if err != nil {
+		t.Fatalf("Definition: %v", err)
+	}
+	if len(res.Locations) != 1 || res.Locations[0].URI != dep {
+		t.Fatalf("locations = %+v, want the out-of-worktree definition", res.Locations)
+	}
+}
+
+func TestReferencesForwardsIncludeDeclaration(t *testing.T) {
+	ed := &fakeEditor{open: true, locations: []api.Location{{URI: "file:///x"}}}
+	svc, root := newSvc(t, ed)
+
+	res, err := svc.References(context.Background(), api.LSPReferencesParams{
+		SessionID: "s1", URI: fileURI(filepath.Join(root, "a.go")),
+		Position: api.Position{Line: 1}, IncludeDeclaration: true,
+	})
+	if err != nil {
+		t.Fatalf("References: %v", err)
+	}
+	if len(res.Locations) != 1 {
+		t.Errorf("locations = %+v, want 1", res.Locations)
+	}
+}
+
+func TestHoverReturnsContents(t *testing.T) {
+	ed := &fakeEditor{open: true, hover: "func Serve()"}
+	svc, root := newSvc(t, ed)
+
+	res, err := svc.Hover(context.Background(), api.LSPHoverParams{
+		SessionID: "s1", URI: fileURI(filepath.Join(root, "a.go")),
+		Position: api.Position{Line: 2, ByteCol: 1},
+	})
+	if err != nil {
+		t.Fatalf("Hover: %v", err)
+	}
+	if res.Contents != "func Serve()" || !res.Open {
+		t.Errorf("result = %+v", res)
+	}
+}
+
+// The navigation methods share the worktree-boundary path with Diagnostics: an
+// explicitly named out-of-worktree uri is refused before the editor is queried,
+// and a headless session surfaces editor_unavailable.
+func TestNavigationOutsideWorktreeRejected(t *testing.T) {
+	ed := &fakeEditor{open: true}
+	svc, _ := newSvc(t, ed)
+
+	if _, err := svc.Symbols(context.Background(), api.LSPSymbolsParams{
+		SessionID: "s1", URI: "file:///etc/passwd",
+	}); !errors.Is(err, worktree.ErrOutsideWorkspace) {
+		t.Errorf("symbols err = %v, want ErrOutsideWorkspace", err)
+	}
+	if _, err := svc.Definition(context.Background(), api.LSPDefinitionParams{
+		SessionID: "s1", URI: "file:///etc/passwd",
+	}); !errors.Is(err, worktree.ErrOutsideWorkspace) {
+		t.Errorf("definition err = %v, want ErrOutsideWorkspace", err)
+	}
+	if ed.queriedURI != "" {
+		t.Errorf("editor queried for an out-of-worktree uri: %q", ed.queriedURI)
+	}
+}
+
+func TestNavigationHeadlessUnavailable(t *testing.T) {
+	ed := &fakeEditor{currentErr: editor.ErrEditorUnavailable, navErr: editor.ErrEditorUnavailable}
+	svc, root := newSvc(t, ed)
+	uri := fileURI(filepath.Join(root, "a.go"))
+
+	if _, err := svc.Hover(context.Background(), api.LSPHoverParams{SessionID: "s1", URI: uri}); !errors.Is(err, editor.ErrEditorUnavailable) {
+		t.Errorf("hover headless err = %v, want ErrEditorUnavailable", err)
+	}
+	if _, err := svc.Symbols(context.Background(), api.LSPSymbolsParams{SessionID: "s1"}); !errors.Is(err, editor.ErrEditorUnavailable) {
+		t.Errorf("symbols empty-uri headless err = %v, want ErrEditorUnavailable", err)
+	}
+}
+
+func TestNavigationUnknownSession(t *testing.T) {
+	svc, _ := newSvc(t, &fakeEditor{})
+	if _, err := svc.Symbols(context.Background(), api.LSPSymbolsParams{SessionID: "nope"}); !errors.Is(err, ErrNoSession) {
+		t.Errorf("symbols err = %v, want ErrNoSession", err)
+	}
+	if _, err := svc.Hover(context.Background(), api.LSPHoverParams{SessionID: "nope"}); !errors.Is(err, ErrNoSession) {
+		t.Errorf("hover err = %v, want ErrNoSession", err)
 	}
 }
 

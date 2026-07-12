@@ -82,6 +82,14 @@ Schemas live under `schemas/` (`methods/<name>.params.json` / `.result.json`, `e
   - Params: `FileDiffParams` · Result: `FileDiffResult`
 - **`lsp.diagnostics`** — Editor-fresh LSP diagnostics for a file via the session's bound editor (session-scoped, not approval-gated); empty uri means the editor's current buffer.
   - Params: `LSPDiagnosticsParams` · Result: `LSPDiagnosticsResult`
+- **`lsp.symbols`** — Editor-fresh document symbols (outline) for a file via the session's bound editor; empty uri means the current buffer. Input uri is worktree-bounded.
+  - Params: `LSPSymbolsParams` · Result: `LSPSymbolsResult`
+- **`lsp.definition`** — Editor-fresh definition location(s) of the symbol at a position via the bound editor; empty uri means the current buffer. Result locations may point outside the worktree (dependency/stdlib).
+  - Params: `LSPDefinitionParams` · Result: `LSPDefinitionResult`
+- **`lsp.references`** — Editor-fresh reference locations of the symbol at a position via the bound editor; include_declaration adds the declaration. Input uri is worktree-bounded.
+  - Params: `LSPReferencesParams` · Result: `LSPReferencesResult`
+- **`lsp.hover`** — Editor-fresh hover info (markdown) for the symbol at a position via the bound editor; empty uri means the current buffer. Input uri is worktree-bounded.
+  - Params: `LSPHoverParams` · Result: `LSPHoverResult`
 - **`approval.list`** — List pending approvals (self-contained payloads), optionally filtered by session.
   - Params: `ApprovalListParams` · Result: `ApprovalListResult`
 - **`approval.respond`** — Resolve a pending approval (approve/deny); returns an ack. Only prompt-capable clients may call it.
@@ -125,6 +133,14 @@ Schemas live under `schemas/` (`methods/<name>.params.json` / `.result.json`, `e
   - Params: `EditorDiffParams` · Result: `EditorDiffResult`
 - **`editor.diagnostics`** — Return editor-fresh LSP diagnostics for a file (open buffers); the daemon filters by severity.
   - Params: `EditorDiagnosticsParams` · Result: `EditorDiagnosticsResult`
+- **`editor.symbols`** — Return editor-fresh document symbols (outline) for a file from its open buffer's LSP.
+  - Params: `EditorSymbolsParams` · Result: `EditorSymbolsResult`
+- **`editor.definition`** — Return editor-fresh definition location(s) of the symbol at a position from the open buffer's LSP.
+  - Params: `EditorDefinitionParams` · Result: `EditorDefinitionResult`
+- **`editor.references`** — Return editor-fresh reference locations of the symbol at a position from the open buffer's LSP.
+  - Params: `EditorReferencesParams` · Result: `EditorReferencesResult`
+- **`editor.hover`** — Return editor-fresh hover info (markdown) for the symbol at a position from the open buffer's LSP.
+  - Params: `EditorHoverParams` · Result: `EditorHoverResult`
 
 ### daemon → attached client
 

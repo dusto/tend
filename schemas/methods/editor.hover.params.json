@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$defs": {
+    "Position": {
+      "properties": {
+        "line": {
+          "type": "integer"
+        },
+        "byte_col": {
+          "type": "integer"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "line",
+        "byte_col"
+      ]
+    }
+  },
+  "properties": {
+    "uri": {
+      "type": "string"
+    },
+    "position": {
+      "$ref": "#/$defs/Position"
+    }
+  },
+  "additionalProperties": false,
+  "type": "object",
+  "required": [
+    "uri",
+    "position"
+  ]
+}

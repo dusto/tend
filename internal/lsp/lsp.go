@@ -17,6 +17,10 @@ import (
 // Method names.
 const (
 	MethodDiagnostics = "lsp.diagnostics"
+	MethodSymbols     = "lsp.symbols"
+	MethodDefinition  = "lsp.definition"
+	MethodReferences  = "lsp.references"
+	MethodHover       = "lsp.hover"
 )
 
 // ErrNoSession reports that no session has the given id.
@@ -28,6 +32,10 @@ var ErrNoSession = errors.New("lsp: unknown session")
 type editorClient interface {
 	CurrentBuffer(ctx context.Context, sessionID api.SessionID) (api.EditorCurrentBufferResult, error)
 	Diagnostics(ctx context.Context, sessionID api.SessionID, p api.EditorDiagnosticsParams) (api.EditorDiagnosticsResult, error)
+	Symbols(ctx context.Context, sessionID api.SessionID, p api.EditorSymbolsParams) (api.EditorSymbolsResult, error)
+	Definition(ctx context.Context, sessionID api.SessionID, p api.EditorDefinitionParams) (api.EditorDefinitionResult, error)
+	References(ctx context.Context, sessionID api.SessionID, p api.EditorReferencesParams) (api.EditorReferencesResult, error)
+	Hover(ctx context.Context, sessionID api.SessionID, p api.EditorHoverParams) (api.EditorHoverResult, error)
 }
 
 // Service implements the LSP tools over the editor reverse-RPC. It is safe for
@@ -53,28 +61,13 @@ func (s *Service) Diagnostics(ctx context.Context, p api.LSPDiagnosticsParams) (
 	if !ok {
 		return api.LSPDiagnosticsResult{}, ErrNoSession
 	}
-	empty := api.LSPDiagnosticsResult{Diagnostics: []api.Diagnostic{}}
-
-	uri := p.URI
-	if uri == "" {
-		cur, err := s.editors.CurrentBuffer(ctx, p.SessionID)
-		if err != nil {
-			return api.LSPDiagnosticsResult{}, err
-		}
-		// The current buffer may be any file the user has focused. Only diagnose
-		// it when it is inside this session's worktree; otherwise there is simply
-		// nothing in scope to report (an out-of-worktree buffer is not the agent's
-		// to read, and naming nothing must not leak where the user is).
-		if cur.URI == "" || !worktree.Contains(cur.URI, sess.WorktreeRoot) {
-			return empty, nil
-		}
-		uri = cur.URI
-	} else if _, err := worktree.ResolvePath(uri, sess.WorktreeRoot); err != nil {
-		// An explicitly named path outside the worktree is a boundary violation,
-		// reported like the file tools rather than silently emptied.
+	uri, skip, err := s.resolveTarget(ctx, sess, p.URI)
+	if err != nil {
 		return api.LSPDiagnosticsResult{}, err
 	}
-
+	if skip {
+		return api.LSPDiagnosticsResult{Diagnostics: []api.Diagnostic{}}, nil
+	}
 	res, err := s.editors.Diagnostics(ctx, p.SessionID, api.EditorDiagnosticsParams{URI: uri})
 	if err != nil {
 		return api.LSPDiagnosticsResult{}, err
@@ -84,6 +77,127 @@ func (s *Service) Diagnostics(ctx context.Context, p api.LSPDiagnosticsParams) (
 		Open:        res.Open,
 		Diagnostics: filterSeverity(res.Diagnostics, p.Severity),
 	}, nil
+}
+
+// Symbols returns editor-fresh document symbols for a file (whole-file outline).
+// Empty uri resolves the current buffer; boundary rules match Diagnostics.
+func (s *Service) Symbols(ctx context.Context, p api.LSPSymbolsParams) (api.LSPSymbolsResult, error) {
+	sess, ok := s.sessions.Get(p.SessionID)
+	if !ok {
+		return api.LSPSymbolsResult{}, ErrNoSession
+	}
+	uri, skip, err := s.resolveTarget(ctx, sess, p.URI)
+	if err != nil {
+		return api.LSPSymbolsResult{}, err
+	}
+	if skip {
+		return api.LSPSymbolsResult{Symbols: []api.DocumentSymbol{}}, nil
+	}
+	res, err := s.editors.Symbols(ctx, p.SessionID, api.EditorSymbolsParams{URI: uri})
+	if err != nil {
+		return api.LSPSymbolsResult{}, err
+	}
+	if res.Symbols == nil {
+		res.Symbols = []api.DocumentSymbol{}
+	}
+	return api.LSPSymbolsResult(res), nil
+}
+
+// Definition returns editor-fresh definition location(s) of the symbol at a
+// position. Result locations may point outside the worktree (a dependency or the
+// standard library); only the input file is worktree-bounded.
+func (s *Service) Definition(ctx context.Context, p api.LSPDefinitionParams) (api.LSPDefinitionResult, error) {
+	sess, ok := s.sessions.Get(p.SessionID)
+	if !ok {
+		return api.LSPDefinitionResult{}, ErrNoSession
+	}
+	uri, skip, err := s.resolveTarget(ctx, sess, p.URI)
+	if err != nil {
+		return api.LSPDefinitionResult{}, err
+	}
+	if skip {
+		return api.LSPDefinitionResult{Locations: []api.Location{}}, nil
+	}
+	res, err := s.editors.Definition(ctx, p.SessionID, api.EditorDefinitionParams{URI: uri, Position: p.Position})
+	if err != nil {
+		return api.LSPDefinitionResult{}, err
+	}
+	return api.LSPDefinitionResult{URI: res.URI, Open: res.Open, Locations: nonNilLocations(res.Locations)}, nil
+}
+
+// References returns editor-fresh reference locations of the symbol at a
+// position. include_declaration is forwarded to the editor.
+func (s *Service) References(ctx context.Context, p api.LSPReferencesParams) (api.LSPReferencesResult, error) {
+	sess, ok := s.sessions.Get(p.SessionID)
+	if !ok {
+		return api.LSPReferencesResult{}, ErrNoSession
+	}
+	uri, skip, err := s.resolveTarget(ctx, sess, p.URI)
+	if err != nil {
+		return api.LSPReferencesResult{}, err
+	}
+	if skip {
+		return api.LSPReferencesResult{Locations: []api.Location{}}, nil
+	}
+	res, err := s.editors.References(ctx, p.SessionID, api.EditorReferencesParams{
+		URI: uri, Position: p.Position, IncludeDeclaration: p.IncludeDeclaration,
+	})
+	if err != nil {
+		return api.LSPReferencesResult{}, err
+	}
+	return api.LSPReferencesResult{URI: res.URI, Open: res.Open, Locations: nonNilLocations(res.Locations)}, nil
+}
+
+// Hover returns editor-fresh hover info for the symbol at a position.
+func (s *Service) Hover(ctx context.Context, p api.LSPHoverParams) (api.LSPHoverResult, error) {
+	sess, ok := s.sessions.Get(p.SessionID)
+	if !ok {
+		return api.LSPHoverResult{}, ErrNoSession
+	}
+	uri, skip, err := s.resolveTarget(ctx, sess, p.URI)
+	if err != nil {
+		return api.LSPHoverResult{}, err
+	}
+	if skip {
+		return api.LSPHoverResult{}, nil
+	}
+	res, err := s.editors.Hover(ctx, p.SessionID, api.EditorHoverParams{URI: uri, Position: p.Position})
+	if err != nil {
+		return api.LSPHoverResult{}, err
+	}
+	return api.LSPHoverResult(res), nil
+}
+
+// resolveTarget resolves the file a query targets and enforces the worktree
+// boundary, exactly as lsp.diagnostics does. It returns the uri to query;
+// skip=true means there is nothing in scope (an empty or out-of-worktree current
+// buffer) and the caller should return an empty result without querying the
+// editor. An explicitly named out-of-worktree uri is an error (a refused
+// boundary crossing), so an agent for one repo cannot navigate another's files.
+func (s *Service) resolveTarget(ctx context.Context, sess *session.Session, uri string) (resolved string, skip bool, err error) {
+	if uri == "" {
+		cur, err := s.editors.CurrentBuffer(ctx, sess.ID)
+		if err != nil {
+			return "", false, err
+		}
+		if cur.URI == "" || !worktree.Contains(cur.URI, sess.WorktreeRoot) {
+			return "", true, nil
+		}
+		return cur.URI, false, nil
+	}
+	if _, err := worktree.ResolvePath(uri, sess.WorktreeRoot); err != nil {
+		return "", false, err
+	}
+	return uri, false, nil
+}
+
+// nonNilLocations returns locs, or an empty non-nil slice, so a result marshals
+// as [] rather than null.
+func nonNilLocations(locs []api.Location) []api.Location {
+	if locs == nil {
+		return []api.Location{}
+	}
+	return locs
 }
 
 // severityRank orders severities most-severe-first so a minimum-severity filter
