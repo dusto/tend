@@ -42,11 +42,15 @@ all approvals for the repo, independent of which sessions it follows.
 - `session.attach` is redefined: it scopes **clarification prompts + `waiting_*`
   status** to attached clients only. It no longer gates approvals. `waiting_*`
   session status is unchanged and still delivered on the session stream.
-- `DaemonToClientVersion` is bumped (0.13.0 → 0.14.0): the two approval events
-  changed scope/stream.
-
-An un-updated client that follows only session streams still recovers approvals
-via `approval.list` on reconnect — degraded live push, not broken.
+- `DaemonToClientVersion` is bumped **breaking** (0.13.0 → **1.0.0**), not minor.
+  Removing approvals from the session stream / `prompt.raise` silently strips live
+  approval delivery from a pre-1.0 client — it would still connect (a minor bump
+  satisfies its `>= 0.13.0` pin) but a gated tool would only resurface on the next
+  reconnect-driven `approval.list`. A major bump makes such a client reject this
+  daemon at the handshake (`versionAtLeast` requires a shared major), honoring the
+  reject-at-handshake house rule instead of degrading in place. A client is
+  compatible again once it subscribes to the workspace stream and pins
+  `daemon_to_client >= 1.0.0` (the plugin counterpart, tend-48d.31).
 
 ## Consequences
 
