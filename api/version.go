@@ -48,8 +48,12 @@ const (
 	// agent_context_usage and agent_token_usage session events (provider-reported
 	// context-window fullness and authoritative per-turn token accounting);
 	// 0.13.0 added the session_renamed session event (user-assigned label set or
-	// cleared).
-	DaemonToClientVersion = "0.13.0"
+	// cleared); 0.14.0 moved the approval_requested and approval_resolved events
+	// from the owning session's stream (ScopeSession) to the repo-wide workspace
+	// stream (ScopeWorkspace) — the approval channel — so a client receives every
+	// pending approval live by subscribing to one stream, independent of which
+	// sessions it follows (approval.list remains the durable snapshot).
+	DaemonToClientVersion = "0.14.0"
 )
 
 // Versions reports the contract version of each method set.

@@ -40,7 +40,7 @@ Schemas live under `schemas/` (`methods/<name>.params.json` / `.result.json`, `e
   - Params: `SessionResumeSeedParams` · Result: `SessionResumeSeedResult`
 - **`session.rename`** — Set or clear a session's user-facing label (independent of its task); an empty label clears it, an over-long one errors. Emits session_renamed so attached clients see the change.
   - Params: `SessionRenameParams` · Result: `SessionRenameResult`
-- **`session.attach`** — Make the calling client follow a session: its prompts (approval/clarification) and waiting_* status are delivered to attached clients. Does not claim the editor binding. Until any client attaches, a session's prompts broadcast to all clients.
+- **`session.attach`** — Make the calling client follow a session: its clarification prompts and waiting_* status are delivered to attached clients. Does not claim the editor binding, and does NOT gate approvals — approval_requested/approval_resolved broadcast to every client on the workspace stream, independent of attach. Until any client attaches, a session's clarification prompts broadcast to all clients.
   - Params: `SessionAttachParams` · Result: `SessionAttachResult`
 - **`session.detach`** — Stop the calling client following a session (does not end the session). Detaching an already-detached client is a no-op.
   - Params: `SessionDetachParams` · Result: `SessionDetachResult`
@@ -150,7 +150,7 @@ Schemas live under `schemas/` (`methods/<name>.params.json` / `.result.json`, `e
 
 - **`event.push`** — Deliver an event on a subscribed stream (at-least-once; clients dedup by (stream_id, seq, kind)).
   - Params: `EventPushParams` · Result: _(notification)_
-- **`prompt.raise`** — Raise an approval/clarification prompt and waiting_* status to attached clients.
+- **`prompt.raise`** — Raise a clarification prompt and waiting_* status to a session's attached clients. Approvals are NOT raised here — they broadcast on the workspace stream as approval_requested (see session.attach).
   - Params: `PromptRaiseParams` · Result: _(notification)_
 - **`event.subscription_closed`** — A single stream subscription was dropped (per-stream overflow or ended); the client resubscribes from its own last_seq.
   - Params: `SubscriptionClosedParams` · Result: _(notification)_
@@ -177,9 +177,9 @@ Schemas live under `schemas/` (`methods/<name>.params.json` / `.result.json`, `e
   - Payload: `AgentThoughtLevelUpdated`
 - **`agent_token_usage`** (`session` stream) — The provider's authoritative token accounting for one completed turn, from the session/prompt result (input/output/cached/reasoning/total). Supersedes the agent_prompt_usage estimate; includes a per-model breakdown when the provider supplies one.
   - Payload: `AgentTokenUsage`
-- **`approval_requested`** (`session` stream) — A mutating action is awaiting approval.
+- **`approval_requested`** (`workspace` stream) — A mutating action is awaiting approval. Repo-wide: delivered on the workspace stream so any client (editor, or a TUI/GUI approval console) sees every pending approval live without following each session. A lightweight signal — approval.list is the durable snapshot.
   - Payload: `ApprovalRequested`
-- **`approval_resolved`** (`session` stream) — A pending approval was resolved.
+- **`approval_resolved`** (`workspace` stream) — A pending approval was resolved. Repo-wide: delivered on the workspace stream (see approval_requested).
   - Payload: `ApprovalResolved`
 - **`memory_searched`** (`workspace` stream) — A workspace's memories were searched (memory.search), so a supervisor can see what an agent recalled. Repo-wide: delivered on the workspace stream.
   - Payload: `MemorySearched`
