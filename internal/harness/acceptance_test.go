@@ -2,6 +2,7 @@ package harness
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -43,6 +44,10 @@ func TestM0AcceptanceScenario(t *testing.T) {
 		WorktreeRoot: root,
 	}, &started)
 	mustCall(t, c, "events.subscribe", api.EventsSubscribeParams{StreamID: started.StreamID}, &api.EventsSubscribeResult{})
+	// Approvals broadcast on the repo-wide workspace stream, not the session
+	// stream: subscribe there to receive the gate's approval_requested live.
+	wsStream := api.WorkspaceStream("ws1")
+	mustCall(t, c, "events.subscribe", api.EventsSubscribeParams{StreamID: wsStream}, &api.EventsSubscribeResult{})
 
 	// Run a turn that stays open (session running) until we release it, so the
 	// approval-gated edit happens mid-turn — the only state an approval is legal.
@@ -103,19 +108,31 @@ func TestM0AcceptanceScenario(t *testing.T) {
 		patchDone <- res
 	}()
 
-	prompt, ok := c.WaitPrompt(3 * time.Second)
-	if !ok {
+	// The workspace stream also carries repo-wide events (e.g. task_created), so
+	// wait for and pick out the approval_requested broadcast specifically.
+	var requested api.ApprovalRequested
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		if ev, ok := findEvent(c.Events(wsStream), "approval_requested"); ok {
+			if err := json.Unmarshal(ev.Payload, &requested); err != nil {
+				t.Fatalf("unmarshal approval_requested: %v", err)
+			}
+			break
+		}
 		select {
 		case err := <-patchErr:
 			t.Fatalf("file.patch errored before the gate: %v", err)
 		default:
 		}
-		t.Fatalf("no approval prompt was raised for the edit")
+		if time.Now().After(deadline) {
+			t.Fatalf("no approval_requested broadcast on the workspace stream; got %v", c.EventTypes(wsStream))
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
-	if prompt.Kind != "approval" || prompt.ApprovalID == "" || prompt.SessionID != started.SessionID {
-		t.Fatalf("prompt = %+v, want a session approval", prompt)
+	if requested.ApprovalID == "" || requested.SessionID != started.SessionID {
+		t.Fatalf("approval_requested = %+v, want a session approval", requested)
 	}
-	mustCall(t, c, "approval.respond", api.ApprovalRespondParams{ApprovalID: prompt.ApprovalID, Approved: true}, &api.ApprovalRespondResult{})
+	mustCall(t, c, "approval.respond", api.ApprovalRespondParams{ApprovalID: requested.ApprovalID, Approved: true}, &api.ApprovalRespondResult{})
 
 	select {
 	case err := <-patchErr:
@@ -142,15 +159,16 @@ func TestM0AcceptanceScenario(t *testing.T) {
 	}
 
 	// Reconnect mid-turn — the turn is still held (running), so the session
-	// stream carries seqs 1..8 (user_prompt + agent_prompt_usage + four turn
-	// updates + the approval pair) but not yet turn_end. A fresh connection
-	// resumes from a cursor behind the tail and replays (2, tail] = seqs 3..8; a
-	// Deduper seeded with the first delivery drops every redelivered record.
+	// stream carries seqs 1..6 (user_prompt + agent_prompt_usage + four turn
+	// updates) but not yet turn_end. The approval pair is NOT here: it broadcast
+	// on the workspace stream. A fresh connection resumes from a cursor behind the
+	// tail and replays (2, tail] = seqs 3..6; a Deduper seeded with the first
+	// delivery drops every redelivered record.
 	//
-	// Wait for the held-turn tail (1..8) to be fully delivered to the original
+	// Wait for the held-turn tail (1..6) to be fully delivered to the original
 	// connection first, so the Deduper seed and the replay extent are
-	// deterministic (the approval-pair delivery is async after file.patch).
-	if !c.WaitEventCount(started.StreamID, 8, 3*time.Second) {
+	// deterministic.
+	if !c.WaitEventCount(started.StreamID, 6, 3*time.Second) {
 		t.Fatalf("held-turn events not fully delivered; got %v", c.EventTypes(started.StreamID))
 	}
 	dd := events.NewDeduper()
@@ -159,19 +177,19 @@ func TestM0AcceptanceScenario(t *testing.T) {
 	}
 	rc := dial(t, sock)
 	mustCall(t, rc, "events.subscribe", api.EventsSubscribeParams{StreamID: started.StreamID, LastSeq: 2}, &api.EventsSubscribeResult{})
-	if !rc.WaitEventCount(started.StreamID, 6, 3*time.Second) {
+	if !rc.WaitEventCount(started.StreamID, 4, 3*time.Second) {
 		t.Fatalf("mid-turn replay incomplete; got %v", rc.EventTypes(started.StreamID))
 	}
 	for _, ev := range rc.Events(started.StreamID) {
-		if ev.Seq < 3 || ev.Seq > 8 {
-			t.Errorf("replay redelivered seq %d, want only (2, tail] = 3..8", ev.Seq)
+		if ev.Seq < 3 || ev.Seq > 6 {
+			t.Errorf("replay redelivered seq %d, want only (2, tail] = 3..6", ev.Seq)
 		}
 		if dd.Fresh(ev) {
 			t.Errorf("redelivered seq %d should dedup as already-seen", ev.Seq)
 		}
 	}
 
-	// Now release the held turn: turn_end (seq 9) is published while the
+	// Now release the held turn: turn_end (seq 7) is published while the
 	// reconnected client is live-subscribed, so it must arrive on rc exactly
 	// once as a fresh record — the "no missing or duplicated events across a
 	// mid-turn reconnect" guarantee.
@@ -181,15 +199,15 @@ func TestM0AcceptanceScenario(t *testing.T) {
 	if err := <-turnDone; err != nil {
 		t.Fatalf("agent.prompt: %v", err)
 	}
-	if !rc.WaitEventCount(started.StreamID, 7, 3*time.Second) {
+	if !rc.WaitEventCount(started.StreamID, 5, 3*time.Second) {
 		t.Fatalf("reconnected client did not receive the live turn_end; got %v", rc.EventTypes(started.StreamID))
 	}
 	var turnEnds int
 	for _, ev := range rc.Events(started.StreamID) {
 		if ev.Type == "turn_end" {
 			turnEnds++
-			if ev.Seq != 9 {
-				t.Errorf("turn_end seq = %d, want 9", ev.Seq)
+			if ev.Seq != 7 {
+				t.Errorf("turn_end seq = %d, want 7", ev.Seq)
 			}
 			if !dd.Fresh(ev) {
 				t.Errorf("live turn_end should be fresh on the reconnected client, not a duplicate")
@@ -200,10 +218,20 @@ func TestM0AcceptanceScenario(t *testing.T) {
 		t.Errorf("reconnected client received turn_end %d times, want exactly once", turnEnds)
 	}
 	// The original connection sees the completed turn too, ending in turn_end.
-	if !c.WaitEventCount(started.StreamID, 9, 3*time.Second) {
+	if !c.WaitEventCount(started.StreamID, 7, 3*time.Second) {
 		t.Fatalf("original client turn did not complete; got %v", c.EventTypes(started.StreamID))
 	}
 	if types := c.EventTypes(started.StreamID); types[len(types)-1] != "turn_end" {
 		t.Errorf("original stream did not end in turn_end; got %v", types)
 	}
+}
+
+// findEvent returns the first event of the given type in evs, if any.
+func findEvent(evs []api.Event, typ string) (api.Event, bool) {
+	for _, ev := range evs {
+		if ev.Type == typ {
+			return ev, true
+		}
+	}
+	return api.Event{}, false
 }

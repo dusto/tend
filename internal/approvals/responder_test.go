@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"sync"
 	"testing"
 
 	"github.com/dusto/tend/api"
@@ -36,12 +35,12 @@ func startPending(t *testing.T, g *Gate, detail json.RawMessage) chan Outcome {
 	return out
 }
 
-func fixedGate(prompter Prompter) *Gate {
-	return NewGate(nil, Options{NewID: func() api.ApprovalID { return "appr-1" }, Prompter: prompter})
+func fixedGate() *Gate {
+	return NewGate(nil, Options{NewID: func() api.ApprovalID { return "appr-1" }})
 }
 
 func TestResponderRespondCapabilityGated(t *testing.T) {
-	g := fixedGate(nil)
+	g := fixedGate()
 	out := startPending(t, g, nil)
 
 	// A client that is not prompt-capable cannot resolve it.
@@ -71,7 +70,7 @@ func TestResponderRespondCapabilityGated(t *testing.T) {
 }
 
 func TestResponderRespondUnknown(t *testing.T) {
-	g := fixedGate(nil)
+	g := fixedGate()
 	h := &responder{gate: g, self: selfFn(true, true)}
 	_, err := h.respond(context.Background(), api.ApprovalRespondParams{ApprovalID: "ghost", Approved: true})
 	var rpcErr *rpc.Error
@@ -81,7 +80,7 @@ func TestResponderRespondUnknown(t *testing.T) {
 }
 
 func TestResponderList(t *testing.T) {
-	g := fixedGate(nil)
+	g := fixedGate()
 	detail := json.RawMessage(`{"kind":"file_edit"}`)
 	out := startPending(t, g, detail)
 	defer func() {
@@ -103,41 +102,5 @@ func TestResponderList(t *testing.T) {
 	res2, _ := h.list(context.Background(), api.ApprovalListParams{SessionID: "other"})
 	if len(res2.Approvals) != 0 {
 		t.Errorf("filtered list len = %d, want 0", len(res2.Approvals))
-	}
-}
-
-type fakePrompter struct {
-	mu     sync.Mutex
-	raised []Pending
-}
-
-func (f *fakePrompter) RaiseApproval(p Pending) {
-	f.mu.Lock()
-	f.raised = append(f.raised, p)
-	f.mu.Unlock()
-}
-
-func (f *fakePrompter) count() int {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	return len(f.raised)
-}
-
-func TestRequestRaisesPrompt(t *testing.T) {
-	fp := &fakePrompter{}
-	g := fixedGate(fp)
-	detail := json.RawMessage(`{"kind":"file_edit"}`)
-	out := startPending(t, g, detail)
-	defer func() {
-		_ = g.Resolve("appr-1", Decision{Approved: false})
-		<-out
-	}()
-
-	waitFor(t, func() bool { return fp.count() == 1 })
-	fp.mu.Lock()
-	p := fp.raised[0]
-	fp.mu.Unlock()
-	if p.ID != "appr-1" || p.Kind != "file_edit" || string(p.Detail) != string(detail) {
-		t.Errorf("raised = %+v", p)
 	}
 }

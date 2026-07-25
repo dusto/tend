@@ -90,8 +90,8 @@ var EventDefs = []EventDef{
 	{Type: "agent_prompt_usage", Scope: ScopeSession, Payload: AgentPromptUsage{}, Summary: "The size of the prompt input the daemon composed for a turn: bytes and an approximate, model-agnostic token estimate. Measures only client-side prompt content, not the agent-owned system prompt/history."},
 	{Type: "agent_context_usage", Scope: ScopeSession, Payload: AgentContextUsage{}, Summary: "The agent's context-window fullness (tokens used of the window size), from the provider's usage_update. The authoritative signal for context-window management (e.g. compaction triggering), distinct from a single turn's spend. Carries cost when the provider reports it."},
 	{Type: "agent_token_usage", Scope: ScopeSession, Payload: AgentTokenUsage{}, Summary: "The provider's authoritative token accounting for one completed turn, from the session/prompt result (input/output/cached/reasoning/total). Supersedes the agent_prompt_usage estimate; includes a per-model breakdown when the provider supplies one."},
-	{Type: "approval_requested", Scope: ScopeSession, Payload: ApprovalRequested{}, Summary: "A mutating action is awaiting approval."},
-	{Type: "approval_resolved", Scope: ScopeSession, Payload: ApprovalResolved{}, Summary: "A pending approval was resolved."},
+	{Type: "approval_requested", Scope: ScopeWorkspace, Payload: ApprovalRequested{}, Summary: "A mutating action is awaiting approval. Repo-wide: delivered on the workspace stream so any client (editor, or a TUI/GUI approval console) sees every pending approval live without following each session. A lightweight signal — approval.list is the durable snapshot."},
+	{Type: "approval_resolved", Scope: ScopeWorkspace, Payload: ApprovalResolved{}, Summary: "A pending approval was resolved. Repo-wide: delivered on the workspace stream (see approval_requested)."},
 	{Type: "agent_error", Scope: ScopeSession, Payload: AgentError{}, Summary: "A session's turn failed (e.g. its provider process exited mid-turn)."},
 	{Type: "provider_started", Scope: ScopeWorkspace, Payload: ProviderStarted{}, Summary: "A provider process joined the pool (spawned for a turn or an explicit start). Repo-wide: delivered on the workspace stream."},
 	{Type: "provider_stopped", Scope: ScopeWorkspace, Payload: ProviderStopped{}, Summary: "A provider process left the pool (exit or crash). Repo-wide: delivered on the workspace stream."},
@@ -256,7 +256,9 @@ type ModelTokenUsage struct {
 	TotalTokens      int    `json:"total_tokens,omitempty"`
 }
 
-// ApprovalRequested signals that a mutating action is awaiting approval.
+// ApprovalRequested signals that a mutating action is awaiting approval. It is a
+// lightweight signal on the workspace stream (ids + kind); a client fetches the
+// decision context from approval.list.
 type ApprovalRequested struct {
 	SessionID  SessionID  `json:"session_id"`
 	ApprovalID ApprovalID `json:"approval_id"`

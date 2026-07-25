@@ -6,6 +6,13 @@
 // returns the session to running. The decision context carried in an approval
 // payload is supplied by the caller, so the gate is agnostic to the operation
 // kind (file edit, pane run, code action).
+//
+// Approval events are published on the repo-wide workspace stream (ScopeWorkspace),
+// not the owning session's stream: any client — the editor, or a future TUI/GUI
+// approval console — receives every pending approval live by subscribing to one
+// channel, without following each session. The live event is a lightweight signal
+// (session/approval id, kind); approval.list is the durable, self-contained
+// snapshot a client syncs from on connect and reconnect.
 package approvals
 
 import (
@@ -44,13 +51,6 @@ type Emitter interface {
 	Publish(api.Event) (api.Event, error)
 }
 
-// Prompter is notified when an approval is requested, so it can raise the prompt
-// to attached clients (via prompt.raise). It is called with a snapshot and must
-// not block.
-type Prompter interface {
-	RaiseApproval(Pending)
-}
-
 // Pending is a snapshot of an approval still awaiting a decision. ExpiresAt is
 // the gate's deadline (zero when no TTL is configured); enforcing it is layered
 // on separately.
@@ -76,11 +76,10 @@ type pending struct {
 // Gate owns the set of pending approvals and the block/resolve handshake. It is
 // safe for concurrent use.
 type Gate struct {
-	emit     Emitter
-	prompter Prompter
-	newID    func() api.ApprovalID
-	now      func() time.Time
-	ttl      time.Duration
+	emit  Emitter
+	newID func() api.ApprovalID
+	now   func() time.Time
+	ttl   time.Duration
 
 	mu      sync.Mutex
 	pending map[api.ApprovalID]*pending
@@ -96,8 +95,6 @@ type Options struct {
 	// TTL stamps each approval's ExpiresAt as created+TTL. Zero leaves ExpiresAt
 	// zero (no expiry). Enforcing the deadline is layered on separately.
 	TTL time.Duration
-	// Prompter, if set, is notified to raise each requested approval to clients.
-	Prompter Prompter
 }
 
 // NewGate returns a Gate that raises events through emit (which may be nil to
@@ -111,7 +108,7 @@ func NewGate(emit Emitter, opts Options) *Gate {
 	if now == nil {
 		now = time.Now
 	}
-	return &Gate{emit: emit, prompter: opts.Prompter, newID: newID, now: now, ttl: opts.TTL, pending: make(map[api.ApprovalID]*pending)}
+	return &Gate{emit: emit, newID: newID, now: now, ttl: opts.TTL, pending: make(map[api.ApprovalID]*pending)}
 }
 
 // Request gates a mutating action on sess: it marks the session waiting_approval
@@ -143,14 +140,11 @@ func (g *Gate) Request(ctx context.Context, sess *session.Session, kind string, 
 	g.pending[id] = p
 	g.mu.Unlock()
 
-	g.emit2(sess.Stream, "approval_requested", api.ApprovalRequested{
+	g.emit2(api.WorkspaceStream(sess.WorkspaceID), "approval_requested", api.ApprovalRequested{
 		SessionID:  sess.ID,
 		ApprovalID: id,
 		Kind:       kind,
 	})
-	if g.prompter != nil {
-		g.prompter.RaiseApproval(p.snapshot())
-	}
 
 	select {
 	case <-ctx.Done():
@@ -186,7 +180,7 @@ func (g *Gate) Resolve(id api.ApprovalID, d Decision) error {
 	}
 
 	out := Outcome(d)
-	g.emit2(p.sess.Stream, "approval_resolved", api.ApprovalResolved{
+	g.emit2(api.WorkspaceStream(p.sess.WorkspaceID), "approval_resolved", api.ApprovalResolved{
 		SessionID:  p.sess.ID,
 		ApprovalID: id,
 		Approved:   d.Approved,
@@ -232,14 +226,17 @@ func (g *Gate) claim(id api.ApprovalID) *pending {
 	return p
 }
 
+// emit2 publishes an approval event on stream, tagging it with the event scope
+// the stream id belongs to (workspace, for the approval channel).
 func (g *Gate) emit2(stream api.StreamID, typ string, payload any) {
 	if g.emit == nil {
 		return
 	}
+	scope, _ := stream.Scope()
 	raw, _ := json.Marshal(payload)
 	_, _ = g.emit.Publish(api.Event{
 		StreamID: stream,
-		Scope:    api.ScopeSession,
+		Scope:    scope,
 		Type:     typ,
 		Payload:  raw,
 	})

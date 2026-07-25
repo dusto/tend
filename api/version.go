@@ -48,8 +48,21 @@ const (
 	// agent_context_usage and agent_token_usage session events (provider-reported
 	// context-window fullness and authoritative per-turn token accounting);
 	// 0.13.0 added the session_renamed session event (user-assigned label set or
-	// cleared).
-	DaemonToClientVersion = "0.13.0"
+	// cleared); 1.0.0 moved the approval_requested and approval_resolved events
+	// from the owning session's stream (ScopeSession) to the repo-wide workspace
+	// stream (ScopeWorkspace) — the approval channel — so a client receives every
+	// pending approval live by subscribing to one stream, independent of which
+	// sessions it follows (approval.list remains the durable snapshot).
+	//
+	// This is a BREAKING (major) bump, not a minor one. Removing approvals from
+	// the session stream / prompt.raise silently strips live approval delivery
+	// from a pre-1.0 client (it connects, but a gated tool only resurfaces on the
+	// next reconnect-driven approval.list). A major bump makes such a client
+	// reject this daemon at the handshake (versionAtLeast requires a shared major)
+	// instead of losing prompts silently — the house rule is reject-at-handshake,
+	// not degrade-in-place. A client is compatible again once it subscribes to the
+	// workspace stream and pins daemon_to_client >= 1.0.0.
+	DaemonToClientVersion = "1.0.0"
 )
 
 // Versions reports the contract version of each method set.

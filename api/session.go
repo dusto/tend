@@ -175,9 +175,11 @@ type SessionRenameResult struct {
 	Session SessionInfo `json:"session"`
 }
 
-// SessionAttachParams makes the calling client follow a session: its prompts
-// (approval/clarification) and waiting_* status are delivered to attached
-// clients. Attaching does not claim the editor binding.
+// SessionAttachParams makes the calling client follow a session: its
+// clarification prompts and waiting_* status are delivered to attached clients.
+// Attaching does not claim the editor binding, and does not gate approvals:
+// approval_requested/approval_resolved broadcast to every client on the
+// workspace stream, independent of attach.
 type SessionAttachParams struct {
 	SessionID SessionID `json:"session_id"`
 }

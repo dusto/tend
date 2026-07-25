@@ -155,10 +155,7 @@ func New(ln net.Listener, logPath string, opts ...Option) (*Server, error) {
 	}
 	s.store.SetRetention(o.retention)
 	s.binder = editor.NewBinder(s.sessions, s.clients)
-	s.gate = approvals.NewGate(s.store, approvals.Options{
-		TTL:      approvalTTL,
-		Prompter: &promptBroadcaster{clients: s.clients, sessions: s.sessions},
-	})
+	s.gate = approvals.NewGate(s.store, approvals.Options{TTL: approvalTTL})
 	editors := editor.NewService(s.binder, s.clients)
 	s.files = files.NewService(s.sessions, editors, s.gate, files.Options{})
 	s.lsp = lsp.NewService(s.sessions, editors)

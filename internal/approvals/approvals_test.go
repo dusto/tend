@@ -95,13 +95,17 @@ func TestRequestResolvedApproved(t *testing.T) {
 		t.Error("gate should hold no pending approvals after resolve")
 	}
 
-	// approval_requested then approval_resolved on the session stream.
-	evs, _, err := store.Read("session:s1", 0, 10)
+	// approval_requested then approval_resolved on the repo-wide workspace stream
+	// (not the session stream), scoped ScopeWorkspace.
+	evs, _, err := store.Read("workspace:ws1", 0, 10)
 	if err != nil {
 		t.Fatalf("Read: %v", err)
 	}
 	if len(evs) != 2 || evs[0].Type != "approval_requested" || evs[1].Type != "approval_resolved" {
 		t.Fatalf("events = %+v", evs)
+	}
+	if evs[0].Scope != api.ScopeWorkspace || evs[1].Scope != api.ScopeWorkspace {
+		t.Errorf("scopes = %q, %q, want workspace", evs[0].Scope, evs[1].Scope)
 	}
 	var resolved api.ApprovalResolved
 	if err := json.Unmarshal(evs[1].Payload, &resolved); err != nil {
@@ -216,7 +220,7 @@ func TestResolveStaleSessionDeniesAndErrors(t *testing.T) {
 		t.Errorf("status = %q, want ended (resolve must not force running)", sess.Status())
 	}
 	// Only approval_requested was raised; no approval_resolved for a stale resolve.
-	evs, _, _ := store.Read("session:s1", 0, 10)
+	evs, _, _ := store.Read("workspace:ws1", 0, 10)
 	if len(evs) != 1 || evs[0].Type != "approval_requested" {
 		t.Errorf("events = %+v, want only approval_requested", evs)
 	}

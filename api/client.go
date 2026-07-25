@@ -12,19 +12,20 @@ type EventPushParams struct {
 	Event Event `json:"event"`
 }
 
-// PromptRaiseParams raises an approval or clarification to attached clients.
+// PromptRaiseParams raises a clarification prompt to a session's attached
+// clients. Approvals are not raised here: they broadcast on the workspace stream
+// as approval_requested, with approval.list as the durable snapshot.
 type PromptRaiseParams struct {
 	SessionID SessionID `json:"session_id"`
-	Kind      string    `json:"kind"` // "approval" | "clarification"
-	// ApprovalID is set when Kind == "approval".
+	Kind      string    `json:"kind"` // "clarification"
+	// ApprovalID is retained for the shared prompt envelope; unused for
+	// clarification prompts.
 	ApprovalID ApprovalID `json:"approval_id,omitempty"`
-	// Prompt is human-facing text. Detail carries the decision context
-	// (api.ApprovalDetail: a diff + bases, command + cwd, or code-action target)
-	// for approvals.
+	// Prompt is human-facing text; Detail carries structured context for the
+	// prompt kind.
 	Prompt string          `json:"prompt"`
 	Detail json.RawMessage `json:"detail,omitempty"`
-	// ExpiresAt is the approval's deadline, if any (the gate-owned envelope value
-	// that accompanies the detail).
+	// ExpiresAt is the prompt's deadline, if any.
 	ExpiresAt time.Time `json:"expires_at,omitzero"`
 }
 
