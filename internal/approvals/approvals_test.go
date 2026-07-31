@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"testing"
 	"time"
@@ -140,34 +141,21 @@ func TestRequestResolvedDenied(t *testing.T) {
 	}
 }
 
-func TestPendingCarriesExpiry(t *testing.T) {
+func TestPendingCarriesCreated(t *testing.T) {
 	base := time.Unix(1000, 0)
 	g := NewGate(nil, Options{
 		NewID: func() api.ApprovalID { return "appr-1" },
 		Now:   func() time.Time { return base },
-		TTL:   30 * time.Second,
 	})
 	sess := runningSession(t)
 	go func() { _, _ = g.Request(context.Background(), sess, "file_edit", nil) }()
 	waitFor(t, func() bool { _, ok := g.Get("appr-1"); return ok })
 
+	// Approvals have no deadline (no TTL): the snapshot records only when it was
+	// raised. See the no-TTL ADR.
 	p, _ := g.Get("appr-1")
 	if !p.Created.Equal(base) {
 		t.Errorf("created = %v, want %v", p.Created, base)
-	}
-	if want := base.Add(30 * time.Second); !p.ExpiresAt.Equal(want) {
-		t.Errorf("expires = %v, want %v", p.ExpiresAt, want)
-	}
-}
-
-func TestPendingNoExpiryWithoutTTL(t *testing.T) {
-	g := NewGate(nil, Options{NewID: func() api.ApprovalID { return "appr-1" }})
-	sess := runningSession(t)
-	go func() { _, _ = g.Request(context.Background(), sess, "file_edit", nil) }()
-	waitFor(t, func() bool { _, ok := g.Get("appr-1"); return ok })
-
-	if p, _ := g.Get("appr-1"); !p.ExpiresAt.IsZero() {
-		t.Errorf("expires = %v, want zero (no TTL)", p.ExpiresAt)
 	}
 }
 
@@ -226,8 +214,8 @@ func TestResolveStaleSessionDeniesAndErrors(t *testing.T) {
 	}
 }
 
-func TestRequestCancelledDropsPending(t *testing.T) {
-	g, _ := newGate(t)
+func TestRequestCancelEvictsAndSignals(t *testing.T) {
+	g, store := newGate(t)
 	sess := runningSession(t)
 	ctx, cancel := context.WithCancel(context.Background())
 
@@ -238,6 +226,8 @@ func TestRequestCancelledDropsPending(t *testing.T) {
 	}()
 	waitFor(t, func() bool { _, ok := g.Get("appr-1"); return ok })
 
+	// Cancelling the turn's context models any turn-death cause (provider crash,
+	// agent.cancel, session end) — they all reach the gate as ctx cancellation.
 	cancel()
 	if err := <-errc; err == nil {
 		t.Error("cancelled Request should return an error")
@@ -248,5 +238,88 @@ func TestRequestCancelledDropsPending(t *testing.T) {
 	}
 	if err := g.Resolve("appr-1", Decision{Approved: true}); !errors.Is(err, ErrUnknownApproval) {
 		t.Errorf("late Resolve err = %v, want ErrUnknownApproval", err)
+	}
+
+	// The eviction is signalled to clients: approval_requested then a synthetic
+	// approval_resolved (Approved=false, cause in Reason) on the workspace stream,
+	// so a subscribed UI clears the now-unanswerable approval live rather than
+	// waiting for the next approval.list sync.
+	evs, _, err := store.Read("workspace:ws1", 0, 10)
+	if err != nil {
+		t.Fatalf("Read: %v", err)
+	}
+	if len(evs) != 2 || evs[0].Type != "approval_requested" || evs[1].Type != "approval_resolved" {
+		t.Fatalf("events = %+v, want approval_requested then approval_resolved", evs)
+	}
+	if evs[1].Scope != api.ScopeWorkspace {
+		t.Errorf("eviction scope = %q, want workspace", evs[1].Scope)
+	}
+	var resolved api.ApprovalResolved
+	if err := json.Unmarshal(evs[1].Payload, &resolved); err != nil {
+		t.Fatalf("unmarshal resolved: %v", err)
+	}
+	if resolved.Approved {
+		t.Errorf("eviction Approved = true, want false (not a user denial)")
+	}
+	if resolved.Reason == "" {
+		t.Error("eviction should carry the cause in Reason")
+	}
+	if resolved.ApprovalID != "appr-1" || resolved.SessionID != "s1" {
+		t.Errorf("eviction payload = %+v, want appr-1/s1", resolved)
+	}
+}
+
+// After an eviction, a resumed session that re-reaches the gated action raises a
+// FRESH approval (a new id, a fresh approval_requested) — the gate is not left in
+// a state that suppresses re-gating. A pending permission is in-agent turn state
+// that cannot survive a provider death, so "resume where we left off" means the
+// session re-runs and re-gates, not that the same approval object is restored.
+func TestRequestReRaisesAfterEviction(t *testing.T) {
+	var n int
+	ids := func() api.ApprovalID {
+		n++
+		return api.ApprovalID(fmt.Sprintf("appr-%d", n))
+	}
+	log, err := events.OpenLog(filepath.Join(t.TempDir(), "events.log"))
+	if err != nil {
+		t.Fatalf("OpenLog: %v", err)
+	}
+	t.Cleanup(func() { _ = log.Close() })
+	store := events.NewStore(log)
+	g := NewGate(store, Options{NewID: ids})
+
+	// First gated action, then the turn dies (ctx cancelled): approval evicted.
+	sess := runningSession(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	errc := make(chan error, 1)
+	go func() { _, e := g.Request(ctx, sess, "file_edit", nil); errc <- e }()
+	waitFor(t, func() bool { _, ok := g.Get("appr-1"); return ok })
+	cancel()
+	<-errc
+
+	// The resumed session (a fresh session, as resume_seed creates one) re-reaches
+	// the gated action and raises a brand-new approval.
+	resumed := runningSession(t)
+	go func() { _, _ = g.Request(context.Background(), resumed, "file_edit", nil) }()
+	waitFor(t, func() bool { _, ok := g.Get("appr-2"); return ok })
+
+	if _, ok := g.Get("appr-1"); ok {
+		t.Error("the evicted approval must not linger")
+	}
+	if len(g.List()) != 1 {
+		t.Fatalf("pending = %d, want exactly the fresh approval", len(g.List()))
+	}
+	// The stream carries the fresh approval_requested (appr-2) after the eviction.
+	evs, _, err := store.Read("workspace:ws1", 0, 10)
+	if err != nil {
+		t.Fatalf("Read: %v", err)
+	}
+	last := evs[len(evs)-1]
+	var req api.ApprovalRequested
+	if err := json.Unmarshal(last.Payload, &req); err != nil {
+		t.Fatalf("unmarshal requested: %v", err)
+	}
+	if last.Type != "approval_requested" || req.ApprovalID != "appr-2" {
+		t.Errorf("last event = %+v (%+v), want a fresh approval_requested appr-2", last, req)
 	}
 }
