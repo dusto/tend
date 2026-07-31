@@ -9,6 +9,28 @@ The daemon and plugin communicate over a bidirectional JSON-RPC 2.0 Unix socket.
 
 > Status: early scaffolding.
 
+## Install
+
+`tend` ships two binaries: `tendd` (the daemon) and `tend` (the CLI / debug
+client).
+
+**Prebuilt binaries.** Download the archive for your OS/arch (Linux or macOS,
+amd64 or arm64) from the [Releases](https://github.com/dusto/tend/releases) page
+and put `tendd` and `tend` on your `PATH`.
+
+**With Go (1.26+).** Install both from source:
+
+```sh
+go install github.com/dusto/tend/cmd/tendd@latest
+go install github.com/dusto/tend/cmd/tend@latest
+```
+
+This drops `tendd` and `tend` in your `$(go env GOPATH)/bin` (put it on `PATH`).
+Replace `@latest` with a tag (e.g. `@v0.1.0`) to pin a released version, or build
+from a checkout with `go build -o bin/ ./cmd/tendd ./cmd/tend`.
+
+Releases are cut with GoReleaser — see [RELEASING.md](RELEASING.md).
+
 ## Quickstart
 
 1. **Install an ACP provider.** The default Claude provider is the cleanest:
@@ -24,7 +46,7 @@ The daemon and plugin communicate over a bidirectional JSON-RPC 2.0 Unix socket.
 2. **Run the daemon:**
 
    ```sh
-   go run ./cmd/tendd
+   tendd          # or, from a checkout: go run ./cmd/tendd
    ```
 
    The startup log reports the config in use and the socket it listens on
@@ -32,8 +54,8 @@ The daemon and plugin communicate over a bidirectional JSON-RPC 2.0 Unix socket.
    second `tendd` defers to the running one.
 
 3. **Drive it from Neovim** with the [`tend.nvim`](https://github.com/dusto/tend.nvim)
-   plugin: `:TendAttach`, then `:TendTaskNew` → `:TendDelegate`. See the plugin's
-   docs (`:help tend-daemon`).
+   plugin: `:TendConnect`, then `:TendTaskNew` and `:TendSessionNew` → `:TendChat`.
+   See the plugin's docs (`:help tend.txt`).
 
 ### Configuration
 

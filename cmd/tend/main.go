@@ -13,6 +13,7 @@ import (
 
 	"github.com/dusto/tend/internal/memimport"
 	"github.com/dusto/tend/internal/rpc"
+	"github.com/dusto/tend/internal/version"
 )
 
 func main() {
@@ -24,8 +25,9 @@ func main() {
 
 func newApp() *cli.Command {
 	return &cli.Command{
-		Name:  "tend",
-		Usage: "CLI and debug client for the tendd daemon",
+		Name:    "tend",
+		Usage:   "CLI and debug client for the tendd daemon",
+		Version: version.Version,
 		Flags: []cli.Flag{
 			&cli.StringFlag{
 				Name:    "socket",

@@ -1,0 +1,56 @@
+# GoReleaser config for the tend release pipeline. Builds the tendd daemon and
+# tend CLI for Linux and macOS (both are Unix-socket clients — no Windows), with
+# the version stamped into internal/version. Validate locally with
+# `goreleaser check`; a release runs in .github/workflows/release.yml on a v* tag.
+version: 2
+
+project_name: tend
+
+before:
+  hooks:
+    - go mod download
+
+builds:
+  - id: tendd
+    main: ./cmd/tendd
+    binary: tendd
+    env:
+      - CGO_ENABLED=0 # pure-Go (modernc.org/sqlite), so static cross-builds work
+    goos: [linux, darwin]
+    goarch: [amd64, arm64]
+    ldflags:
+      - -s -w -X github.com/dusto/tend/internal/version.Version={{ .Version }}
+  - id: tend
+    main: ./cmd/tend
+    binary: tend
+    env:
+      - CGO_ENABLED=0
+    goos: [linux, darwin]
+    goarch: [amd64, arm64]
+    ldflags:
+      - -s -w -X github.com/dusto/tend/internal/version.Version={{ .Version }}
+
+archives:
+  - id: default
+    ids: [tendd, tend] # both binaries in one archive per os/arch
+    name_template: >-
+      {{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}
+
+checksum:
+  name_template: checksums.txt
+
+changelog:
+  use: github
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
+      - "^ci:"
+      - "merge conflict"
+      - "^Merge "
+
+release:
+  # A pre-1.0 tag (v0.x) or one with a -rc/-beta suffix is marked prerelease.
+  prerelease: auto

@@ -16,6 +16,7 @@ import (
 	"github.com/dusto/tend/internal/daemon"
 	"github.com/dusto/tend/internal/obs"
 	"github.com/dusto/tend/internal/rpc"
+	"github.com/dusto/tend/internal/version"
 )
 
 func main() {
@@ -28,6 +29,7 @@ func main() {
 func run() error {
 	level := obs.ParseLevel(os.Getenv(obs.EnvLogLevel))
 	slog.SetDefault(obs.NewLogger(os.Stderr, level))
+	slog.Info("tendd starting", "version", version.Version)
 	if level > slog.LevelDebug {
 		slog.Info("tendd: request tracing off; set TEND_LOG=debug to trace interactions")
 	}
