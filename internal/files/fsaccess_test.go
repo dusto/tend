@@ -128,6 +128,26 @@ func TestReadExtraReadableRootNoPrompt(t *testing.T) {
 	}
 }
 
+func TestReadOutsideWorktreeNoPromptCapableHardDenies(t *testing.T) {
+	// The gate IS wired, but no connected client can answer a prompt (headless /
+	// CLI-only). An outside read must hard-deny rather than block forever on an
+	// unanswerable filesystem_access prompt, and must not even raise it.
+	ap := &fakeApprover{outcome: approvals.Outcome{Approved: true}}
+	ed := &fakeEditor{err: editor.ErrEditorUnavailable}
+	svc, _ := newGatedReadService(t, ed, ap, Options{PromptCapable: func() bool { return false }})
+
+	outside := filepath.Join(t.TempDir(), "x.txt")
+	if err := os.WriteFile(outside, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.Read(context.Background(), api.FileReadParams{SessionID: "s1", URI: fileURI(outside)}); !errors.Is(err, ErrOutsideWorkspace) {
+		t.Errorf("headless outside read err = %v, want ErrOutsideWorkspace", err)
+	}
+	if ap.kind != "" {
+		t.Errorf("approver was called (kind=%q); a headless outside read must not prompt", ap.kind)
+	}
+}
+
 func TestReadOutsideWorktreeNoApproverHardDenies(t *testing.T) {
 	ed := &fakeEditor{err: editor.ErrEditorUnavailable}
 	svc, _ := newGatedReadService(t, ed, nil, Options{})

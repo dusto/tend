@@ -81,6 +81,11 @@ type Options struct {
 	// default (empty); broad roots are opt-in config, never a default. Writes
 	// ignore these — an outside-worktree write stays hard-denied.
 	ExtraReadableRoots []string
+	// PromptCapable reports whether any connected client can answer an approval.
+	// An outside read with no prompt-capable client would block forever on an
+	// unanswerable prompt, so it hard-denies instead. Nil means "assume prompting
+	// is available" (the daemon always wires it; nil is for tests).
+	PromptCapable func() bool
 }
 
 // defaultRetainChangeSets is the per-session snapshot retention when Options
@@ -90,12 +95,13 @@ const defaultRetainChangeSets = 16
 // Service implements the file tools over the session registry, the editor
 // reverse-RPC, and the approval gate. It is safe for concurrent use.
 type Service struct {
-	sessions   *session.Registry
-	editors    editorClient
-	approver   approver
-	newID      func() api.ChangeSetID
-	snapshots  *snapshotStore
-	extraRoots []string
+	sessions      *session.Registry
+	editors       editorClient
+	approver      approver
+	newID         func() api.ChangeSetID
+	snapshots     *snapshotStore
+	extraRoots    []string
+	promptCapable func() bool
 }
 
 // NewService returns a Service. approver may be nil only if the mutating methods
@@ -110,12 +116,13 @@ func NewService(sessions *session.Registry, editors editorClient, gate approver,
 		retain = defaultRetainChangeSets
 	}
 	return &Service{
-		sessions:   sessions,
-		editors:    editors,
-		approver:   gate,
-		newID:      newID,
-		snapshots:  newSnapshotStore(retain),
-		extraRoots: opts.ExtraReadableRoots,
+		sessions:      sessions,
+		editors:       editors,
+		approver:      gate,
+		newID:         newID,
+		snapshots:     newSnapshotStore(retain),
+		extraRoots:    opts.ExtraReadableRoots,
+		promptCapable: opts.PromptCapable,
 	}
 }
 
@@ -161,7 +168,11 @@ func (s *Service) resolveRead(ctx context.Context, sess *session.Session, uri, m
 	if inside {
 		return resolved, nil
 	}
-	if s.approver == nil {
+	// An outside read can only proceed with user consent. If it cannot be gated —
+	// no approver wired, or no prompt-capable client to answer (a headless or
+	// CLI-only session) — it stays hard-denied rather than blocking forever on an
+	// unanswerable prompt (the pre-consent behavior for such sessions).
+	if s.approver == nil || (s.promptCapable != nil && !s.promptCapable()) {
 		return "", ErrOutsideWorkspace
 	}
 	detail, _ := json.Marshal(api.ApprovalDetail{

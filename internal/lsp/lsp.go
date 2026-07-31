@@ -48,6 +48,11 @@ type Options struct {
 	// as in-scope WITHOUT prompting (e.g. the module cache). Conservative by
 	// default (empty). Shared with the file service's setting.
 	ExtraReadableRoots []string
+	// PromptCapable reports whether any connected client can answer an approval.
+	// An outside read with no prompt-capable client hard-denies instead of
+	// blocking forever on an unanswerable prompt. Nil means "assume prompting is
+	// available" (the daemon always wires it; nil is for tests).
+	PromptCapable func() bool
 }
 
 // editorClient is the slice of editor.Service the LSP tools drive: resolving
@@ -66,17 +71,24 @@ type editorClient interface {
 // Service implements the LSP tools over the editor reverse-RPC. It is safe for
 // concurrent use (it holds no mutable state of its own).
 type Service struct {
-	sessions   *session.Registry
-	editors    editorClient
-	approver   approver
-	extraRoots []string
+	sessions      *session.Registry
+	editors       editorClient
+	approver      approver
+	extraRoots    []string
+	promptCapable func() bool
 }
 
 // NewService returns a Service routing through the editor reverse-RPC, with the
 // session registry for worktree-boundary checks. gate may be nil, in which case
 // an outside-worktree read stays hard-denied (it cannot be gated).
 func NewService(sessions *session.Registry, editors editorClient, gate approver, opts Options) *Service {
-	return &Service{sessions: sessions, editors: editors, approver: gate, extraRoots: opts.ExtraReadableRoots}
+	return &Service{
+		sessions:      sessions,
+		editors:       editors,
+		approver:      gate,
+		extraRoots:    opts.ExtraReadableRoots,
+		promptCapable: opts.PromptCapable,
+	}
 }
 
 // Diagnostics returns editor-fresh diagnostics for a file. With an empty URI it
@@ -89,7 +101,7 @@ func (s *Service) Diagnostics(ctx context.Context, p api.LSPDiagnosticsParams) (
 	if !ok {
 		return api.LSPDiagnosticsResult{}, ErrNoSession
 	}
-	uri, skip, err := s.resolveTarget(ctx, sess, p.URI)
+	uri, skip, err := s.resolveTarget(ctx, sess, p.URI, MethodDiagnostics)
 	if err != nil {
 		return api.LSPDiagnosticsResult{}, err
 	}
@@ -114,7 +126,7 @@ func (s *Service) Symbols(ctx context.Context, p api.LSPSymbolsParams) (api.LSPS
 	if !ok {
 		return api.LSPSymbolsResult{}, ErrNoSession
 	}
-	uri, skip, err := s.resolveTarget(ctx, sess, p.URI)
+	uri, skip, err := s.resolveTarget(ctx, sess, p.URI, MethodSymbols)
 	if err != nil {
 		return api.LSPSymbolsResult{}, err
 	}
@@ -139,7 +151,7 @@ func (s *Service) Definition(ctx context.Context, p api.LSPDefinitionParams) (ap
 	if !ok {
 		return api.LSPDefinitionResult{}, ErrNoSession
 	}
-	uri, skip, err := s.resolveTarget(ctx, sess, p.URI)
+	uri, skip, err := s.resolveTarget(ctx, sess, p.URI, MethodDefinition)
 	if err != nil {
 		return api.LSPDefinitionResult{}, err
 	}
@@ -160,7 +172,7 @@ func (s *Service) References(ctx context.Context, p api.LSPReferencesParams) (ap
 	if !ok {
 		return api.LSPReferencesResult{}, ErrNoSession
 	}
-	uri, skip, err := s.resolveTarget(ctx, sess, p.URI)
+	uri, skip, err := s.resolveTarget(ctx, sess, p.URI, MethodReferences)
 	if err != nil {
 		return api.LSPReferencesResult{}, err
 	}
@@ -182,7 +194,7 @@ func (s *Service) Hover(ctx context.Context, p api.LSPHoverParams) (api.LSPHover
 	if !ok {
 		return api.LSPHoverResult{}, ErrNoSession
 	}
-	uri, skip, err := s.resolveTarget(ctx, sess, p.URI)
+	uri, skip, err := s.resolveTarget(ctx, sess, p.URI, MethodHover)
 	if err != nil {
 		return api.LSPHoverResult{}, err
 	}
@@ -207,7 +219,7 @@ func (s *Service) CodeActions(ctx context.Context, p api.LSPCodeActionsParams) (
 	if !ok {
 		return api.LSPCodeActionsResult{}, ErrNoSession
 	}
-	uri, skip, err := s.resolveTarget(ctx, sess, p.URI)
+	uri, skip, err := s.resolveTarget(ctx, sess, p.URI, MethodCodeActions)
 	if err != nil {
 		return api.LSPCodeActionsResult{}, err
 	}
@@ -230,7 +242,7 @@ func (s *Service) CodeActions(ctx context.Context, p api.LSPCodeActionsParams) (
 // buffer) and the caller should return an empty result without querying the
 // editor. An explicitly named out-of-worktree uri is an error (a refused
 // boundary crossing), so an agent for one repo cannot navigate another's files.
-func (s *Service) resolveTarget(ctx context.Context, sess *session.Session, uri string) (resolved string, skip bool, err error) {
+func (s *Service) resolveTarget(ctx context.Context, sess *session.Session, uri, tool string) (resolved string, skip bool, err error) {
 	if uri == "" {
 		cur, err := s.editors.CurrentBuffer(ctx, sess.ID)
 		if err != nil {
@@ -241,7 +253,7 @@ func (s *Service) resolveTarget(ctx context.Context, sess *session.Session, uri 
 		}
 		return cur.URI, false, nil
 	}
-	if err := s.authorizeRead(ctx, sess, uri); err != nil {
+	if err := s.authorizeRead(ctx, sess, uri, tool); err != nil {
 		return "", false, err
 	}
 	return uri, false, nil
@@ -252,10 +264,12 @@ func (s *Service) resolveTarget(ctx context.Context, sess *session.Session, uri 
 // outside-worktree uri raises a filesystem_access approval (diagnostics mode)
 // and blocks like any gated action. On approval it re-resolves and requires the
 // SAME target (a symlink repointed between prompt and read is refused — TOCTOU);
-// on denial it returns ErrAccessDenied. With no approver wired the outside path
-// stays hard-denied. All LSP navigation reads route through here, so they gate
-// uniformly.
-func (s *Service) authorizeRead(ctx context.Context, sess *session.Session, uri string) error {
+// on denial it returns ErrAccessDenied. With no approver wired, or no
+// prompt-capable client to answer (headless/CLI-only), the outside path stays
+// hard-denied rather than blocking on an unanswerable prompt. All LSP navigation
+// reads route through here, so they gate uniformly; tool names the calling
+// method so the approval reflects the concrete operation.
+func (s *Service) authorizeRead(ctx context.Context, sess *session.Session, uri, tool string) error {
 	resolved, inside, err := worktree.ClassifyPath(uri, sess.WorktreeRoot, s.extraRoots...)
 	if err != nil {
 		return err
@@ -263,7 +277,7 @@ func (s *Service) authorizeRead(ctx context.Context, sess *session.Session, uri 
 	if inside {
 		return nil
 	}
-	if s.approver == nil {
+	if s.approver == nil || (s.promptCapable != nil && !s.promptCapable()) {
 		return worktree.ErrOutsideWorkspace
 	}
 	detail, _ := json.Marshal(api.ApprovalDetail{
@@ -272,7 +286,7 @@ func (s *Service) authorizeRead(ctx context.Context, sess *session.Session, uri 
 			RequestedURI: uri,
 			ResolvedPath: resolved,
 			Mode:         api.FilesystemModeDiagnostics,
-			Tool:         MethodDiagnostics,
+			Tool:         tool,
 		},
 	})
 	outcome, err := s.approver.Request(ctx, sess, api.ApprovalFilesystemAccess, detail)

@@ -106,6 +106,21 @@ func (r *Registry) List() []*Client {
 	return out
 }
 
+// HasPromptCapable reports whether any connected client can respond to prompts
+// (approvals/clarifications). A consent-gated action with no prompt-capable
+// client to answer would block indefinitely, so callers use this to hard-deny
+// instead of raising an unanswerable prompt.
+func (r *Registry) HasPromptCapable() bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, c := range r.clients {
+		if c.CanRespondToPrompts() {
+			return true
+		}
+	}
+	return false
+}
+
 // Conn is the per-connection client-identity handler: it serves client.register
 // for one connection, recording the registered identity in the shared registry
 // and remembering it so other handlers on the connection can check the caller's

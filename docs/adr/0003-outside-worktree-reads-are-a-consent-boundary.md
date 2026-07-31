@@ -61,10 +61,16 @@ only**.
 
 - An agent can read just outside the worktree with per-access user consent,
   instead of being blocked outright.
-- A gated outside read **waits for approval** — there is no timeout and no
-  headless auto-deny. This is consistent with ADR 0002 (approvals have no TTL):
-  the read waits until answered, or evicts when its turn is cancelled. Waiting is
-  the intended behavior for anything gated, not a hang.
+- A gated outside read **waits for approval** when a prompt-capable client is
+  connected — there is no timeout. This is consistent with ADR 0002 (approvals
+  have no TTL): the read waits until answered, or evicts when its turn is
+  cancelled. Waiting for a human is the intended behavior, not a hang.
+- But when **no prompt-capable client** can answer (a headless or CLI-only
+  session), the read would block on an *unanswerable* prompt forever — a real
+  hang, not waiting. So that case **hard-denies** (returns `ErrOutsideWorkspace`,
+  the pre-consent behavior) without raising a prompt. The daemon checks the
+  client registry (`HasPromptCapable`) before gating; the services take it as a
+  `PromptCapable func() bool`.
 - The LSP gate lives in the shared `resolveTarget`, so **all** LSP navigation
   reads (diagnostics, symbols, definition, references, hover, code_actions) gate
   uniformly — avoiding the inconsistency where one read prompts and another
@@ -84,9 +90,11 @@ only**.
 - **Fold outside-read permission into `file_edit`**: rejected — a read is not an
   edit; reusing the edit approval would misrepresent the operation and its
   detail (a diff/base makes no sense for a read).
-- **A no-responder/headless hard-deny fallback**: dropped — a gated read simply
-  waits for approval like any gated action (see Consequences / ADR 0002), so no
-  special-case client-presence check is needed.
+- **Block a headless read on an unanswerable prompt** (no client-presence
+  check): rejected — with a prompt-capable client, waiting is correct (ADR 0002);
+  but with *no* client able to answer, waiting is an indefinite hang, not consent.
+  So a no-prompt-capable session hard-denies (its pre-consent behavior) rather
+  than parking the turn forever.
 
 ## Deferrals (each its own later decision)
 
