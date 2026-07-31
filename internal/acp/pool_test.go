@@ -522,15 +522,19 @@ func TestStopKeyTerminatesAndEmitsStopped(t *testing.T) {
 		t.Errorf("StopKey stopped %d, want 2", got)
 	}
 	waitFor(t, func() bool { return p.RunningFor(testKey) == 0 }, "processes to leave the pool")
-	stopped := 0
-	for _, ty := range em.types() {
-		if ty == "provider_stopped" {
-			stopped++
+	// provider_stopped is emitted asynchronously as each process exits, which can
+	// lag the pool's RunningFor dropping to 0. Wait for both events rather than
+	// counting once, or the test races the emit and sees fewer than 2.
+	countStopped := func() int {
+		n := 0
+		for _, ty := range em.types() {
+			if ty == "provider_stopped" {
+				n++
+			}
 		}
+		return n
 	}
-	if stopped != 2 {
-		t.Errorf("provider_stopped emitted %d times, want 2", stopped)
-	}
+	waitFor(t, func() bool { return countStopped() == 2 }, "two provider_stopped events")
 
 	// Stopping a key with nothing running reports zero and is not an error.
 	if got := p.StopKey(testKey); got != 0 {
