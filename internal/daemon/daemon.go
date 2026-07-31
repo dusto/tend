@@ -44,10 +44,6 @@ import (
 // small cap is enough.
 const maxProcsPerProvider = 8
 
-// approvalTTL is how long a pending approval's payload advertises before it is
-// considered expired. Enforcing the deadline is layered on separately.
-const approvalTTL = 5 * time.Minute
-
 // resourceSampleInterval is how often the daemon samples each session's
 // agent-process CPU/RSS. It is a coarse, off-hot-path cadence: the estimate is
 // approximate and a client reads the latest sample, never triggers one.
@@ -155,7 +151,7 @@ func New(ln net.Listener, logPath string, opts ...Option) (*Server, error) {
 	}
 	s.store.SetRetention(o.retention)
 	s.binder = editor.NewBinder(s.sessions, s.clients)
-	s.gate = approvals.NewGate(s.store, approvals.Options{TTL: approvalTTL})
+	s.gate = approvals.NewGate(s.store, approvals.Options{})
 	editors := editor.NewService(s.binder, s.clients)
 	s.files = files.NewService(s.sessions, editors, s.gate, files.Options{})
 	s.lsp = lsp.NewService(s.sessions, editors)

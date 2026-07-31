@@ -53,7 +53,6 @@ func (h *responder) list(_ context.Context, p api.ApprovalListParams) (api.Appro
 			ApprovalID: x.ID,
 			SessionID:  x.SessionID,
 			Kind:       x.Kind,
-			ExpiresAt:  x.ExpiresAt,
 			Detail:     x.Detail,
 		})
 	}
