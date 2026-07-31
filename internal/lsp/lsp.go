@@ -7,9 +7,11 @@ package lsp
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 
 	"github.com/dusto/tend/api"
+	"github.com/dusto/tend/internal/approvals"
 	"github.com/dusto/tend/internal/session"
 	"github.com/dusto/tend/internal/worktree"
 )
@@ -24,8 +26,29 @@ const (
 	MethodCodeActions = "lsp.code_actions"
 )
 
-// ErrNoSession reports that no session has the given id.
-var ErrNoSession = errors.New("lsp: unknown session")
+// Errors returned by the LSP service.
+var (
+	// ErrNoSession reports that no session has the given id.
+	ErrNoSession = errors.New("lsp: unknown session")
+	// ErrAccessDenied reports that a gated outside-worktree read was refused —
+	// the user denied the filesystem_access approval, or the resolved target
+	// changed between approval and read (a symlink repoint).
+	ErrAccessDenied = errors.New("lsp: filesystem access denied")
+)
+
+// approver gates an outside-worktree read on a session. *approvals.Gate
+// satisfies it.
+type approver interface {
+	Request(ctx context.Context, sess *session.Session, kind string, detail json.RawMessage) (approvals.Outcome, error)
+}
+
+// Options configures a Service.
+type Options struct {
+	// ExtraReadableRoots are directories outside the worktree that reads resolve
+	// as in-scope WITHOUT prompting (e.g. the module cache). Conservative by
+	// default (empty). Shared with the file service's setting.
+	ExtraReadableRoots []string
+}
 
 // editorClient is the slice of editor.Service the LSP tools drive: resolving
 // the current buffer and querying editor-fresh diagnostics. It is an interface
@@ -43,14 +66,17 @@ type editorClient interface {
 // Service implements the LSP tools over the editor reverse-RPC. It is safe for
 // concurrent use (it holds no mutable state of its own).
 type Service struct {
-	sessions *session.Registry
-	editors  editorClient
+	sessions   *session.Registry
+	editors    editorClient
+	approver   approver
+	extraRoots []string
 }
 
 // NewService returns a Service routing through the editor reverse-RPC, with the
-// session registry for worktree-boundary checks.
-func NewService(sessions *session.Registry, editors editorClient) *Service {
-	return &Service{sessions: sessions, editors: editors}
+// session registry for worktree-boundary checks. gate may be nil, in which case
+// an outside-worktree read stays hard-denied (it cannot be gated).
+func NewService(sessions *session.Registry, editors editorClient, gate approver, opts Options) *Service {
+	return &Service{sessions: sessions, editors: editors, approver: gate, extraRoots: opts.ExtraReadableRoots}
 }
 
 // Diagnostics returns editor-fresh diagnostics for a file. With an empty URI it
@@ -215,10 +241,55 @@ func (s *Service) resolveTarget(ctx context.Context, sess *session.Session, uri 
 		}
 		return cur.URI, false, nil
 	}
-	if _, err := worktree.ResolvePath(uri, sess.WorktreeRoot); err != nil {
+	if err := s.authorizeRead(ctx, sess, uri); err != nil {
 		return "", false, err
 	}
 	return uri, false, nil
+}
+
+// authorizeRead enforces the worktree read boundary as a consent boundary: an
+// in-worktree (or extra-readable-root) uri is allowed as before; an
+// outside-worktree uri raises a filesystem_access approval (diagnostics mode)
+// and blocks like any gated action. On approval it re-resolves and requires the
+// SAME target (a symlink repointed between prompt and read is refused — TOCTOU);
+// on denial it returns ErrAccessDenied. With no approver wired the outside path
+// stays hard-denied. All LSP navigation reads route through here, so they gate
+// uniformly.
+func (s *Service) authorizeRead(ctx context.Context, sess *session.Session, uri string) error {
+	resolved, inside, err := worktree.ClassifyPath(uri, sess.WorktreeRoot, s.extraRoots...)
+	if err != nil {
+		return err
+	}
+	if inside {
+		return nil
+	}
+	if s.approver == nil {
+		return worktree.ErrOutsideWorkspace
+	}
+	detail, _ := json.Marshal(api.ApprovalDetail{
+		Kind: api.ApprovalFilesystemAccess,
+		FilesystemAccess: &api.FilesystemAccessApproval{
+			RequestedURI: uri,
+			ResolvedPath: resolved,
+			Mode:         api.FilesystemModeDiagnostics,
+			Tool:         MethodDiagnostics,
+		},
+	})
+	outcome, err := s.approver.Request(ctx, sess, api.ApprovalFilesystemAccess, detail)
+	if err != nil {
+		return err
+	}
+	if !outcome.Approved {
+		return ErrAccessDenied
+	}
+	reResolved, _, err := worktree.ClassifyPath(uri, sess.WorktreeRoot, s.extraRoots...)
+	if err != nil {
+		return err
+	}
+	if reResolved != resolved {
+		return ErrAccessDenied
+	}
+	return nil
 }
 
 // nonNilLocations returns locs, or an empty non-nil slice, so a result marshals

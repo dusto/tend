@@ -100,10 +100,11 @@ type Server struct {
 type Option func(*options)
 
 type options struct {
-	acp           *acp.Config
-	taskFactory   tasks.Factory
-	memoryFactory memory.Factory
-	retention     uint64
+	acp                *acp.Config
+	taskFactory        tasks.Factory
+	memoryFactory      memory.Factory
+	retention          uint64
+	extraReadableRoots []string
 }
 
 // WithACPConfig sets the ACP provider config the daemon spawns from (default:
@@ -123,6 +124,13 @@ func WithMemoryFactory(f memory.Factory) Option {
 // WithEventRetention sets how many most-recent raw event records each stream
 // keeps uncompacted (default: events.DefaultRetention).
 func WithEventRetention(n uint64) Option { return func(o *options) { o.retention = n } }
+
+// WithExtraReadableRoots sets directories outside the worktree that reads
+// resolve as in-scope without prompting (e.g. the module cache). Conservative
+// by default (empty); broad roots are opt-in. Writes ignore these.
+func WithExtraReadableRoots(roots []string) Option {
+	return func(o *options) { o.extraReadableRoots = roots }
+}
 
 // New builds a Server over ln with a fresh per-process epoch and the params
 // validator available for the build. It opens the durable event log at logPath
@@ -157,8 +165,8 @@ func New(ln net.Listener, logPath string, opts ...Option) (*Server, error) {
 	s.binder = editor.NewBinder(s.sessions, s.clients)
 	s.gate = approvals.NewGate(s.store, approvals.Options{TTL: approvalTTL})
 	editors := editor.NewService(s.binder, s.clients)
-	s.files = files.NewService(s.sessions, editors, s.gate, files.Options{})
-	s.lsp = lsp.NewService(s.sessions, editors)
+	s.files = files.NewService(s.sessions, editors, s.gate, files.Options{ExtraReadableRoots: o.extraReadableRoots})
+	s.lsp = lsp.NewService(s.sessions, editors, s.gate, lsp.Options{ExtraReadableRoots: o.extraReadableRoots})
 	s.sessSvc = sessions.NewService(s.sessions, s.binder, s.store)
 	// Task provider per workspace. The default factory is the in-memory fake (for
 	// tests and zero-config runs); tendd installs the config-resolved factory. The

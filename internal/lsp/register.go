@@ -76,7 +76,8 @@ func toRPCError(err error) error {
 	case errors.Is(err, editor.ErrEditorUnavailable):
 		return &rpc.Error{Code: api.ErrEditorUnavailable, Message: err.Error()}
 	case errors.Is(err, ErrNoSession), errors.Is(err, editor.ErrNoSession),
-		errors.Is(err, worktree.ErrBadURI), errors.Is(err, worktree.ErrOutsideWorkspace):
+		errors.Is(err, worktree.ErrBadURI), errors.Is(err, worktree.ErrOutsideWorkspace),
+		errors.Is(err, ErrAccessDenied):
 		return &rpc.Error{Code: rpc.CodeInvalidParams, Message: err.Error()}
 	default:
 		return &rpc.Error{Code: rpc.CodeInternalError, Message: err.Error()}
