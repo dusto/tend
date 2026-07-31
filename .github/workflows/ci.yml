@@ -53,6 +53,17 @@ jobs:
         with:
           version: v2.12.2
 
+  goreleaser-check:
+    name: goreleaser config
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: goreleaser/goreleaser-action@v6
+        with:
+          version: "~> v2"
+          install-only: true
+      - run: goreleaser check
+
   pr-title:
     name: conventional PR title
     if: github.event_name == 'pull_request'

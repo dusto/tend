@@ -1,0 +1,37 @@
+name: release
+
+# Builds and publishes a GitHub Release with GoReleaser. Fires when a v* tag is
+# pushed (a maintainer `git push` of a tag, or the tag workflow's dispatch of
+# this one on the new tag ref). workflow_dispatch also allows re-running a
+# release for an existing tag: run it with the tag selected as the ref.
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch: {}
+
+permissions:
+  contents: write # create the release + upload assets
+
+jobs:
+  goreleaser:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # full history + tags for the changelog and version
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Verify a tag is checked out
+        run: |
+          if ! git describe --tags --exact-match >/dev/null 2>&1; then
+            echo "::error::release must run on a v* tag ref (got $(git rev-parse --short HEAD)); run the 'tag' workflow to cut one"
+            exit 1
+          fi
+      - uses: goreleaser/goreleaser-action@v6
+        with:
+          version: "~> v2"
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
