@@ -207,10 +207,19 @@ func TestResolveStaleSessionDeniesAndErrors(t *testing.T) {
 	if sess.Status() != api.StatusEnded {
 		t.Errorf("status = %q, want ended (resolve must not force running)", sess.Status())
 	}
-	// Only approval_requested was raised; no approval_resolved for a stale resolve.
+	// The stale approval is unanswerable, so it is evicted on the stream too:
+	// approval_requested then an eviction-shaped approval_resolved(Approved=false)
+	// so subscribed clients clear it live, not only on the next approval.list sync.
 	evs, _, _ := store.Read("workspace:ws1", 0, 10)
-	if len(evs) != 1 || evs[0].Type != "approval_requested" {
-		t.Errorf("events = %+v, want only approval_requested", evs)
+	if len(evs) != 2 || evs[0].Type != "approval_requested" || evs[1].Type != "approval_resolved" {
+		t.Fatalf("events = %+v, want approval_requested then approval_resolved", evs)
+	}
+	var resolved api.ApprovalResolved
+	if err := json.Unmarshal(evs[1].Payload, &resolved); err != nil {
+		t.Fatalf("unmarshal resolved: %v", err)
+	}
+	if resolved.Approved || resolved.Reason == "" || resolved.ApprovalID != "appr-1" {
+		t.Errorf("eviction payload = %+v, want Approved=false with a cause", resolved)
 	}
 }
 

@@ -168,7 +168,11 @@ func (g *Gate) Request(ctx context.Context, sess *session.Session, kind string, 
 // If the session has already left waiting_approval (for example it was ended or
 // cancelled through another path), the approval is stale: Resolve does not apply
 // the decision. It unblocks the waiting Request with a denial so the gated tool
-// cannot proceed, raises no approval_resolved, and returns an error.
+// cannot proceed, and returns an error. Because Resolve claimed the id, the
+// Request ctx-cancel path can no longer emit the eviction, so Resolve emits it
+// here: the stale approval is now unanswerable, so it signals the same
+// eviction-shaped approval_resolved(Approved=false) to clear subscribed clients
+// live. The session's terminal status is left as it is.
 func (g *Gate) Resolve(id api.ApprovalID, d Decision) error {
 	p := g.claim(id)
 	if p == nil {
@@ -177,6 +181,12 @@ func (g *Gate) Resolve(id api.ApprovalID, d Decision) error {
 	// A resolved approval (approved or denied) returns the turn to running:
 	// either the action executes or the agent is told it was rejected.
 	if err := p.sess.SetStatus(api.StatusRunning, nil); err != nil {
+		g.emit2(api.WorkspaceStream(p.sess.WorkspaceID), "approval_resolved", api.ApprovalResolved{
+			SessionID:  p.sess.ID,
+			ApprovalID: id,
+			Approved:   false,
+			Reason:     "cancelled: session no longer awaiting approval",
+		})
 		p.resolve <- Outcome{Approved: false, Reason: "session no longer awaiting approval"}
 		return fmt.Errorf("approvals: resolve %s: %w", id, err)
 	}
