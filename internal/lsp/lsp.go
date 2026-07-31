@@ -7,9 +7,11 @@ package lsp
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 
 	"github.com/dusto/tend/api"
+	"github.com/dusto/tend/internal/approvals"
 	"github.com/dusto/tend/internal/session"
 	"github.com/dusto/tend/internal/worktree"
 )
@@ -24,8 +26,34 @@ const (
 	MethodCodeActions = "lsp.code_actions"
 )
 
-// ErrNoSession reports that no session has the given id.
-var ErrNoSession = errors.New("lsp: unknown session")
+// Errors returned by the LSP service.
+var (
+	// ErrNoSession reports that no session has the given id.
+	ErrNoSession = errors.New("lsp: unknown session")
+	// ErrAccessDenied reports that a gated outside-worktree read was refused —
+	// the user denied the filesystem_access approval, or the resolved target
+	// changed between approval and read (a symlink repoint).
+	ErrAccessDenied = errors.New("lsp: filesystem access denied")
+)
+
+// approver gates an outside-worktree read on a session. *approvals.Gate
+// satisfies it.
+type approver interface {
+	Request(ctx context.Context, sess *session.Session, kind string, detail json.RawMessage) (approvals.Outcome, error)
+}
+
+// Options configures a Service.
+type Options struct {
+	// ExtraReadableRoots are directories outside the worktree that reads resolve
+	// as in-scope WITHOUT prompting (e.g. the module cache). Conservative by
+	// default (empty). Shared with the file service's setting.
+	ExtraReadableRoots []string
+	// PromptCapable reports whether any connected client can answer an approval.
+	// An outside read with no prompt-capable client hard-denies instead of
+	// blocking forever on an unanswerable prompt. Nil means "assume prompting is
+	// available" (the daemon always wires it; nil is for tests).
+	PromptCapable func() bool
+}
 
 // editorClient is the slice of editor.Service the LSP tools drive: resolving
 // the current buffer and querying editor-fresh diagnostics. It is an interface
@@ -43,14 +71,24 @@ type editorClient interface {
 // Service implements the LSP tools over the editor reverse-RPC. It is safe for
 // concurrent use (it holds no mutable state of its own).
 type Service struct {
-	sessions *session.Registry
-	editors  editorClient
+	sessions      *session.Registry
+	editors       editorClient
+	approver      approver
+	extraRoots    []string
+	promptCapable func() bool
 }
 
 // NewService returns a Service routing through the editor reverse-RPC, with the
-// session registry for worktree-boundary checks.
-func NewService(sessions *session.Registry, editors editorClient) *Service {
-	return &Service{sessions: sessions, editors: editors}
+// session registry for worktree-boundary checks. gate may be nil, in which case
+// an outside-worktree read stays hard-denied (it cannot be gated).
+func NewService(sessions *session.Registry, editors editorClient, gate approver, opts Options) *Service {
+	return &Service{
+		sessions:      sessions,
+		editors:       editors,
+		approver:      gate,
+		extraRoots:    opts.ExtraReadableRoots,
+		promptCapable: opts.PromptCapable,
+	}
 }
 
 // Diagnostics returns editor-fresh diagnostics for a file. With an empty URI it
@@ -63,7 +101,7 @@ func (s *Service) Diagnostics(ctx context.Context, p api.LSPDiagnosticsParams) (
 	if !ok {
 		return api.LSPDiagnosticsResult{}, ErrNoSession
 	}
-	uri, skip, err := s.resolveTarget(ctx, sess, p.URI)
+	uri, skip, err := s.resolveTarget(ctx, sess, p.URI, MethodDiagnostics)
 	if err != nil {
 		return api.LSPDiagnosticsResult{}, err
 	}
@@ -88,7 +126,7 @@ func (s *Service) Symbols(ctx context.Context, p api.LSPSymbolsParams) (api.LSPS
 	if !ok {
 		return api.LSPSymbolsResult{}, ErrNoSession
 	}
-	uri, skip, err := s.resolveTarget(ctx, sess, p.URI)
+	uri, skip, err := s.resolveTarget(ctx, sess, p.URI, MethodSymbols)
 	if err != nil {
 		return api.LSPSymbolsResult{}, err
 	}
@@ -113,7 +151,7 @@ func (s *Service) Definition(ctx context.Context, p api.LSPDefinitionParams) (ap
 	if !ok {
 		return api.LSPDefinitionResult{}, ErrNoSession
 	}
-	uri, skip, err := s.resolveTarget(ctx, sess, p.URI)
+	uri, skip, err := s.resolveTarget(ctx, sess, p.URI, MethodDefinition)
 	if err != nil {
 		return api.LSPDefinitionResult{}, err
 	}
@@ -134,7 +172,7 @@ func (s *Service) References(ctx context.Context, p api.LSPReferencesParams) (ap
 	if !ok {
 		return api.LSPReferencesResult{}, ErrNoSession
 	}
-	uri, skip, err := s.resolveTarget(ctx, sess, p.URI)
+	uri, skip, err := s.resolveTarget(ctx, sess, p.URI, MethodReferences)
 	if err != nil {
 		return api.LSPReferencesResult{}, err
 	}
@@ -156,7 +194,7 @@ func (s *Service) Hover(ctx context.Context, p api.LSPHoverParams) (api.LSPHover
 	if !ok {
 		return api.LSPHoverResult{}, ErrNoSession
 	}
-	uri, skip, err := s.resolveTarget(ctx, sess, p.URI)
+	uri, skip, err := s.resolveTarget(ctx, sess, p.URI, MethodHover)
 	if err != nil {
 		return api.LSPHoverResult{}, err
 	}
@@ -181,7 +219,7 @@ func (s *Service) CodeActions(ctx context.Context, p api.LSPCodeActionsParams) (
 	if !ok {
 		return api.LSPCodeActionsResult{}, ErrNoSession
 	}
-	uri, skip, err := s.resolveTarget(ctx, sess, p.URI)
+	uri, skip, err := s.resolveTarget(ctx, sess, p.URI, MethodCodeActions)
 	if err != nil {
 		return api.LSPCodeActionsResult{}, err
 	}
@@ -204,7 +242,7 @@ func (s *Service) CodeActions(ctx context.Context, p api.LSPCodeActionsParams) (
 // buffer) and the caller should return an empty result without querying the
 // editor. An explicitly named out-of-worktree uri is an error (a refused
 // boundary crossing), so an agent for one repo cannot navigate another's files.
-func (s *Service) resolveTarget(ctx context.Context, sess *session.Session, uri string) (resolved string, skip bool, err error) {
+func (s *Service) resolveTarget(ctx context.Context, sess *session.Session, uri, tool string) (resolved string, skip bool, err error) {
 	if uri == "" {
 		cur, err := s.editors.CurrentBuffer(ctx, sess.ID)
 		if err != nil {
@@ -215,10 +253,57 @@ func (s *Service) resolveTarget(ctx context.Context, sess *session.Session, uri 
 		}
 		return cur.URI, false, nil
 	}
-	if _, err := worktree.ResolvePath(uri, sess.WorktreeRoot); err != nil {
+	if err := s.authorizeRead(ctx, sess, uri, tool); err != nil {
 		return "", false, err
 	}
 	return uri, false, nil
+}
+
+// authorizeRead enforces the worktree read boundary as a consent boundary: an
+// in-worktree (or extra-readable-root) uri is allowed as before; an
+// outside-worktree uri raises a filesystem_access approval (diagnostics mode)
+// and blocks like any gated action. On approval it re-resolves and requires the
+// SAME target (a symlink repointed between prompt and read is refused — TOCTOU);
+// on denial it returns ErrAccessDenied. With no approver wired, or no
+// prompt-capable client to answer (headless/CLI-only), the outside path stays
+// hard-denied rather than blocking on an unanswerable prompt. All LSP navigation
+// reads route through here, so they gate uniformly; tool names the calling
+// method so the approval reflects the concrete operation.
+func (s *Service) authorizeRead(ctx context.Context, sess *session.Session, uri, tool string) error {
+	resolved, inside, err := worktree.ClassifyPath(uri, sess.WorktreeRoot, s.extraRoots...)
+	if err != nil {
+		return err
+	}
+	if inside {
+		return nil
+	}
+	if s.approver == nil || (s.promptCapable != nil && !s.promptCapable()) {
+		return worktree.ErrOutsideWorkspace
+	}
+	detail, _ := json.Marshal(api.ApprovalDetail{
+		Kind: api.ApprovalFilesystemAccess,
+		FilesystemAccess: &api.FilesystemAccessApproval{
+			RequestedURI: uri,
+			ResolvedPath: resolved,
+			Mode:         api.FilesystemModeDiagnostics,
+			Tool:         tool,
+		},
+	})
+	outcome, err := s.approver.Request(ctx, sess, api.ApprovalFilesystemAccess, detail)
+	if err != nil {
+		return err
+	}
+	if !outcome.Approved {
+		return ErrAccessDenied
+	}
+	reResolved, _, err := worktree.ClassifyPath(uri, sess.WorktreeRoot, s.extraRoots...)
+	if err != nil {
+		return err
+	}
+	if reResolved != resolved {
+		return ErrAccessDenied
+	}
+	return nil
 }
 
 // nonNilLocations returns locs, or an empty non-nil slice, so a result marshals

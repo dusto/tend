@@ -98,7 +98,7 @@ func newSvc(t *testing.T, ed editorClient) (*Service, string) {
 	root := t.TempDir()
 	r := session.NewRegistry()
 	r.Create("s1", "codex", "ws1", api.TaskRef{Provider: "beads", WorkspaceID: "ws1", ID: "t1"}, root)
-	return NewService(r, ed), root
+	return NewService(r, ed, nil, Options{}), root
 }
 
 func TestDiagnosticsEditorFresh(t *testing.T) {

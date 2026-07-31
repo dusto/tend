@@ -7,10 +7,19 @@ import (
 
 // Approval kinds: the operation an approval gates.
 const (
-	ApprovalFileEdit   = "file_edit"
-	ApprovalPaneOpen   = "pane_open"
-	ApprovalPaneRun    = "pane_run"
-	ApprovalCodeAction = "code_action"
+	ApprovalFileEdit         = "file_edit"
+	ApprovalPaneOpen         = "pane_open"
+	ApprovalPaneRun          = "pane_run"
+	ApprovalCodeAction       = "code_action"
+	ApprovalFilesystemAccess = "filesystem_access"
+)
+
+// Filesystem-access modes (FilesystemAccessApproval.Mode): the read operation an
+// outside-worktree access approval gates. Writes are not represented here — an
+// outside-worktree write stays hard-denied.
+const (
+	FilesystemModeRead        = "read"
+	FilesystemModeDiagnostics = "diagnostics"
 )
 
 // ApprovalDetail is the decision context for a pending approval: everything about
@@ -22,10 +31,25 @@ const (
 type ApprovalDetail struct {
 	Kind string `json:"kind"`
 
-	FileEdit   *FileEditApproval   `json:"file_edit,omitempty"`
-	PaneOpen   *PaneOpenApproval   `json:"pane_open,omitempty"`
-	PaneRun    *PaneRunApproval    `json:"pane_run,omitempty"`
-	CodeAction *CodeActionApproval `json:"code_action,omitempty"`
+	FileEdit         *FileEditApproval         `json:"file_edit,omitempty"`
+	PaneOpen         *PaneOpenApproval         `json:"pane_open,omitempty"`
+	PaneRun          *PaneRunApproval          `json:"pane_run,omitempty"`
+	CodeAction       *CodeActionApproval       `json:"code_action,omitempty"`
+	FilesystemAccess *FilesystemAccessApproval `json:"filesystem_access,omitempty"`
+}
+
+// FilesystemAccessApproval is the decision context for reading a file that
+// resolves outside the session's worktree: the agent asks and the user consents
+// per access. Both the requested uri and the resolved path are carried — they
+// differ when a symlink is involved, and the user is consenting to the RESOLVED
+// target. Mode is the read operation (read|diagnostics); outside-worktree writes
+// are never represented here (they stay hard-denied). Tool names the daemon
+// method that requested access, for context.
+type FilesystemAccessApproval struct {
+	RequestedURI string `json:"requested_uri"`
+	ResolvedPath string `json:"resolved_path"`
+	Mode         string `json:"mode"`
+	Tool         string `json:"tool,omitempty"`
 }
 
 // PaneOpenApproval is the decision context for an agent-initiated pane open: it

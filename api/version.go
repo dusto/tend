@@ -52,7 +52,11 @@ const (
 	// from the owning session's stream (ScopeSession) to the repo-wide workspace
 	// stream (ScopeWorkspace) — the approval channel — so a client receives every
 	// pending approval live by subscribing to one stream, independent of which
-	// sessions it follows (approval.list remains the durable snapshot).
+	// sessions it follows (approval.list remains the durable snapshot); 1.1.0
+	// added the filesystem_access approval kind + detail (an outside-worktree read
+	// is a consent decision, delivered to clients on approval_requested /
+	// approval.list) — additive, so a client that does not render it still sees
+	// the other approval kinds.
 	//
 	// This is a BREAKING (major) bump, not a minor one. Removing approvals from
 	// the session stream / prompt.raise silently strips live approval delivery
@@ -62,7 +66,7 @@ const (
 	// instead of losing prompts silently — the house rule is reject-at-handshake,
 	// not degrade-in-place. A client is compatible again once it subscribes to the
 	// workspace stream and pins daemon_to_client >= 1.0.0.
-	DaemonToClientVersion = "1.0.0"
+	DaemonToClientVersion = "1.1.0"
 )
 
 // Versions reports the contract version of each method set.

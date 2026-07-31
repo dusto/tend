@@ -51,6 +51,10 @@ var (
 	// task-gated: a session can converse and read without a task, but must have
 	// one assigned (by delegation) before it mutates.
 	ErrNoTask = errors.New("files: a task is required to modify files")
+	// ErrAccessDenied reports that a gated outside-worktree read was refused —
+	// the user denied the filesystem_access approval, or the resolved target
+	// changed between approval and read (a symlink repoint).
+	ErrAccessDenied = errors.New("files: filesystem access denied")
 )
 
 // editorClient is the slice of editor.Service the file service drives. It is an
@@ -72,6 +76,16 @@ type Options struct {
 	// RetainChangeSets caps how many recent change sets keep their
 	// before/after snapshots per session for file.diff; 0 uses a default.
 	RetainChangeSets int
+	// ExtraReadableRoots are directories outside the worktree that reads resolve
+	// as in-scope WITHOUT prompting (e.g. the module cache). Conservative by
+	// default (empty); broad roots are opt-in config, never a default. Writes
+	// ignore these — an outside-worktree write stays hard-denied.
+	ExtraReadableRoots []string
+	// PromptCapable reports whether any connected client can answer an approval.
+	// An outside read with no prompt-capable client would block forever on an
+	// unanswerable prompt, so it hard-denies instead. Nil means "assume prompting
+	// is available" (the daemon always wires it; nil is for tests).
+	PromptCapable func() bool
 }
 
 // defaultRetainChangeSets is the per-session snapshot retention when Options
@@ -81,11 +95,13 @@ const defaultRetainChangeSets = 16
 // Service implements the file tools over the session registry, the editor
 // reverse-RPC, and the approval gate. It is safe for concurrent use.
 type Service struct {
-	sessions  *session.Registry
-	editors   editorClient
-	approver  approver
-	newID     func() api.ChangeSetID
-	snapshots *snapshotStore
+	sessions      *session.Registry
+	editors       editorClient
+	approver      approver
+	newID         func() api.ChangeSetID
+	snapshots     *snapshotStore
+	extraRoots    []string
+	promptCapable func() bool
 }
 
 // NewService returns a Service. approver may be nil only if the mutating methods
@@ -100,11 +116,13 @@ func NewService(sessions *session.Registry, editors editorClient, gate approver,
 		retain = defaultRetainChangeSets
 	}
 	return &Service{
-		sessions:  sessions,
-		editors:   editors,
-		approver:  gate,
-		newID:     newID,
-		snapshots: newSnapshotStore(retain),
+		sessions:      sessions,
+		editors:       editors,
+		approver:      gate,
+		newID:         newID,
+		snapshots:     newSnapshotStore(retain),
+		extraRoots:    opts.ExtraReadableRoots,
+		promptCapable: opts.PromptCapable,
 	}
 }
 
@@ -123,7 +141,7 @@ func (s *Service) Read(ctx context.Context, p api.FileReadParams) (api.FileReadR
 	if !ok {
 		return api.FileReadResult{}, ErrNoSession
 	}
-	path, err := resolvePath(p.URI, sess.WorktreeRoot)
+	path, err := s.resolveRead(ctx, sess, p.URI, api.FilesystemModeRead, MethodRead)
 	if err != nil {
 		return api.FileReadResult{}, err
 	}
@@ -132,6 +150,59 @@ func (s *Service) Read(ctx context.Context, p api.FileReadParams) (api.FileReadR
 		return api.FileReadResult{}, err
 	}
 	return api.FileReadResult{Content: string(st.content), Base: st.base(), Open: st.open}, nil
+}
+
+// resolveRead resolves uri to a readable path, gating an outside-worktree read
+// on a filesystem_access approval. An in-worktree (or extra-readable-root) path
+// resolves and returns as before. An outside path is a consent decision, not a
+// hard boundary: it raises a filesystem_access approval and blocks like any
+// gated action; on approval it re-resolves and requires the SAME target (a
+// symlink repointed between prompt and read is refused — TOCTOU), on denial it
+// returns ErrAccessDenied without touching disk or editor. When no approver is
+// wired (reads cannot be gated) an outside path stays hard-denied.
+func (s *Service) resolveRead(ctx context.Context, sess *session.Session, uri, mode, tool string) (string, error) {
+	resolved, inside, err := worktree.ClassifyPath(uri, sess.WorktreeRoot, s.extraRoots...)
+	if err != nil {
+		return "", err
+	}
+	if inside {
+		return resolved, nil
+	}
+	// An outside read can only proceed with user consent. If it cannot be gated —
+	// no approver wired, or no prompt-capable client to answer (a headless or
+	// CLI-only session) — it stays hard-denied rather than blocking forever on an
+	// unanswerable prompt (the pre-consent behavior for such sessions).
+	if s.approver == nil || (s.promptCapable != nil && !s.promptCapable()) {
+		return "", ErrOutsideWorkspace
+	}
+	detail, _ := json.Marshal(api.ApprovalDetail{
+		Kind: api.ApprovalFilesystemAccess,
+		FilesystemAccess: &api.FilesystemAccessApproval{
+			RequestedURI: uri,
+			ResolvedPath: resolved,
+			Mode:         mode,
+			Tool:         tool,
+		},
+	})
+	outcome, err := s.approver.Request(ctx, sess, api.ApprovalFilesystemAccess, detail)
+	if err != nil {
+		return "", err
+	}
+	if !outcome.Approved {
+		return "", ErrAccessDenied
+	}
+	// TOCTOU: re-resolve immediately before access and require the exact target
+	// that was approved. A symlink can be repointed between the prompt and the
+	// read; the approval was for the resolved target, so a different one is
+	// refused rather than silently read.
+	reResolved, _, err := worktree.ClassifyPath(uri, sess.WorktreeRoot, s.extraRoots...)
+	if err != nil {
+		return "", err
+	}
+	if reResolved != resolved {
+		return "", ErrAccessDenied
+	}
+	return resolved, nil
 }
 
 // Patch applies a set of text edits to a repo file through the change-set flow.
