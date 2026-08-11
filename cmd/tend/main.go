@@ -36,7 +36,29 @@ func newApp() *cli.Command {
 				Value:   rpc.SocketPath(),
 			},
 		},
-		Commands: []*cli.Command{psCommand(), memoryCommand()},
+		Commands: []*cli.Command{psCommand(), stopCommand(), memoryCommand()},
+	}
+}
+
+func stopCommand() *cli.Command {
+	return &cli.Command{
+		Name:      "stop",
+		Usage:     "end a session, releasing its provider process",
+		ArgsUsage: "<session-id>",
+		Description: "End the named session: cancel any in-flight turn, mark it ended, and " +
+			"release its hold on the provider process. Other sessions are unaffected. " +
+			"Find session ids with `tend ps`.",
+		Action: func(ctx context.Context, cmd *cli.Command) error {
+			id := cmd.Args().First()
+			if id == "" {
+				return fmt.Errorf("a session id is required (see `tend ps`)")
+			}
+			if err := stopSession(ctx, cmd.String("socket"), id); err != nil {
+				return err
+			}
+			fmt.Println("stopped session", id)
+			return nil
+		},
 	}
 }
 
