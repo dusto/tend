@@ -36,7 +36,7 @@ func newApp() *cli.Command {
 				Value:   rpc.SocketPath(),
 			},
 		},
-		Commands: []*cli.Command{psCommand(), stopCommand(), memoryCommand()},
+		Commands: []*cli.Command{psCommand(), stopCommand(), mcpCommand(), memoryCommand()},
 	}
 }
 
