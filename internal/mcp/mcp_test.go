@@ -93,6 +93,22 @@ func TestNotificationGetsNoReply(t *testing.T) {
 	}
 }
 
+func TestKnownMethodNotificationGetsNoReply(t *testing.T) {
+	// A known request method sent WITHOUT an id is a notification: per JSON-RPC
+	// it must never be replied to. Regression: these leaked id:null responses
+	// because reply suppression only ran in the default (unknown-method) case.
+	resp := run(t,
+		`{"jsonrpc":"2.0","method":"ping"}`,
+		`{"jsonrpc":"2.0","id":7,"method":"ping"}`,
+	)
+	if len(resp) != 1 {
+		t.Fatalf("responses = %d, want 1 (only the id'd ping)", len(resp))
+	}
+	if resp[0]["id"] != float64(7) {
+		t.Errorf("reply id = %v, want 7", resp[0]["id"])
+	}
+}
+
 func TestUnknownMethodIsMethodNotFound(t *testing.T) {
 	resp := run(t, `{"jsonrpc":"2.0","id":4,"method":"does/not/exist"}`)
 	errObj, _ := resp[0]["error"].(map[string]any)

@@ -133,6 +133,14 @@ func (s *Server) handleLine(line []byte) (response, bool) {
 }
 
 func (s *Server) dispatch(req request) (response, bool) {
+	// A message with no id is a notification: per JSON-RPC it is never replied
+	// to, whatever its method (so a request method sent without an id, like a
+	// notification-form ping, must not leak an id:null response). Process any
+	// side effects, then return no reply.
+	if req.isNotification() {
+		s.handleNotification(req)
+		return response{}, false
+	}
 	switch req.Method {
 	case "initialize":
 		return s.ok(req.ID, s.initializeResult()), true
@@ -142,16 +150,15 @@ func (s *Server) dispatch(req request) (response, bool) {
 		return s.ok(req.ID, s.callStub()), true
 	case "ping":
 		return s.ok(req.ID, struct{}{}), true
-	case "notifications/initialized", "notifications/cancelled":
-		// Notifications: no reply.
-		return response{}, false
 	default:
-		if req.isNotification() {
-			return response{}, false // unknown notifications are ignored
-		}
 		return errorResponse(req.ID, codeMethodNotFound, "method not found: "+req.Method), true
 	}
 }
+
+// handleNotification runs a notification's side effects. notifications/initialized
+// and notifications/cancelled are no-ops for now; unknown notifications are
+// ignored per JSON-RPC.
+func (s *Server) handleNotification(_ request) {}
 
 func (s *Server) initializeResult() map[string]any {
 	return map[string]any{
