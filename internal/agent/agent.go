@@ -31,6 +31,9 @@ const (
 	MethodSetMode         = "session.set_mode"
 	MethodSetModel        = "session.set_model"
 	MethodSetThoughtLevel = "session.set_thought_level"
+	// MethodMCPResolve lets a spawned MCP bridge (`tend mcp --bridge <token>`)
+	// resolve its token to the session it serves. See bridge.go.
+	MethodMCPResolve = "mcp.resolve"
 )
 
 // Manager is the slice of the ACP session manager the service drives. *acp.Manager
@@ -65,16 +68,24 @@ type Service struct {
 
 	mu       sync.Mutex
 	inflight map[api.SessionID]context.CancelFunc
+
+	// bridgeTokens maps an MCP bridge token to the session it serves. The daemon
+	// declares `tend mcp --bridge <token>` in each session's mcpServers (the
+	// session id is not yet known then); the spawned bridge resolves the token
+	// with mcp.resolve. Entries are dropped when the session ends.
+	bridgeMu     sync.Mutex
+	bridgeTokens map[string]api.SessionID
 }
 
 // NewService returns a Service that opens sessions through manager, records their
 // state in sessions, and ends turns through norm (which publishes turn_end).
 func NewService(sessions *session.Registry, manager Manager, norm *acp.Normalizer) *Service {
 	return &Service{
-		sessions: sessions,
-		manager:  manager,
-		norm:     norm,
-		inflight: make(map[api.SessionID]context.CancelFunc),
+		sessions:     sessions,
+		manager:      manager,
+		norm:         norm,
+		inflight:     make(map[api.SessionID]context.CancelFunc),
+		bridgeTokens: make(map[string]api.SessionID),
 	}
 }
 
@@ -118,7 +129,10 @@ func Register(m *dispatch.Mux, s *Service, onStarted func(api.SessionID)) error 
 	if err := dispatch.Handle(m, MethodSetModel, s.SetModel); err != nil {
 		return err
 	}
-	return dispatch.Handle(m, MethodSetThoughtLevel, s.SetThoughtLevel)
+	if err := dispatch.Handle(m, MethodSetThoughtLevel, s.SetThoughtLevel); err != nil {
+		return err
+	}
+	return dispatch.Handle(m, MethodMCPResolve, s.ResolveBridge)
 }
 
 // Start opens a task-scoped session on a provider process for the task's
@@ -163,7 +177,24 @@ func (s *Service) Start(ctx context.Context, p api.AgentStartParams) (api.AgentS
 	// Carry the worktree root so a provider process spawned for this session
 	// starts in it; the session's own cwd is set on session/new below.
 	ctx = acp.WithWorktreeRoot(ctx, p.WorktreeRoot)
-	as, err := s.manager.Open(ctx, key, acp.NewSessionParams{Cwd: p.WorktreeRoot})
+
+	// Declare the MCP editor-tools bridge so the agent can call tend's buffer
+	// tools. It is scoped to this session by a token (the session id does not yet
+	// exist — the provider assigns it in the session/new reply); the bridge
+	// resolves the token with mcp.resolve once spawned.
+	bridgeToken, err := newBridgeToken()
+	if err != nil {
+		return api.AgentStartResult{}, internalErr(err)
+	}
+	bridgeDecl, err := mcpBridgeDeclaration(daemonSocketPath(), bridgeToken)
+	if err != nil {
+		return api.AgentStartResult{}, internalErr(err)
+	}
+	params := acp.NewSessionParams{
+		Cwd:        p.WorktreeRoot,
+		MCPServers: []json.RawMessage{bridgeDecl},
+	}
+	as, err := s.manager.Open(ctx, key, params)
 	if err != nil {
 		return api.AgentStartResult{}, internalErr(err)
 	}
@@ -175,6 +206,9 @@ func (s *Service) Start(ctx context.Context, p api.AgentStartParams) (api.AgentS
 		return api.AgentStartResult{}, &rpc.Error{Code: rpc.CodeInternalError, Message: "agent: duplicate session id " + string(as.ID)}
 	}
 	sess := s.sessions.Create(as.ID, p.ProviderID, workspace, p.Task, p.WorktreeRoot)
+	// Now that the provider has assigned the session id, bind the bridge token to
+	// it so a bridge the agent spawned can resolve which session it serves.
+	s.registerBridge(bridgeToken, sess.ID)
 	// Record the provider's advertised mode/model/thought-level choices (empty
 	// when it offers none) so session.list reports them and the set_* methods can
 	// validate.
@@ -362,6 +396,7 @@ func (s *Service) Stop(ctx context.Context, p api.AgentStopParams) (struct{}, er
 	_ = sess.SetStatus(api.StatusEnded, nil)
 	s.manager.Close(p.SessionID)
 	s.sessions.Remove(p.SessionID)
+	s.unbindBridge(p.SessionID)
 	return struct{}{}, nil
 }
 

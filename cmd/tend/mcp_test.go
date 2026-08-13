@@ -45,6 +45,20 @@ func TestDaemonCallerValidation(t *testing.T) {
 	}
 }
 
+// A directly-bound session id needs no resolution; a bridge with neither a
+// session nor a token has nothing to serve. (Token resolution itself dials the
+// daemon and is covered by the daemon-side ResolveBridge tests.)
+func TestSessionIDWithoutResolve(t *testing.T) {
+	sid, err := (&daemonCaller{session: "s1"}).sessionID(context.Background())
+	if err != nil || sid != "s1" {
+		t.Errorf("sessionID = %q, %v; want s1, nil", sid, err)
+	}
+	if _, err := (&daemonCaller{}).sessionID(context.Background()); err == nil ||
+		!strings.Contains(err.Error(), "no session") {
+		t.Errorf("err = %v, want containing 'no session'", err)
+	}
+}
+
 // An explicit empty new_text is a legitimate whole-file clear and must pass
 // validation — only an omitted new_text is rejected.
 func TestParseWriteArgsAllowsEmptyNewText(t *testing.T) {

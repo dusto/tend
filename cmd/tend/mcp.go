@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"sync"
 
 	"github.com/urfave/cli/v3"
 
@@ -28,8 +29,12 @@ func mcpCommand() *cli.Command {
 			"daemon declares it via session/new.mcpServers and the agent spawns it.",
 		Flags: []cli.Flag{
 			// --session binds this bridge to one session so tool calls route to
-			// the right editor. The daemon passes it when it spawns the bridge.
+			// the right editor. Used when the session id is known up front.
 			&cli.StringFlag{Name: "session", Usage: "session id this bridge serves"},
+			// --bridge is how the daemon binds a spawned bridge: it declares a
+			// token (the session id does not exist yet at declaration time) and
+			// the bridge resolves it to a session id via mcp.resolve on first use.
+			&cli.StringFlag{Name: "bridge", Usage: "bridge token; resolved to a session id at runtime"},
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
 			// Dial the daemon up front: the bridge is spawned inside a live
@@ -45,7 +50,7 @@ func mcpCommand() *cli.Command {
 				Name:    "tend",
 				Version: version.Version,
 				Tools:   mcp.EditorTools(),
-				Caller:  &daemonCaller{conn: conn, session: cmd.String("session")},
+				Caller:  &daemonCaller{conn: conn, session: cmd.String("session"), token: cmd.String("bridge")},
 			})
 			return srv.Serve(ctx, os.Stdin, os.Stdout)
 		},
@@ -54,9 +59,46 @@ func mcpCommand() *cli.Command {
 
 // daemonCaller routes MCP tools/call invocations to the daemon over conn, scoped
 // to one session. It implements mcp.ToolCaller.
+//
+// The session is identified either directly (session, from --session) or by a
+// bridge token (token, from --bridge) resolved to a session id at runtime — the
+// daemon declares the bridge before the provider assigns the session id, so the
+// id is not known until the bridge dials back. Resolution is done once, lazily,
+// on the first tool call (always inside a prompt turn, well after the daemon has
+// bound the token), and cached.
 type daemonCaller struct {
 	conn    *rpc.Conn
 	session string
+	token   string
+
+	resolveOnce sync.Once
+	resolveErr  error
+}
+
+// sessionID returns the session this bridge serves, resolving the bridge token
+// on first use when no session id was given directly.
+func (c *daemonCaller) sessionID(ctx context.Context) (string, error) {
+	if c.session != "" {
+		return c.session, nil
+	}
+	if c.token == "" {
+		return "", fmt.Errorf("no session is bound to this mcp bridge")
+	}
+	c.resolveOnce.Do(func() {
+		var res api.MCPResolveResult
+		if err := c.conn.Call(ctx, "mcp.resolve", api.MCPResolveParams{Token: c.token}, &res); err != nil {
+			c.resolveErr = err
+			return
+		}
+		c.session = string(res.SessionID)
+	})
+	if c.resolveErr != nil {
+		return "", c.resolveErr
+	}
+	if c.session == "" {
+		return "", fmt.Errorf("no session is bound to this mcp bridge")
+	}
+	return c.session, nil
 }
 
 func (c *daemonCaller) Call(ctx context.Context, name string, arguments json.RawMessage) (string, error) {
@@ -85,10 +127,11 @@ func (c *daemonCaller) readBuffer(ctx context.Context, arguments json.RawMessage
 	if a.URI == "" {
 		return "", fmt.Errorf("uri is required")
 	}
-	if c.session == "" {
-		return "", fmt.Errorf("no session is bound to this mcp bridge")
+	sid, err := c.sessionID(ctx)
+	if err != nil {
+		return "", err
 	}
-	res, err := c.read(ctx, a.URI)
+	res, err := c.read(ctx, sid, a.URI)
 	if err != nil {
 		return "", err
 	}
@@ -103,17 +146,18 @@ func (c *daemonCaller) writeBuffer(ctx context.Context, arguments json.RawMessag
 	if err != nil {
 		return "", err
 	}
-	if c.session == "" {
-		return "", fmt.Errorf("no session is bound to this mcp bridge")
+	sid, err := c.sessionID(ctx)
+	if err != nil {
+		return "", err
 	}
 
-	base, err := c.read(ctx, uri)
+	base, err := c.read(ctx, sid, uri)
 	if err != nil {
 		return "", err
 	}
 	var res api.FileMutationResult
 	if err := c.conn.Call(ctx, "file.write", api.FileWriteParams{
-		SessionID: api.SessionID(c.session),
+		SessionID: api.SessionID(sid),
 		URI:       uri,
 		Content:   newText,
 		Base:      base.Base,
@@ -131,17 +175,18 @@ func (c *daemonCaller) editBuffer(ctx context.Context, arguments json.RawMessage
 	if err != nil {
 		return "", err
 	}
-	if c.session == "" {
-		return "", fmt.Errorf("no session is bound to this mcp bridge")
+	sid, err := c.sessionID(ctx)
+	if err != nil {
+		return "", err
 	}
 
-	base, err := c.read(ctx, uri)
+	base, err := c.read(ctx, sid, uri)
 	if err != nil {
 		return "", err
 	}
 	var res api.FileMutationResult
 	if err := c.conn.Call(ctx, "file.patch", api.FilePatchParams{
-		SessionID: api.SessionID(c.session),
+		SessionID: api.SessionID(sid),
 		URI:       uri,
 		Edits:     edits,
 		Base:      base.Base,
@@ -219,10 +264,10 @@ func parseEditArgs(arguments json.RawMessage) (uri string, edits []api.TextEdit,
 // revision the mutation is submitted against, so the daemon's apply-time recheck
 // catches any change during the approval wait. (The user's review of the diff is
 // the ultimate guard against an edit computed against stale content.)
-func (c *daemonCaller) read(ctx context.Context, uri string) (api.FileReadResult, error) {
+func (c *daemonCaller) read(ctx context.Context, sid, uri string) (api.FileReadResult, error) {
 	var res api.FileReadResult
 	err := c.conn.Call(ctx, "file.read", api.FileReadParams{
-		SessionID: api.SessionID(c.session),
+		SessionID: api.SessionID(sid),
 		URI:       uri,
 	}, &res)
 	return res, err

@@ -29,8 +29,10 @@ const (
 	// 0.26.0 added session.attach/detach (scope a session's prompt + waiting_*
 	// delivery to attached clients); 0.27.0 added lsp.symbols/definition/
 	// references/hover (editor-fronted code navigation); 0.28.0 added
-	// lsp.code_actions (list-only; apply via file.apply_change_set).
-	PluginToDaemonVersion = "0.28.0"
+	// lsp.code_actions (list-only; apply via file.apply_change_set); 0.29.0 added
+	// mcp.resolve (an MCP editor-tools bridge resolves its per-session token to a
+	// session id — additive).
+	PluginToDaemonVersion = "0.29.0"
 	// 0.2.0 added editor.open + editor.diff; 0.3.0 added editor.diagnostics; 0.4.0
 	// added editor.symbols/definition/references/hover (LSP navigation reverse
 	// methods); 0.5.0 added editor.code_actions.
