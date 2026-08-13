@@ -63,6 +63,10 @@ func (c *daemonCaller) Call(ctx context.Context, name string, arguments json.Raw
 	switch name {
 	case "read_buffer":
 		return c.readBuffer(ctx, arguments)
+	case "write_buffer":
+		return c.writeBuffer(ctx, arguments)
+	case "edit_buffer":
+		return c.editBuffer(ctx, arguments)
 	default:
 		return "", fmt.Errorf("unknown tool: %s", name)
 	}
@@ -84,12 +88,155 @@ func (c *daemonCaller) readBuffer(ctx context.Context, arguments json.RawMessage
 	if c.session == "" {
 		return "", fmt.Errorf("no session is bound to this mcp bridge")
 	}
-	var res api.FileReadResult
-	if err := c.conn.Call(ctx, "file.read", api.FileReadParams{
-		SessionID: api.SessionID(c.session),
-		URI:       a.URI,
-	}, &res); err != nil {
+	res, err := c.read(ctx, a.URI)
+	if err != nil {
 		return "", err
 	}
 	return res.Content, nil
+}
+
+// writeBuffer implements the write_buffer tool: it proposes replacing the whole
+// file via file.write, which runs the daemon's change-set -> approval flow, so
+// the user reviews a diff and the write lands only if they approve.
+func (c *daemonCaller) writeBuffer(ctx context.Context, arguments json.RawMessage) (string, error) {
+	uri, newText, err := parseWriteArgs(arguments)
+	if err != nil {
+		return "", err
+	}
+	if c.session == "" {
+		return "", fmt.Errorf("no session is bound to this mcp bridge")
+	}
+
+	base, err := c.read(ctx, uri)
+	if err != nil {
+		return "", err
+	}
+	var res api.FileMutationResult
+	if err := c.conn.Call(ctx, "file.write", api.FileWriteParams{
+		SessionID: api.SessionID(c.session),
+		URI:       uri,
+		Content:   newText,
+		Base:      base.Base,
+	}, &res); err != nil {
+		return "", err
+	}
+	return mutationSummary(res), nil
+}
+
+// editBuffer implements the edit_buffer tool: it proposes targeted text edits
+// via file.patch, which (like write) runs through the change-set -> approval
+// flow. Positions are 0-indexed line and byte column, matching api.Range.
+func (c *daemonCaller) editBuffer(ctx context.Context, arguments json.RawMessage) (string, error) {
+	uri, edits, err := parseEditArgs(arguments)
+	if err != nil {
+		return "", err
+	}
+	if c.session == "" {
+		return "", fmt.Errorf("no session is bound to this mcp bridge")
+	}
+
+	base, err := c.read(ctx, uri)
+	if err != nil {
+		return "", err
+	}
+	var res api.FileMutationResult
+	if err := c.conn.Call(ctx, "file.patch", api.FilePatchParams{
+		SessionID: api.SessionID(c.session),
+		URI:       uri,
+		Edits:     edits,
+		Base:      base.Base,
+	}, &res); err != nil {
+		return "", err
+	}
+	return mutationSummary(res), nil
+}
+
+// parseWriteArgs validates write_buffer arguments at the bridge boundary. MCP
+// arguments come from model output, so a JSON-schema "required" is only a hint;
+// the required fields are decoded as pointers to distinguish an omitted field
+// from its zero value. A missing new_text is rejected rather than becoming a
+// silent proposal to blank the file, but an explicit empty new_text is a valid
+// whole-file clear.
+func parseWriteArgs(arguments json.RawMessage) (uri, newText string, err error) {
+	var a struct {
+		URI     *string `json:"uri"`
+		NewText *string `json:"new_text"`
+	}
+	if err := json.Unmarshal(arguments, &a); err != nil {
+		return "", "", fmt.Errorf("invalid arguments: %w", err)
+	}
+	if a.URI == nil || *a.URI == "" {
+		return "", "", fmt.Errorf("uri is required")
+	}
+	if a.NewText == nil {
+		return "", "", fmt.Errorf("new_text is required")
+	}
+	return *a.URI, *a.NewText, nil
+}
+
+// parseEditArgs validates edit_buffer arguments at the bridge boundary. Every
+// range field is decoded as a pointer so an omitted start_line/start_column/
+// end_line/end_column does not silently collapse to a 0:0 edit; new_text is
+// required present but may be empty (a pure deletion of the range).
+func parseEditArgs(arguments json.RawMessage) (uri string, edits []api.TextEdit, err error) {
+	var a struct {
+		URI   *string `json:"uri"`
+		Edits []struct {
+			StartLine   *int    `json:"start_line"`
+			StartColumn *int    `json:"start_column"`
+			EndLine     *int    `json:"end_line"`
+			EndColumn   *int    `json:"end_column"`
+			NewText     *string `json:"new_text"`
+		} `json:"edits"`
+	}
+	if err := json.Unmarshal(arguments, &a); err != nil {
+		return "", nil, fmt.Errorf("invalid arguments: %w", err)
+	}
+	if a.URI == nil || *a.URI == "" {
+		return "", nil, fmt.Errorf("uri is required")
+	}
+	if len(a.Edits) == 0 {
+		return "", nil, fmt.Errorf("edits is required and must be non-empty")
+	}
+	edits = make([]api.TextEdit, len(a.Edits))
+	for i, e := range a.Edits {
+		if e.StartLine == nil || e.StartColumn == nil || e.EndLine == nil || e.EndColumn == nil || e.NewText == nil {
+			return "", nil, fmt.Errorf("edits[%d]: start_line, start_column, end_line, end_column, and new_text are all required", i)
+		}
+		edits[i] = api.TextEdit{
+			Range: api.Range{
+				Start: api.Position{Line: *e.StartLine, ByteCol: *e.StartColumn},
+				End:   api.Position{Line: *e.EndLine, ByteCol: *e.EndColumn},
+			},
+			NewText: *e.NewText,
+		}
+	}
+	return *a.URI, edits, nil
+}
+
+// read fetches the file's current content and base from the daemon, scoped to
+// the bridge's session. Callers use the base for conflict detection: it is the
+// revision the mutation is submitted against, so the daemon's apply-time recheck
+// catches any change during the approval wait. (The user's review of the diff is
+// the ultimate guard against an edit computed against stale content.)
+func (c *daemonCaller) read(ctx context.Context, uri string) (api.FileReadResult, error) {
+	var res api.FileReadResult
+	err := c.conn.Call(ctx, "file.read", api.FileReadParams{
+		SessionID: api.SessionID(c.session),
+		URI:       uri,
+	}, &res)
+	return res, err
+}
+
+// mutationSummary renders a file mutation result as tool output. An unapproved
+// mutation is not a tool error — the user chose not to apply it — so it returns
+// a plain message the agent can act on rather than surfacing isError.
+func mutationSummary(res api.FileMutationResult) string {
+	if !res.Applied {
+		if res.Reason != "" {
+			return "not applied: " + res.Reason
+		}
+		return "not applied (the user did not approve the change)"
+	}
+	return "applied"
 }

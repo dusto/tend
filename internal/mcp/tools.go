@@ -3,11 +3,14 @@ package mcp
 import "encoding/json"
 
 // EditorTools returns the editor tools tend advertises to an agent (see
-// docs/adr/0004). tools/list should only advertise tools that are actually
-// callable, so the set grows as each tool's handler is wired to the daemon.
-// Currently: read_buffer. open_buffer (needs a plugin->daemon open method) and
-// the supervised edit_buffer (change-set -> approval flow) join here as they
-// land.
+// docs/adr/0004). tools/list only advertises tools that are actually callable,
+// so the set grows as each tool's handler is wired to the daemon. Currently:
+// read_buffer, write_buffer, edit_buffer. open_buffer (needs a plugin->daemon
+// open method) joins when it lands.
+//
+// write_buffer and edit_buffer are SUPERVISED: they run through the daemon's
+// change-set -> approval flow, so proposing one asks for the user's approval
+// (they review a diff) rather than writing directly.
 func EditorTools() []Tool {
 	return []Tool{
 		{
@@ -20,6 +23,49 @@ func EditorTools() []Tool {
 					"uri": { "type": "string", "description": "file:// URI of the file to read" }
 				},
 				"required": ["uri"],
+				"additionalProperties": false
+			}`),
+		},
+		{
+			Name:        "write_buffer",
+			Title:       "Write buffer",
+			Description: "Propose replacing a file's ENTIRE content. The user reviews the change as a diff and it is applied to the live buffer only if they approve — a supervised edit, not a direct write. Use edit_buffer for targeted changes to a large file.",
+			InputSchema: schema(`{
+				"type": "object",
+				"properties": {
+					"uri": { "type": "string", "description": "file:// URI of the file to write" },
+					"new_text": { "type": "string", "description": "the file's full proposed new content" }
+				},
+				"required": ["uri", "new_text"],
+				"additionalProperties": false
+			}`),
+		},
+		{
+			Name:        "edit_buffer",
+			Title:       "Edit buffer",
+			Description: "Propose targeted, non-overlapping text edits to a file. Each edit replaces the text in a [start, end) range with new_text; positions are 0-indexed line and byte column. The user reviews the resulting diff and it is applied to the live buffer only if they approve — a supervised edit. Read the file first (read_buffer) so your positions match its current content.",
+			InputSchema: schema(`{
+				"type": "object",
+				"properties": {
+					"uri": { "type": "string", "description": "file:// URI of the file to edit" },
+					"edits": {
+						"type": "array",
+						"description": "non-overlapping edits applied together",
+						"items": {
+							"type": "object",
+							"properties": {
+								"start_line": { "type": "integer", "description": "0-indexed start line" },
+								"start_column": { "type": "integer", "description": "0-indexed start byte column" },
+								"end_line": { "type": "integer", "description": "0-indexed end line (exclusive of the range end)" },
+								"end_column": { "type": "integer", "description": "0-indexed end byte column" },
+								"new_text": { "type": "string", "description": "replacement text for the range" }
+							},
+							"required": ["start_line", "start_column", "end_line", "end_column", "new_text"],
+							"additionalProperties": false
+						}
+					}
+				},
+				"required": ["uri", "edits"],
 				"additionalProperties": false
 			}`),
 		},
