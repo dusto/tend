@@ -3,9 +3,12 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 )
+
+var errFake = errors.New("boom")
 
 // run feeds newline-delimited request lines through a Server and returns the
 // decoded response objects (notifications produce no line, so they are absent).
@@ -61,21 +64,82 @@ func TestToolsList(t *testing.T) {
 			t.Errorf("tool %v has no inputSchema", tm["name"])
 		}
 	}
-	for _, want := range []string{"read_buffer", "open_buffer", "edit_buffer"} {
-		if !names[want] {
-			t.Errorf("tools/list missing %q; got %v", want, names)
-		}
+	// Only wired tools are advertised.
+	if !names["read_buffer"] {
+		t.Errorf("tools/list missing read_buffer; got %v", names)
 	}
 }
 
-func TestToolsCallStubIsError(t *testing.T) {
+func TestToolsCallNoCallerIsError(t *testing.T) {
+	// The default server (run) has no caller wired: tools/call is a
+	// tool-execution error, not a protocol error.
 	resp := run(t, `{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"read_buffer","arguments":{"uri":"file:///x"}}}`)
 	res, _ := resp[0]["result"].(map[string]any)
 	if res["isError"] != true {
-		t.Errorf("stub tools/call isError = %v, want true", res["isError"])
+		t.Errorf("no-caller tools/call isError = %v, want true", res["isError"])
 	}
 	if _, ok := resp[0]["error"]; ok {
-		t.Errorf("stub should be a tool-execution error (isError), not a protocol error")
+		t.Errorf("should be a tool-execution error (isError), not a protocol error")
+	}
+}
+
+// fakeCaller records the call and returns a canned result or error.
+type fakeCaller struct {
+	name string
+	args string
+	text string
+	err  error
+}
+
+func (f *fakeCaller) Call(_ context.Context, name string, args json.RawMessage) (string, error) {
+	f.name, f.args = name, string(args)
+	return f.text, f.err
+}
+
+func TestToolsCallRoutesToCaller(t *testing.T) {
+	fc := &fakeCaller{text: "buffer contents"}
+	srv := NewServer(Options{Tools: EditorTools(), Caller: fc})
+	var out strings.Builder
+	in := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"read_buffer","arguments":{"uri":"file:///a"}}}` + "\n"
+	if err := srv.Serve(context.Background(), strings.NewReader(in), &out); err != nil {
+		t.Fatalf("Serve: %v", err)
+	}
+	// The caller saw the name and raw arguments.
+	if fc.name != "read_buffer" || fc.args != `{"uri":"file:///a"}` {
+		t.Errorf("caller got (%q, %q)", fc.name, fc.args)
+	}
+	// The success result carries the text and is not an error.
+	var m map[string]any
+	if err := json.Unmarshal([]byte(strings.TrimSpace(out.String())), &m); err != nil {
+		t.Fatal(err)
+	}
+	res, _ := m["result"].(map[string]any)
+	if res["isError"] != false {
+		t.Errorf("isError = %v, want false", res["isError"])
+	}
+	content, _ := res["content"].([]any)
+	first, _ := content[0].(map[string]any)
+	if first["text"] != "buffer contents" {
+		t.Errorf("content text = %v, want the caller's output", first["text"])
+	}
+}
+
+func TestToolsCallCallerErrorIsToolError(t *testing.T) {
+	fc := &fakeCaller{err: errFake}
+	srv := NewServer(Options{Tools: EditorTools(), Caller: fc})
+	var out strings.Builder
+	in := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"read_buffer","arguments":{}}}` + "\n"
+	if err := srv.Serve(context.Background(), strings.NewReader(in), &out); err != nil {
+		t.Fatalf("Serve: %v", err)
+	}
+	var m map[string]any
+	_ = json.Unmarshal([]byte(strings.TrimSpace(out.String())), &m)
+	res, _ := m["result"].(map[string]any)
+	if res["isError"] != true {
+		t.Errorf("caller error should surface as isError; got %v", res)
+	}
+	if _, ok := m["error"]; ok {
+		t.Errorf("a caller error is a tool error, not a protocol error")
 	}
 }
 
