@@ -24,11 +24,14 @@ func TestDaemonCallerValidation(t *testing.T) {
 		{"read bad json", &daemonCaller{session: "s1"}, "read_buffer", `{bad`, "invalid arguments"},
 
 		{"write missing uri", &daemonCaller{session: "s1"}, "write_buffer", `{"new_text":"x"}`, "uri is required"},
+		{"write missing new_text", &daemonCaller{session: "s1"}, "write_buffer", `{"uri":"file:///a"}`, "new_text is required"},
 		{"write no session", &daemonCaller{session: ""}, "write_buffer", `{"uri":"file:///a","new_text":"x"}`, "no session"},
 		{"write bad json", &daemonCaller{session: "s1"}, "write_buffer", `{bad`, "invalid arguments"},
 
 		{"edit missing uri", &daemonCaller{session: "s1"}, "edit_buffer", `{"edits":[{"start_line":0,"start_column":0,"end_line":0,"end_column":0,"new_text":"x"}]}`, "uri is required"},
 		{"edit no edits", &daemonCaller{session: "s1"}, "edit_buffer", `{"uri":"file:///a","edits":[]}`, "edits is required"},
+		{"edit missing range field", &daemonCaller{session: "s1"}, "edit_buffer", `{"uri":"file:///a","edits":[{"new_text":"hi"}]}`, "edits[0]:"},
+		{"edit missing new_text", &daemonCaller{session: "s1"}, "edit_buffer", `{"uri":"file:///a","edits":[{"start_line":0,"start_column":0,"end_line":0,"end_column":0}]}`, "edits[0]:"},
 		{"edit no session", &daemonCaller{session: ""}, "edit_buffer", `{"uri":"file:///a","edits":[{"start_line":0,"start_column":0,"end_line":0,"end_column":0,"new_text":"x"}]}`, "no session"},
 		{"edit bad json", &daemonCaller{session: "s1"}, "edit_buffer", `{bad`, "invalid arguments"},
 	}
@@ -39,6 +42,42 @@ func TestDaemonCallerValidation(t *testing.T) {
 				t.Errorf("err = %v, want containing %q", err, tc.wantErr)
 			}
 		})
+	}
+}
+
+// An explicit empty new_text is a legitimate whole-file clear and must pass
+// validation — only an omitted new_text is rejected.
+func TestParseWriteArgsAllowsEmptyNewText(t *testing.T) {
+	uri, newText, err := parseWriteArgs(json.RawMessage(`{"uri":"file:///a","new_text":""}`))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if uri != "file:///a" || newText != "" {
+		t.Errorf("got uri=%q newText=%q, want file:///a and empty", uri, newText)
+	}
+}
+
+// A well-formed edit maps to api.TextEdit; an explicit empty new_text (a pure
+// range deletion) is allowed, while a zero-valued position is honored as given
+// rather than treated as absent.
+func TestParseEditArgsMapsEdits(t *testing.T) {
+	uri, edits, err := parseEditArgs(json.RawMessage(
+		`{"uri":"file:///a","edits":[{"start_line":1,"start_column":2,"end_line":3,"end_column":4,"new_text":""}]}`))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if uri != "file:///a" || len(edits) != 1 {
+		t.Fatalf("got uri=%q edits=%d, want file:///a and 1 edit", uri, len(edits))
+	}
+	want := api.TextEdit{
+		Range: api.Range{
+			Start: api.Position{Line: 1, ByteCol: 2},
+			End:   api.Position{Line: 3, ByteCol: 4},
+		},
+		NewText: "",
+	}
+	if edits[0] != want {
+		t.Errorf("edit = %+v, want %+v", edits[0], want)
 	}
 }
 
