@@ -3,11 +3,11 @@ package mcp
 import "encoding/json"
 
 // EditorTools returns the editor tools tend advertises to an agent (see
-// docs/adr/0004). The schemas are the agent-facing contract; the handlers that
-// route each call to the daemon's editor/file services are wired separately.
-// read/open are plain reads; edit is a supervised change (it will run through
-// the change-set -> approval flow), so an agent proposing an edit is asking for
-// the user's approval, not writing directly.
+// docs/adr/0004). tools/list should only advertise tools that are actually
+// callable, so the set grows as each tool's handler is wired to the daemon.
+// Currently: read_buffer. open_buffer (needs a plugin->daemon open method) and
+// the supervised edit_buffer (change-set -> approval flow) join here as they
+// land.
 func EditorTools() []Tool {
 	return []Tool{
 		{
@@ -20,33 +20,6 @@ func EditorTools() []Tool {
 					"uri": { "type": "string", "description": "file:// URI of the file to read" }
 				},
 				"required": ["uri"],
-				"additionalProperties": false
-			}`),
-		},
-		{
-			Name:        "open_buffer",
-			Title:       "Open buffer",
-			Description: "Open a file in the user's editor so they can see it. Does not modify the file.",
-			InputSchema: schema(`{
-				"type": "object",
-				"properties": {
-					"uri": { "type": "string", "description": "file:// URI of the file to open" }
-				},
-				"required": ["uri"],
-				"additionalProperties": false
-			}`),
-		},
-		{
-			Name:        "edit_buffer",
-			Title:       "Edit buffer",
-			Description: "Propose replacing a file's content. The change is shown to the user as a diff and applied to the live buffer only after they approve it — this is a supervised edit, not a direct write.",
-			InputSchema: schema(`{
-				"type": "object",
-				"properties": {
-					"uri": { "type": "string", "description": "file:// URI of the file to edit" },
-					"new_text": { "type": "string", "description": "the file's full proposed new content" }
-				},
-				"required": ["uri", "new_text"],
 				"additionalProperties": false
 			}`),
 		},

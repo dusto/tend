@@ -65,6 +65,16 @@ type Tool struct {
 	InputSchema json.RawMessage `json:"inputSchema"`
 }
 
+// ToolCaller executes a tools/call: it runs the named tool with the raw JSON
+// arguments and returns text output. A returned error becomes an MCP
+// tool-execution error (isError) rather than a protocol error, so the agent
+// surfaces it as a failed tool run. Kept as an interface so the protocol server
+// stays independent of how tools are executed (the tend mcp command supplies a
+// caller that routes to the daemon).
+type ToolCaller interface {
+	Call(ctx context.Context, name string, arguments json.RawMessage) (string, error)
+}
+
 // Options configures a Server.
 type Options struct {
 	// Name and Version identify the server in the initialize handshake.
@@ -72,6 +82,9 @@ type Options struct {
 	Version string
 	// Tools are advertised by tools/list.
 	Tools []Tool
+	// Caller executes tools/call. Nil means no execution is wired: tools/call
+	// then returns a tool-execution error.
+	Caller ToolCaller
 }
 
 // Server serves MCP over a single stdio connection.
@@ -79,6 +92,7 @@ type Server struct {
 	name    string
 	version string
 	tools   []Tool
+	caller  ToolCaller
 }
 
 // NewServer returns a Server. Name defaults to "tend".
@@ -87,7 +101,7 @@ func NewServer(opts Options) *Server {
 	if name == "" {
 		name = "tend"
 	}
-	return &Server{name: name, version: opts.Version, tools: opts.Tools}
+	return &Server{name: name, version: opts.Version, tools: opts.Tools, caller: opts.Caller}
 }
 
 // Serve reads newline-delimited JSON-RPC requests from in and writes responses
@@ -105,7 +119,7 @@ func (s *Server) Serve(ctx context.Context, in io.Reader, out io.Writer) error {
 		if len(line) == 0 {
 			continue
 		}
-		resp, reply := s.handleLine(line)
+		resp, reply := s.handleLine(ctx, line)
 		if reply {
 			if err := enc.Encode(resp); err != nil {
 				return fmt.Errorf("mcp: write response: %w", err)
@@ -117,7 +131,7 @@ func (s *Server) Serve(ctx context.Context, in io.Reader, out io.Writer) error {
 
 // handleLine parses one message and produces its response (reply=false for a
 // notification or a parse error on a notification, which get no reply).
-func (s *Server) handleLine(line []byte) (response, bool) {
+func (s *Server) handleLine(ctx context.Context, line []byte) (response, bool) {
 	var req request
 	if err := json.Unmarshal(line, &req); err != nil {
 		// A parse error cannot be correlated to an id; reply with a null id.
@@ -129,10 +143,10 @@ func (s *Server) handleLine(line []byte) (response, bool) {
 		}
 		return errorResponse(req.ID, codeInvalidRequest, "invalid request"), true
 	}
-	return s.dispatch(req)
+	return s.dispatch(ctx, req)
 }
 
-func (s *Server) dispatch(req request) (response, bool) {
+func (s *Server) dispatch(ctx context.Context, req request) (response, bool) {
 	// A message with no id is a notification: per JSON-RPC it is never replied
 	// to, whatever its method (so a request method sent without an id, like a
 	// notification-form ping, must not leak an id:null response). Process any
@@ -147,7 +161,7 @@ func (s *Server) dispatch(req request) (response, bool) {
 	case "tools/list":
 		return s.ok(req.ID, map[string]any{"tools": s.tools}), true
 	case "tools/call":
-		return s.ok(req.ID, s.callStub()), true
+		return s.ok(req.ID, s.callTool(ctx, req.Params)), true
 	case "ping":
 		return s.ok(req.ID, struct{}{}), true
 	default:
@@ -175,15 +189,35 @@ func (s *Server) initializeResult() map[string]any {
 	}
 }
 
-// callStub is the placeholder tools/call result until tool execution is wired to
-// the daemon. It reports the failure as a tool-execution error (isError) rather
-// than a protocol error, so an agent surfaces it as a failed tool run.
-func (s *Server) callStub() map[string]any {
+// callTool runs a tools/call through the configured caller and shapes the MCP
+// result. A caller error (bad arguments, unknown tool, daemon failure) becomes a
+// tool-execution error (isError) — the model sees a failed tool run, not a
+// protocol fault. With no caller wired, every call is a tool error.
+func (s *Server) callTool(ctx context.Context, params json.RawMessage) map[string]any {
+	var p struct {
+		Name      string          `json:"name"`
+		Arguments json.RawMessage `json:"arguments"`
+	}
+	if err := json.Unmarshal(params, &p); err != nil {
+		return toolError("invalid tools/call params: " + err.Error())
+	}
+	if s.caller == nil {
+		return toolError("tend mcp: tool execution is not wired")
+	}
+	text, err := s.caller.Call(ctx, p.Name, p.Arguments)
+	if err != nil {
+		return toolError(err.Error())
+	}
 	return map[string]any{
-		"content": []map[string]any{{
-			"type": "text",
-			"text": "tend mcp: tool execution is not yet wired to the daemon",
-		}},
+		"content": []map[string]any{{"type": "text", "text": text}},
+		"isError": false,
+	}
+}
+
+// toolError shapes a tool-execution error result.
+func toolError(msg string) map[string]any {
+	return map[string]any{
+		"content": []map[string]any{{"type": "text", "text": msg}},
 		"isError": true,
 	}
 }

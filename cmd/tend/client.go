@@ -19,7 +19,7 @@ const minPluginToDaemon = "0.8.0"
 // and registers as an observer — a read-only client that lists and watches but
 // does not serve editor operations or answer prompts. The caller owns the
 // returned connection and must Close it.
-func dialRegister(ctx context.Context, socket string) (*rpc.Conn, error) {
+func dialRegister(ctx context.Context, socket, clientID string) (*rpc.Conn, error) {
 	nc, err := net.Dial("unix", socket)
 	if err != nil {
 		return nil, fmt.Errorf("connecting to tendd at %s: %w (is the daemon running?)", socket, err)
@@ -32,7 +32,7 @@ func dialRegister(ctx context.Context, socket string) (*rpc.Conn, error) {
 		return nil, fmt.Errorf("daemon handshake: %w", err)
 	}
 	if err := conn.Call(ctx, "client.register", api.ClientRegisterParams{
-		ClientID: "tend-cli",
+		ClientID: api.ClientID(clientID),
 		Role:     api.RoleObserver,
 	}, &api.ClientRegisterResult{}); err != nil {
 		_ = conn.Close()
@@ -44,7 +44,7 @@ func dialRegister(ctx context.Context, socket string) (*rpc.Conn, error) {
 // listSessions returns every session (optionally filtered to workspace). It
 // reuses the existing daemon_to_client contract — no CLI-specific wire surface.
 func listSessions(ctx context.Context, socket, workspace string) ([]api.SessionInfo, error) {
-	conn, err := dialRegister(ctx, socket)
+	conn, err := dialRegister(ctx, socket, "tend-cli")
 	if err != nil {
 		return nil, err
 	}
@@ -62,7 +62,7 @@ func listSessions(ctx context.Context, socket, workspace string) ([]api.SessionI
 // stopSession ends a session via agent.stop, releasing its provider process.
 // agent.stop is not role-gated, so an observer connection suffices.
 func stopSession(ctx context.Context, socket, sessionID string) error {
-	conn, err := dialRegister(ctx, socket)
+	conn, err := dialRegister(ctx, socket, "tend-cli")
 	if err != nil {
 		return err
 	}
