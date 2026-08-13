@@ -40,6 +40,8 @@ Schemas live under `schemas/` (`methods/<name>.params.json` / `.result.json`, `e
   - Params: `SessionResumeSeedParams` · Result: `SessionResumeSeedResult`
 - **`session.rename`** — Set or clear a session's user-facing label (independent of its task); an empty label clears it, an over-long one errors. Emits session_renamed so attached clients see the change.
   - Params: `SessionRenameParams` · Result: `SessionRenameResult`
+- **`mcp.resolve`** — Resolve an MCP editor-tools bridge token (from a session's mcpServers declaration) to the session id the bridge serves; errors on an unknown token or an ended session.
+  - Params: `MCPResolveParams` · Result: `MCPResolveResult`
 - **`session.attach`** — Make the calling client follow a session: its clarification prompts and waiting_* status are delivered to attached clients. Does not claim the editor binding, and does NOT gate approvals — approval_requested/approval_resolved broadcast to every client on the workspace stream, independent of attach. Until any client attaches, a session's clarification prompts broadcast to all clients.
   - Params: `SessionAttachParams` · Result: `SessionAttachResult`
 - **`session.detach`** — Stop the calling client following a session (does not end the session). Detaching an already-detached client is a no-op.
