@@ -28,6 +28,22 @@ type FileReadResult struct {
 	Open    bool     `json:"open"`
 }
 
+// FileOpenParams asks the session's bound editor to open a repo file in a buffer
+// for the user to see. SessionID selects the editor; URI is worktree-bounded.
+// Non-mutating and not task-gated — it changes editor window state, nothing on
+// disk.
+type FileOpenParams struct {
+	SessionID SessionID `json:"session_id"`
+	URI       string    `json:"uri"`
+}
+
+// FileOpenResult acknowledges a file.open. Open reports whether an editor was
+// reachable to service the request; it is false for a headless session (no bound
+// editor), where the call is a no-op rather than an error.
+type FileOpenResult struct {
+	Open bool `json:"open"`
+}
+
 // FilePatchParams applies an ordered set of non-overlapping text edits to a repo
 // file. SessionID makes the edit task-bound; Base is the revision the edits were
 // computed against (from file.read) and is re-verified before applying.

@@ -74,6 +74,8 @@ Schemas live under `schemas/` (`methods/<name>.params.json` / `.result.json`, `e
   - Params: `ClientRegisterParams` · Result: `ClientRegisterResult`
 - **`file.read`** — Read a repo file editor-aware (non-mutating): live buffer content + changedtick when open, else disk content + content hash.
   - Params: `FileReadParams` · Result: `FileReadResult`
+- **`file.open`** — Open a repo file in the session's bound editor for the user to see (non-mutating, not task-gated, worktree-bounded); a no-op for a headless session (open=false).
+  - Params: `FileOpenParams` · Result: `FileOpenResult`
 - **`file.patch`** — Apply non-overlapping text edits to a repo file (task-bound, approval-gated, base-checked); single-target change set.
   - Params: `FilePatchParams` · Result: `FileMutationResult`
 - **`file.write`** — Replace a repo file's whole content (task-bound, approval-gated, base-checked); single-target change set.

@@ -23,6 +23,10 @@ func TestDaemonCallerValidation(t *testing.T) {
 		{"read no session", &daemonCaller{session: ""}, "read_buffer", `{"uri":"file:///a"}`, "no session"},
 		{"read bad json", &daemonCaller{session: "s1"}, "read_buffer", `{bad`, "invalid arguments"},
 
+		{"open missing uri", &daemonCaller{session: "s1"}, "open_buffer", `{}`, "uri is required"},
+		{"open no session", &daemonCaller{session: ""}, "open_buffer", `{"uri":"file:///a"}`, "no session"},
+		{"open bad json", &daemonCaller{session: "s1"}, "open_buffer", `{bad`, "invalid arguments"},
+
 		{"write missing uri", &daemonCaller{session: "s1"}, "write_buffer", `{"new_text":"x"}`, "uri is required"},
 		{"write missing new_text", &daemonCaller{session: "s1"}, "write_buffer", `{"uri":"file:///a"}`, "new_text is required"},
 		{"write no session", &daemonCaller{session: ""}, "write_buffer", `{"uri":"file:///a","new_text":"x"}`, "no session"},

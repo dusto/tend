@@ -15,6 +15,14 @@ import (
 	"github.com/dusto/tend/internal/version"
 )
 
+// minMCPBridge is the lowest plugin_to_daemon contract the MCP bridge needs: its
+// tools call the file methods, and the newest of those, file.open (backing
+// open_buffer), landed at 0.30.0. Handshaking against this makes a too-old daemon
+// fail clearly at connect rather than advertising open_buffer and then getting a
+// missing-method error on the first call. Bump this in step with the newest file
+// method any tool calls.
+const minMCPBridge = "0.30.0"
+
 // mcpCommand runs tend as a Model Context Protocol server over stdio. An ACP
 // agent spawns it (declared via session/new.mcpServers) and calls tend's editor
 // tools, so an agent that does not use ACP's client fs callbacks can still work
@@ -40,7 +48,7 @@ func mcpCommand() *cli.Command {
 			// Dial the daemon up front: the bridge is spawned inside a live
 			// session, so the daemon is running. Tool calls reuse this one
 			// connection (the stdio server processes messages sequentially).
-			conn, err := dialRegister(ctx, cmd.String("socket"), "tend-mcp")
+			conn, err := dialRegister(ctx, cmd.String("socket"), "tend-mcp", minMCPBridge)
 			if err != nil {
 				return err
 			}
@@ -105,6 +113,8 @@ func (c *daemonCaller) Call(ctx context.Context, name string, arguments json.Raw
 	switch name {
 	case "read_buffer":
 		return c.readBuffer(ctx, arguments)
+	case "open_buffer":
+		return c.openBuffer(ctx, arguments)
 	case "write_buffer":
 		return c.writeBuffer(ctx, arguments)
 	case "edit_buffer":
@@ -136,6 +146,36 @@ func (c *daemonCaller) readBuffer(ctx context.Context, arguments json.RawMessage
 		return "", err
 	}
 	return res.Content, nil
+}
+
+// openBuffer implements the open_buffer tool via file.open, asking the bridge's
+// session to open the file in its editor. Non-mutating: it reports whether an
+// editor received the request (a headless session is a no-op, not an error).
+func (c *daemonCaller) openBuffer(ctx context.Context, arguments json.RawMessage) (string, error) {
+	var a struct {
+		URI *string `json:"uri"`
+	}
+	if err := json.Unmarshal(arguments, &a); err != nil {
+		return "", fmt.Errorf("invalid arguments: %w", err)
+	}
+	if a.URI == nil || *a.URI == "" {
+		return "", fmt.Errorf("uri is required")
+	}
+	sid, err := c.sessionID(ctx)
+	if err != nil {
+		return "", err
+	}
+	var res api.FileOpenResult
+	if err := c.conn.Call(ctx, "file.open", api.FileOpenParams{
+		SessionID: api.SessionID(sid),
+		URI:       *a.URI,
+	}, &res); err != nil {
+		return "", err
+	}
+	if !res.Open {
+		return "no editor is attached to this session, so nothing was opened", nil
+	}
+	return "opened", nil
 }
 
 // writeBuffer implements the write_buffer tool: it proposes replacing the whole

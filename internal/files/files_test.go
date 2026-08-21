@@ -25,6 +25,9 @@ type fakeEditor struct {
 
 	wrote     *api.EditorWriteBufferParams // last write routed here
 	writeBase api.FileBase                 // base returned from a write
+
+	opened  []string // uris routed through Open
+	openErr error    // error returned from Open (e.g. editor.ErrEditorUnavailable)
 }
 
 func (f *fakeEditor) ReadBuffer(_ context.Context, _ api.SessionID, p api.EditorReadBufferParams) (api.EditorReadBufferResult, error) {
@@ -36,6 +39,14 @@ func (f *fakeEditor) WriteBuffer(_ context.Context, _ api.SessionID, p api.Edito
 	cp := p
 	f.wrote = &cp
 	return api.EditorWriteBufferResult{Base: f.writeBase}, nil
+}
+
+func (f *fakeEditor) Open(_ context.Context, _ api.SessionID, p api.EditorOpenParams) (api.EditorOpenResult, error) {
+	if f.openErr != nil {
+		return api.EditorOpenResult{}, f.openErr
+	}
+	f.opened = append(f.opened, p.URIs...)
+	return api.EditorOpenResult{}, nil
 }
 
 func fileURI(path string) string {
@@ -136,6 +147,64 @@ func TestReadUnknownSession(t *testing.T) {
 	svc, root := newService(t, &fakeEditor{err: editor.ErrEditorUnavailable})
 	if _, err := svc.Read(context.Background(), api.FileReadParams{SessionID: "nope", URI: fileURI(filepath.Join(root, "a.go"))}); !errors.Is(err, ErrNoSession) {
 		t.Errorf("err = %v, want ErrNoSession", err)
+	}
+}
+
+func TestOpenRoutesToEditor(t *testing.T) {
+	ed := &fakeEditor{}
+	svc, root := newService(t, ed)
+	uri := fileURI(filepath.Join(root, "a.go"))
+
+	res, err := svc.Open(context.Background(), api.FileOpenParams{SessionID: "s1", URI: uri})
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	if !res.Open {
+		t.Error("Open should be true when an editor serviced the request")
+	}
+	if len(ed.opened) != 1 || ed.opened[0] != uri {
+		t.Errorf("opened = %v, want [%s]", ed.opened, uri)
+	}
+}
+
+func TestOpenHeadlessIsNoOp(t *testing.T) {
+	// A headless session (no bound editor) is not an error: the open is simply a
+	// no-op, reported as Open=false.
+	ed := &fakeEditor{openErr: editor.ErrEditorUnavailable}
+	svc, root := newService(t, ed)
+
+	res, err := svc.Open(context.Background(), api.FileOpenParams{SessionID: "s1", URI: fileURI(filepath.Join(root, "a.go"))})
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	if res.Open {
+		t.Error("Open should be false for a headless session")
+	}
+}
+
+func TestOpenSurfacesEditorError(t *testing.T) {
+	ed := &fakeEditor{openErr: errors.New("reverse call failed")}
+	svc, root := newService(t, ed)
+	if _, err := svc.Open(context.Background(), api.FileOpenParams{SessionID: "s1", URI: fileURI(filepath.Join(root, "a.go"))}); err == nil {
+		t.Error("a genuine reverse-call failure should be surfaced")
+	}
+}
+
+func TestOpenUnknownSession(t *testing.T) {
+	svc, root := newService(t, &fakeEditor{})
+	if _, err := svc.Open(context.Background(), api.FileOpenParams{SessionID: "nope", URI: fileURI(filepath.Join(root, "a.go"))}); !errors.Is(err, ErrNoSession) {
+		t.Errorf("err = %v, want ErrNoSession", err)
+	}
+}
+
+func TestOpenRejectsPathOutsideWorktree(t *testing.T) {
+	ed := &fakeEditor{}
+	svc, _ := newService(t, ed)
+	if _, err := svc.Open(context.Background(), api.FileOpenParams{SessionID: "s1", URI: "file:///etc/passwd"}); !errors.Is(err, ErrOutsideWorkspace) {
+		t.Errorf("err = %v, want ErrOutsideWorkspace", err)
+	}
+	if len(ed.opened) != 0 {
+		t.Error("an out-of-worktree open must not reach the editor")
 	}
 }
 
