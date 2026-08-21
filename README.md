@@ -68,6 +68,40 @@ back. See [`config.example.toml`](config.example.toml).
 > The task provider is currently an in-memory stand-in (tasks do not persist
 > across restarts); the beads adapter is not yet wired into the daemon.
 
+## Editor tools for agents
+
+tend is **editor-fronted**: an agent's file reads and edits are meant to go
+*through* the daemon to your Neovim buffers, so an edit shows up as a diff and
+waits for your approval instead of scribbling on disk. For agents that speak
+ACP's client filesystem calls (Claude, Codex) that happens automatically. But
+some agents — **Kiro** most notably — do their own file I/O and never make those
+calls, so their edits would bypass the buffer, the diff, and the approval gate.
+
+To close that gap, tend also exposes its editor operations as **MCP tools** (the
+Model Context Protocol — the standard way to hand an agent extra tools). Every
+MCP-capable agent, including Kiro, sees these in its tool list and can call them,
+independently of whether it honors ACP's `fs` calls:
+
+- **`read_buffer`** — read a file as the editor sees it (the live buffer when
+  it's open, otherwise disk), so the agent sees your unsaved edits.
+- **`open_buffer`** — open a file in your editor so you can see it. Non-mutating.
+- **`write_buffer`** — propose replacing a file's whole content.
+- **`edit_buffer`** — propose targeted edits to part of a file.
+
+`write_buffer` and `edit_buffer` are **supervised**: each proposal runs through
+the same change-set → approval flow as any other tend edit, so you review a diff
+and it lands in your live buffer only if you approve — even for Kiro.
+
+**No setup.** The daemon declares this MCP server to the agent automatically, per
+session (via ACP's `session/new.mcpServers`); there is nothing to configure and
+nothing to run by hand. Under the hood the agent spawns `tend mcp`, which dials
+the running daemon and routes each tool call to your session's editor. The one
+requirement is that the **`tend` binary is reachable** — installed beside `tendd`
+or on the daemon's `PATH` (see [Install](#install)) — so the agent can spawn it.
+
+See [ADR 0004](docs/adr/0004-mcp-editor-tools-server.md) for the design, and
+[`docs/api.md`](docs/api.md) for the underlying wire methods.
+
 ## Layout
 
 - `cmd/tendd` — daemon entrypoint
