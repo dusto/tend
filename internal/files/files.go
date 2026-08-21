@@ -31,6 +31,7 @@ import (
 // File method names.
 const (
 	MethodRead           = "file.read"
+	MethodOpen           = "file.open"
 	MethodPatch          = "file.patch"
 	MethodWrite          = "file.write"
 	MethodApplyChangeSet = "file.apply_change_set"
@@ -62,6 +63,7 @@ var (
 type editorClient interface {
 	ReadBuffer(ctx context.Context, sessionID api.SessionID, p api.EditorReadBufferParams) (api.EditorReadBufferResult, error)
 	WriteBuffer(ctx context.Context, sessionID api.SessionID, p api.EditorWriteBufferParams) (api.EditorWriteBufferResult, error)
+	Open(ctx context.Context, sessionID api.SessionID, p api.EditorOpenParams) (api.EditorOpenResult, error)
 }
 
 // approver gates a mutating action on a session. *approvals.Gate satisfies it.
@@ -150,6 +152,33 @@ func (s *Service) Read(ctx context.Context, p api.FileReadParams) (api.FileReadR
 		return api.FileReadResult{}, err
 	}
 	return api.FileReadResult{Content: string(st.content), Base: st.base(), Open: st.open}, nil
+}
+
+// Open asks the session's bound editor to open a repo file in a buffer for the
+// user to see. It is non-mutating and not task-gated (it changes editor window
+// state, nothing on disk), but the uri is worktree-bounded: an agent for one
+// repo cannot make the editor open another's files. A headless session (no bound
+// editor) is a no-op — Open is false in the result — rather than an error, so an
+// agent that opportunistically opens a file is not penalized when there is no
+// editor to receive it.
+func (s *Service) Open(ctx context.Context, p api.FileOpenParams) (api.FileOpenResult, error) {
+	sess, ok := s.sessions.Get(p.SessionID)
+	if !ok {
+		return api.FileOpenResult{}, ErrNoSession
+	}
+	// Worktree-bound the target hard (no outside-read gate): opening is a UI
+	// affordance, and an out-of-worktree open is simply refused.
+	if _, err := resolvePath(p.URI, sess.WorktreeRoot); err != nil {
+		return api.FileOpenResult{}, err
+	}
+	_, err := s.editors.Open(ctx, p.SessionID, api.EditorOpenParams{URIs: []string{p.URI}})
+	if errors.Is(err, editor.ErrEditorUnavailable) {
+		return api.FileOpenResult{Open: false}, nil
+	}
+	if err != nil {
+		return api.FileOpenResult{}, err
+	}
+	return api.FileOpenResult{Open: true}, nil
 }
 
 // resolveRead resolves uri to a readable path, gating an outside-worktree read

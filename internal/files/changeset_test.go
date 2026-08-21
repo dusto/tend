@@ -33,6 +33,10 @@ func (e *uriEditor) WriteBuffer(_ context.Context, _ api.SessionID, p api.Editor
 	return api.EditorWriteBufferResult{Base: e.writeBase}, nil
 }
 
+func (e *uriEditor) Open(_ context.Context, _ api.SessionID, _ api.EditorOpenParams) (api.EditorOpenResult, error) {
+	return api.EditorOpenResult{}, nil
+}
+
 // newChangeSet builds a change-set service over a temp worktree with the given
 // editor and approver, and returns the service and the worktree root.
 func newChangeSet(t *testing.T, ed editorClient, ap approver) (*Service, string) {

@@ -65,7 +65,7 @@ func TestToolsList(t *testing.T) {
 		}
 	}
 	// Only wired tools are advertised.
-	for _, want := range []string{"read_buffer", "write_buffer", "edit_buffer"} {
+	for _, want := range []string{"read_buffer", "open_buffer", "write_buffer", "edit_buffer"} {
 		if !names[want] {
 			t.Errorf("tools/list missing %s; got %v", want, names)
 		}

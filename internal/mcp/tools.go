@@ -3,14 +3,12 @@ package mcp
 import "encoding/json"
 
 // EditorTools returns the editor tools tend advertises to an agent (see
-// docs/adr/0004). tools/list only advertises tools that are actually callable,
-// so the set grows as each tool's handler is wired to the daemon. Currently:
-// read_buffer, write_buffer, edit_buffer. open_buffer (needs a plugin->daemon
-// open method) joins when it lands.
+// docs/adr/0004): read_buffer, open_buffer, write_buffer, edit_buffer.
 //
 // write_buffer and edit_buffer are SUPERVISED: they run through the daemon's
 // change-set -> approval flow, so proposing one asks for the user's approval
-// (they review a diff) rather than writing directly.
+// (they review a diff) rather than writing directly. read_buffer and open_buffer
+// are non-mutating.
 func EditorTools() []Tool {
 	return []Tool{
 		{
@@ -21,6 +19,19 @@ func EditorTools() []Tool {
 				"type": "object",
 				"properties": {
 					"uri": { "type": "string", "description": "file:// URI of the file to read" }
+				},
+				"required": ["uri"],
+				"additionalProperties": false
+			}`),
+		},
+		{
+			Name:        "open_buffer",
+			Title:       "Open buffer",
+			Description: "Open a file in the user's editor so they can see it (e.g. to draw attention to a file you are discussing). Non-mutating; does nothing when the session has no editor attached.",
+			InputSchema: schema(`{
+				"type": "object",
+				"properties": {
+					"uri": { "type": "string", "description": "file:// URI of the file to open" }
 				},
 				"required": ["uri"],
 				"additionalProperties": false

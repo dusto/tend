@@ -24,6 +24,15 @@ func Register(m *dispatch.Mux, s *Service) error {
 	}); err != nil {
 		return err
 	}
+	if err := dispatch.Handle(m, MethodOpen, func(ctx context.Context, p api.FileOpenParams) (api.FileOpenResult, error) {
+		res, err := s.Open(ctx, p)
+		if err != nil {
+			return api.FileOpenResult{}, toRPCError(err, p.URI)
+		}
+		return res, nil
+	}); err != nil {
+		return err
+	}
 	if err := dispatch.Handle(m, MethodPatch, func(ctx context.Context, p api.FilePatchParams) (api.FileMutationResult, error) {
 		res, err := s.Patch(ctx, p)
 		if err != nil {

@@ -105,6 +105,8 @@ func (c *daemonCaller) Call(ctx context.Context, name string, arguments json.Raw
 	switch name {
 	case "read_buffer":
 		return c.readBuffer(ctx, arguments)
+	case "open_buffer":
+		return c.openBuffer(ctx, arguments)
 	case "write_buffer":
 		return c.writeBuffer(ctx, arguments)
 	case "edit_buffer":
@@ -136,6 +138,36 @@ func (c *daemonCaller) readBuffer(ctx context.Context, arguments json.RawMessage
 		return "", err
 	}
 	return res.Content, nil
+}
+
+// openBuffer implements the open_buffer tool via file.open, asking the bridge's
+// session to open the file in its editor. Non-mutating: it reports whether an
+// editor received the request (a headless session is a no-op, not an error).
+func (c *daemonCaller) openBuffer(ctx context.Context, arguments json.RawMessage) (string, error) {
+	var a struct {
+		URI *string `json:"uri"`
+	}
+	if err := json.Unmarshal(arguments, &a); err != nil {
+		return "", fmt.Errorf("invalid arguments: %w", err)
+	}
+	if a.URI == nil || *a.URI == "" {
+		return "", fmt.Errorf("uri is required")
+	}
+	sid, err := c.sessionID(ctx)
+	if err != nil {
+		return "", err
+	}
+	var res api.FileOpenResult
+	if err := c.conn.Call(ctx, "file.open", api.FileOpenParams{
+		SessionID: api.SessionID(sid),
+		URI:       *a.URI,
+	}, &res); err != nil {
+		return "", err
+	}
+	if !res.Open {
+		return "no editor is attached to this session, so nothing was opened", nil
+	}
+	return "opened", nil
 }
 
 // writeBuffer implements the write_buffer tool: it proposes replacing the whole
