@@ -15,6 +15,14 @@ import (
 	"github.com/dusto/tend/internal/version"
 )
 
+// minMCPBridge is the lowest plugin_to_daemon contract the MCP bridge needs: its
+// tools call the file methods, and the newest of those, file.open (backing
+// open_buffer), landed at 0.30.0. Handshaking against this makes a too-old daemon
+// fail clearly at connect rather than advertising open_buffer and then getting a
+// missing-method error on the first call. Bump this in step with the newest file
+// method any tool calls.
+const minMCPBridge = "0.30.0"
+
 // mcpCommand runs tend as a Model Context Protocol server over stdio. An ACP
 // agent spawns it (declared via session/new.mcpServers) and calls tend's editor
 // tools, so an agent that does not use ACP's client fs callbacks can still work
@@ -40,7 +48,7 @@ func mcpCommand() *cli.Command {
 			// Dial the daemon up front: the bridge is spawned inside a live
 			// session, so the daemon is running. Tool calls reuse this one
 			// connection (the stdio server processes messages sequentially).
-			conn, err := dialRegister(ctx, cmd.String("socket"), "tend-mcp")
+			conn, err := dialRegister(ctx, cmd.String("socket"), "tend-mcp", minMCPBridge)
 			if err != nil {
 				return err
 			}
