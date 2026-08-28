@@ -106,6 +106,7 @@ See [ADR 0004](docs/adr/0004-mcp-editor-tools-server.md) for the design, and
 
 - `cmd/tendd` — daemon entrypoint
 - `cmd/tend` — CLI / debug client
+- `client/` — shared daemon-socket client (dial + handshake + register + call), used by the CLI, the MCP bridge, and external clients like tend-ui
 - `internal/rpc` — JSON-RPC socket server (bidirectional)
 - `internal/acp` — generic ACP client, provider registry, process pool, session lifecycle
 - `internal/tasks` — task provider interface + beads adapter

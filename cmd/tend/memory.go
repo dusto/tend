@@ -4,10 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net"
 
 	"github.com/dusto/tend/api"
-	"github.com/dusto/tend/internal/handshake"
+	"github.com/dusto/tend/client"
 	"github.com/dusto/tend/internal/memimport"
 	"github.com/dusto/tend/internal/rpc"
 )
@@ -20,7 +19,7 @@ const minMemoryProvenance = "0.22.0"
 // daemon socket for one workspace, so imports land in that workspace's configured
 // memory dir.
 type daemonStore struct {
-	conn *rpc.Conn
+	conn *client.Conn
 	ws   api.WorkspaceID
 }
 
@@ -58,22 +57,16 @@ func runImport(ctx context.Context, socket, dir string, sources []string, dryRun
 		return memimport.Result{}, err
 	}
 
-	nc, err := net.Dial("unix", socket)
+	conn, err := client.Dial(ctx, client.Options{
+		Socket:            socket,
+		ClientID:          "tend-cli",
+		Role:              api.RoleObserver,
+		MinPluginToDaemon: minMemoryProvenance,
+	})
 	if err != nil {
-		return memimport.Result{}, fmt.Errorf("connecting to tendd at %s: %w (is the daemon running?)", socket, err)
+		return memimport.Result{}, err
 	}
-	conn := rpc.NewConn(nc, nil)
 	defer func() { _ = conn.Close() }()
-
-	if _, err := handshake.Do(ctx, conn, api.Versions{PluginToDaemon: minMemoryProvenance}); err != nil {
-		return memimport.Result{}, fmt.Errorf("daemon handshake: %w", err)
-	}
-	if err := conn.Call(ctx, "client.register", api.ClientRegisterParams{
-		ClientID: "tend-cli",
-		Role:     api.RoleObserver,
-	}, &api.ClientRegisterResult{}); err != nil {
-		return memimport.Result{}, fmt.Errorf("client.register: %w", err)
-	}
 
 	// Resolve the workspace (and its worktree root) from dir.
 	var ws api.WorkspaceInfo

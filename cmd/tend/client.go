@@ -3,11 +3,9 @@ package main
 import (
 	"context"
 	"fmt"
-	"net"
 
 	"github.com/dusto/tend/api"
-	"github.com/dusto/tend/internal/handshake"
-	"github.com/dusto/tend/internal/rpc"
+	"github.com/dusto/tend/client"
 )
 
 // minPluginToDaemon is the lowest plugin_to_daemon contract the read-only CLI
@@ -18,32 +16,17 @@ import (
 // methods).
 const minPluginToDaemon = "0.8.0"
 
-// dialRegister connects to the daemon at socket, performs the version handshake
-// against minVersion, and registers as an observer — a read-only client that
-// lists and watches but does not serve editor operations or answer prompts.
-// minVersion is the lowest plugin_to_daemon contract the caller's methods need,
-// so a too-old daemon fails at the handshake rather than at a later missing-method
-// call. The caller owns the returned connection and must Close it.
-func dialRegister(ctx context.Context, socket, clientID, minVersion string) (*rpc.Conn, error) {
-	nc, err := net.Dial("unix", socket)
-	if err != nil {
-		return nil, fmt.Errorf("connecting to tendd at %s: %w (is the daemon running?)", socket, err)
-	}
-	conn := rpc.NewConn(nc, nil)
-	// Handshake first: verify the daemon meets the minimum contract before issuing
-	// method calls, so a version mismatch fails clearly rather than at a later call.
-	if _, err := handshake.Do(ctx, conn, api.Versions{PluginToDaemon: minVersion}); err != nil {
-		_ = conn.Close()
-		return nil, fmt.Errorf("daemon handshake: %w", err)
-	}
-	if err := conn.Call(ctx, "client.register", api.ClientRegisterParams{
-		ClientID: api.ClientID(clientID),
-		Role:     api.RoleObserver,
-	}, &api.ClientRegisterResult{}); err != nil {
-		_ = conn.Close()
-		return nil, fmt.Errorf("client.register: %w", err)
-	}
-	return conn, nil
+// dialRegister connects to the daemon at socket as a read-only observer,
+// requiring minVersion at the handshake. It is a thin wrapper over the shared
+// client package with the CLI's identity/role fixed. The caller owns the
+// returned connection and must Close it.
+func dialRegister(ctx context.Context, socket, clientID, minVersion string) (*client.Conn, error) {
+	return client.Dial(ctx, client.Options{
+		Socket:            socket,
+		ClientID:          clientID,
+		Role:              api.RoleObserver,
+		MinPluginToDaemon: minVersion,
+	})
 }
 
 // listSessions returns every session (optionally filtered to workspace). It
