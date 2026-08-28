@@ -10,8 +10,8 @@ import (
 	"github.com/urfave/cli/v3"
 
 	"github.com/dusto/tend/api"
+	"github.com/dusto/tend/client"
 	"github.com/dusto/tend/internal/mcp"
-	"github.com/dusto/tend/internal/rpc"
 	"github.com/dusto/tend/internal/version"
 )
 
@@ -75,7 +75,7 @@ func mcpCommand() *cli.Command {
 // on the first tool call (always inside a prompt turn, well after the daemon has
 // bound the token), and cached.
 type daemonCaller struct {
-	conn    *rpc.Conn
+	conn    *client.Conn
 	session string
 	token   string
 
