@@ -9,6 +9,7 @@ package client
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net"
 
@@ -58,6 +59,14 @@ type Options struct {
 	// prompts. Observers may see prompts but only prompt-capable clients resolve
 	// them.
 	PromptCapable bool
+	// OnNotify receives daemon->client notifications by method name and raw
+	// params — event.push (a subscribed stream's events), event.subscription_closed,
+	// and prompt.raise. It MUST be set by a client that calls events.subscribe;
+	// otherwise those pushes are delivered to a nil handler and dropped. The
+	// callback runs on the connection's read goroutine, so it should hand work off
+	// rather than block. Leave nil for a client that only makes one-shot calls
+	// (the CLI, the MCP bridge). The caller decodes params (e.g. api.EventPushParams).
+	OnNotify func(method string, params json.RawMessage)
 }
 
 // Dial connects to the daemon, performs the version handshake against
@@ -72,10 +81,18 @@ func Dial(ctx context.Context, opts Options) (*Conn, error) {
 	if err != nil {
 		return nil, fmt.Errorf("connecting to tendd at %s: %w (is the daemon running?)", socket, err)
 	}
-	// Observer clients (the CLI, the MCP bridge, a read-only UI) serve no inbound
-	// requests, so there is no handler yet. Streaming event delivery is a later
-	// addition on this package.
-	rc := rpc.NewConn(nc, nil)
+	// A subscribing client (e.g. tend-ui following session streams) must receive
+	// daemon->client pushes; route them to OnNotify. A one-shot caller leaves
+	// OnNotify nil and gets the nil handler (inbound pushes, if any, are ignored).
+	var h rpc.Handler
+	if opts.OnNotify != nil {
+		onNotify := opts.OnNotify
+		h = rpc.HandlerFunc(func(_ context.Context, req *rpc.Request) (any, error) {
+			onNotify(req.Method, req.Params)
+			return nil, nil
+		})
+	}
+	rc := rpc.NewConn(nc, h)
 	if _, err := handshake.Do(ctx, rc, api.Versions{PluginToDaemon: opts.MinPluginToDaemon}); err != nil {
 		_ = rc.Close()
 		return nil, fmt.Errorf("daemon handshake: %w", err)
