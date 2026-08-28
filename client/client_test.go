@@ -3,6 +3,7 @@ package client_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net"
 	"path/filepath"
 	"testing"
@@ -19,23 +20,33 @@ import (
 // handshake, client.register (capturing the params it received), and a
 // session.list probe so a test can confirm Call works over the returned Conn.
 // It returns the socket path and a channel that yields the register params.
-func fakeDaemon(t *testing.T) (string, <-chan api.ClientRegisterParams) {
+func fakeDaemon(t *testing.T) (sock string, registered <-chan api.ClientRegisterParams, reverseErr <-chan error) {
 	t.Helper()
-	sock := filepath.Join(t.TempDir(), "tend.sock")
+	sock = filepath.Join(t.TempDir(), "tend.sock")
 	ln, err := net.Listen("unix", sock)
 	if err != nil {
 		t.Fatalf("listen: %v", err)
 	}
 	t.Cleanup(func() { _ = ln.Close() })
 
-	registered := make(chan api.ClientRegisterParams, 1)
+	reg := make(chan api.ClientRegisterParams, 1)
+	rev := make(chan error, 1)
 	m := dispatch.NewMux(api.PluginToDaemon)
 	if err := handshake.Register(m, "epoch-test"); err != nil {
 		t.Fatalf("handshake.Register: %v", err)
 	}
 	if err := dispatch.Handle(m, "client.register",
-		func(_ context.Context, p api.ClientRegisterParams) (api.ClientRegisterResult, error) {
-			registered <- p
+		func(ctx context.Context, p api.ClientRegisterParams) (api.ClientRegisterResult, error) {
+			reg <- p
+			// Once registered, send the client a daemon->client *request* (an
+			// editor reverse call it does not serve) and report how it answered,
+			// so a test can assert requests get method-not-found, not null.
+			if c := rpc.ConnFromContext(ctx); c != nil {
+				go func() {
+					var res api.EditorCurrentBufferResult
+					rev <- c.Call(context.Background(), "editor.current_buffer", api.EditorCurrentBufferParams{}, &res)
+				}()
+			}
 			return api.ClientRegisterResult{}, nil
 		}); err != nil {
 		t.Fatalf("register handler: %v", err)
@@ -70,7 +81,7 @@ func fakeDaemon(t *testing.T) (string, <-chan api.ClientRegisterParams) {
 			t.Cleanup(func() { _ = sc.Close() })
 		}
 	}()
-	return sock, registered
+	return sock, reg, rev
 }
 
 func testCtx(t *testing.T) context.Context {
@@ -81,7 +92,7 @@ func testCtx(t *testing.T) context.Context {
 }
 
 func TestDialRegistersThenCalls(t *testing.T) {
-	sock, registered := fakeDaemon(t)
+	sock, registered, _ := fakeDaemon(t)
 
 	conn, err := client.Dial(testCtx(t), client.Options{
 		Socket:            sock,
@@ -112,7 +123,7 @@ func TestDialRegistersThenCalls(t *testing.T) {
 }
 
 func TestOnNotifyReceivesDaemonPushes(t *testing.T) {
-	sock, _ := fakeDaemon(t)
+	sock, _, _ := fakeDaemon(t)
 	pushes := make(chan struct {
 		method string
 		params json.RawMessage
@@ -153,8 +164,36 @@ func TestOnNotifyReceivesDaemonPushes(t *testing.T) {
 	}
 }
 
+func TestClientRejectsInboundRequests(t *testing.T) {
+	sock, _, reverseErr := fakeDaemon(t)
+	// OnNotify set, so the notification-routing handler (not the nil handler) is
+	// installed; it must still reject a daemon->client request with
+	// method-not-found rather than a null success.
+	conn, err := client.Dial(testCtx(t), client.Options{
+		Socket: sock, ClientID: "tend-ui", MinPluginToDaemon: "0.8.0",
+		OnNotify: func(string, json.RawMessage) {},
+	})
+	if err != nil {
+		t.Fatalf("Dial: %v", err)
+	}
+	defer func() { _ = conn.Close() }()
+
+	select {
+	case err := <-reverseErr:
+		if err == nil {
+			t.Fatal("daemon->client request returned success; want method-not-found")
+		}
+		var rerr *rpc.Error
+		if !errors.As(err, &rerr) || rerr.Code != rpc.CodeMethodNotFound {
+			t.Fatalf("reverse-call err = %v, want rpc method-not-found (%d)", err, rpc.CodeMethodNotFound)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for the reverse call to be answered")
+	}
+}
+
 func TestDialDefaultsToObserver(t *testing.T) {
-	sock, registered := fakeDaemon(t)
+	sock, registered, _ := fakeDaemon(t)
 	conn, err := client.Dial(testCtx(t), client.Options{Socket: sock, ClientID: "tend-cli", MinPluginToDaemon: "0.8.0"})
 	if err != nil {
 		t.Fatalf("Dial: %v", err)
@@ -166,7 +205,7 @@ func TestDialDefaultsToObserver(t *testing.T) {
 }
 
 func TestDialVersionMismatchFailsAtHandshake(t *testing.T) {
-	sock, _ := fakeDaemon(t)
+	sock, _, _ := fakeDaemon(t)
 	if _, err := client.Dial(testCtx(t), client.Options{
 		Socket: sock, ClientID: "tend-cli", MinPluginToDaemon: "99.0.0",
 	}); err == nil {

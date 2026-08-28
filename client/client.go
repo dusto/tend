@@ -88,6 +88,13 @@ func Dial(ctx context.Context, opts Options) (*Conn, error) {
 	if opts.OnNotify != nil {
 		onNotify := opts.OnNotify
 		h = rpc.HandlerFunc(func(_ context.Context, req *rpc.Request) (any, error) {
+			// This client serves no daemon->client *requests* (those go to
+			// editor-role clients). Reject any with method-not-found rather than a
+			// bogus null success — mirrors rpc.Conn's nil-handler path. Only
+			// notifications (event.push and friends) reach OnNotify.
+			if !req.Notification {
+				return nil, &rpc.Error{Code: rpc.CodeMethodNotFound, Message: "method not found: " + req.Method}
+			}
 			onNotify(req.Method, req.Params)
 			return nil, nil
 		})
