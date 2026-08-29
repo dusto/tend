@@ -48,6 +48,35 @@ func TestCallSurfacesDaemonErrorCode(t *testing.T) {
 	}
 }
 
+// A downstream client can decode the typed Data payload off a client.Error —
+// e.g. api.CursorCompactedData for api.ErrCursorCompacted (its resume boundary).
+func TestCallSurfacesTypedErrorData(t *testing.T) {
+	srv := clienttest.New(t)
+	srv.Handle("events.subscribe", func(json.RawMessage) (any, error) {
+		return nil, clienttest.ErrorData(api.ErrCursorCompacted, "cursor predates retention",
+			api.CursorCompactedData{StreamID: "workspace:ws-1", BoundarySeq: 42})
+	})
+
+	conn, err := client.Dial(ctx(t), client.Options{Socket: srv.Socket(), ClientID: "test", MinPluginToDaemon: "0.8.0"})
+	if err != nil {
+		t.Fatalf("Dial: %v", err)
+	}
+	defer func() { _ = conn.Close() }()
+
+	callErr := conn.Call(ctx(t), "events.subscribe", api.EventsSubscribeParams{}, &api.EventsSubscribeResult{})
+	e, ok := client.AsError(callErr)
+	if !ok || e.Code != api.ErrCursorCompacted {
+		t.Fatalf("AsError = %v, %v", e, ok)
+	}
+	var data api.CursorCompactedData
+	if err := json.Unmarshal(e.Data, &data); err != nil {
+		t.Fatalf("decode Data: %v", err)
+	}
+	if data.BoundarySeq != 42 || data.StreamID != "workspace:ws-1" {
+		t.Errorf("CursorCompactedData = %+v", data)
+	}
+}
+
 // A successful call returns nil; a non-daemon error (e.g. a closed connection)
 // is not misreported as a *client.Error.
 func TestCallOKAndNonDaemonError(t *testing.T) {

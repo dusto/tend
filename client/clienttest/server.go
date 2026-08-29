@@ -68,6 +68,18 @@ func ErrorCode(code int, message string) error {
 	return &rpc.Error{Code: code, Message: message}
 }
 
+// ErrorData is ErrorCode with a typed Data payload (marshaled to JSON), so a
+// test can exercise a downstream client's typed-payload handling — e.g. reading
+// api.CursorCompactedData off a client.Error's Data for an api.ErrCursorCompacted.
+// It panics if data does not marshal (a test-only programmer error).
+func ErrorData(code int, message string, data any) error {
+	raw, err := json.Marshal(data)
+	if err != nil {
+		panic("clienttest: marshal error data: " + err.Error())
+	}
+	return &rpc.Error{Code: code, Message: message, Data: raw}
+}
+
 func (s *Server) serve(t testing.TB, ln net.Listener) {
 	m := s.mux(t)
 	for {
