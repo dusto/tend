@@ -25,9 +25,11 @@ type Conn struct {
 }
 
 // Call invokes a plugin->daemon method and decodes the reply into result (which
-// may be nil for a method with no result).
+// may be nil for a method with no result). A daemon-side JSON-RPC error is
+// returned as *Error, so callers can branch on its Code (see IsCode / AsError)
+// without importing tend's internal packages.
 func (c *Conn) Call(ctx context.Context, method string, params, result any) error {
-	return c.rc.Call(ctx, method, params, result)
+	return asClientError(c.rc.Call(ctx, method, params, result))
 }
 
 // Close closes the connection.
