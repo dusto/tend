@@ -14,7 +14,7 @@ func EditorTools() []Tool {
 		{
 			Name:        "read_buffer",
 			Title:       "Read buffer",
-			Description: "Read a file's current content as the editor sees it (the live buffer when the file is open, otherwise disk). Prefer this over reading disk directly so you see unsaved edits.",
+			Description: "Read a file as the user's editor sees it — the live buffer (INCLUDING unsaved edits) when the file is open, otherwise disk. Prefer this over reading the file from disk directly (native file-read / cat) for any file the user may be editing, so you see the current buffer state rather than a stale on-disk copy.",
 			InputSchema: schema(`{
 				"type": "object",
 				"properties": {
@@ -27,7 +27,7 @@ func EditorTools() []Tool {
 		{
 			Name:        "open_buffer",
 			Title:       "Open buffer",
-			Description: "Open a file in the user's editor so they can see it (e.g. to draw attention to a file you are discussing). Non-mutating; does nothing when the session has no editor attached.",
+			Description: "Open a file in the user's editor (Neovim, VS Code, …) so it appears as a buffer/tab. Use this whenever the user asks to open, show, or bring up a file in their editor — do NOT shell out to the editor (e.g. `nvim --remote`) or probe for editor sockets; this is the supported way. Non-mutating; a no-op when the session has no editor attached.",
 			InputSchema: schema(`{
 				"type": "object",
 				"properties": {
@@ -40,7 +40,7 @@ func EditorTools() []Tool {
 		{
 			Name:        "write_buffer",
 			Title:       "Write buffer",
-			Description: "Propose replacing a file's ENTIRE content. The user reviews the change as a diff and it is applied to the live buffer only if they approve — a supervised edit, not a direct write. Use edit_buffer for targeted changes to a large file.",
+			Description: "Propose replacing a file's ENTIRE content as a SUPERVISED edit through the user's editor: they review a diff and it applies to the live buffer only on approval — not a direct write. Prefer this over writing the file directly (native file-write) for any file the user is editing, so the change lands in their live buffer and is reviewed as a diff. Use edit_buffer for targeted changes to a large file.",
 			InputSchema: schema(`{
 				"type": "object",
 				"properties": {
@@ -54,7 +54,7 @@ func EditorTools() []Tool {
 		{
 			Name:        "edit_buffer",
 			Title:       "Edit buffer",
-			Description: "Propose targeted, non-overlapping text edits to a file. Each edit replaces the text in a [start, end) range with new_text; positions are 0-indexed line and byte column. The user reviews the resulting diff and it is applied to the live buffer only if they approve — a supervised edit. Read the file first (read_buffer) so your positions match its current content.",
+			Description: "Propose targeted, non-overlapping text edits to a file as a SUPERVISED edit through the user's editor. Each edit replaces the text in a [start, end) range with new_text; positions are 0-indexed line and byte column. The user reviews the resulting diff and it applies to the live buffer only on approval. Prefer this over editing the file directly (native edit) for any file the user is editing. Read the file first (read_buffer) so your positions match its current content.",
 			InputSchema: schema(`{
 				"type": "object",
 				"properties": {
