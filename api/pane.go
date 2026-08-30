@@ -65,8 +65,8 @@ type PaneCloseParams struct {
 // PaneCloseResult acknowledges a close.
 type PaneCloseResult struct{}
 
-// PaneRunParams runs a command in a pane. It is task-bound (SessionID is
-// required) and approval-gated.
+// PaneRunParams runs a command in a pane. SessionID is required (the approval is
+// attached to it) and the run is approval-gated; task association is optional.
 type PaneRunParams struct {
 	PaneID    PaneID    `json:"pane_id"`
 	Command   string    `json:"command"`

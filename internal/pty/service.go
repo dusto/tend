@@ -145,7 +145,8 @@ func (s *Service) run(ctx context.Context, p api.PaneRunParams) (api.PaneRunResu
 	if !ok {
 		return api.PaneRunResult{}, &rpc.Error{Code: rpc.CodeInvalidParams, Message: ErrNoPane.Error()}
 	}
-	// Running a command is task-bound and approval-gated.
+	// pane.run needs a session (to attach the approval to) and is supervised by
+	// the approval below — not by task association, which is optional (ADR 0006).
 	if p.SessionID == "" {
 		return api.PaneRunResult{}, &rpc.Error{Code: rpc.CodeInvalidParams, Message: "pty: pane.run requires a session"}
 	}
@@ -153,8 +154,6 @@ func (s *Service) run(ctx context.Context, p api.PaneRunParams) (api.PaneRunResu
 	if !ok {
 		return api.PaneRunResult{}, &rpc.Error{Code: rpc.CodeInvalidParams, Message: ErrNoSession.Error()}
 	}
-	// No task requirement: an agent-initiated run is supervised by the approval
-	// below, not task association (ADR 0006).
 	detail, _ := json.Marshal(api.ApprovalDetail{
 		Kind:    api.ApprovalPaneRun,
 		PaneRun: &api.PaneRunApproval{PaneID: p.PaneID, Command: p.Command, Cwd: pane.Cwd},
