@@ -76,6 +76,17 @@ func RunFakeACP() {
 					},
 				})
 			}
+			// A prompt of "reqperm" makes the agent request permission for one of its
+			// OWN tools over ACP session/request_permission (a request back to the
+			// daemon), the way Claude's native Write/Edit/Bash do. The turn blocks in
+			// the call until the daemon answers (a prompt-capable client resolves the
+			// approval), then streams the outcome as "PERM:<outcome>[:<optionId>]" so a
+			// test can assert the mapping. Gated behind the marker so the default turn
+			// keeps its fixed shape.
+			if firstText(p.Prompt) == "reqperm" {
+				send(map[string]any{"sessionUpdate": "agent_message_chunk", "content": map[string]any{"text": "PERM:" + requestPermission(conn, p.SessionID)}})
+				return acp.PromptResult{StopReason: "end_turn"}, nil
+			}
 			send(map[string]any{"sessionUpdate": "agent_message_chunk", "content": map[string]any{"text": "hello "}})
 			send(map[string]any{"sessionUpdate": "agent_message_chunk", "content": map[string]any{"text": "world"}})
 			send(map[string]any{"sessionUpdate": "tool_call", "toolCallId": "t1", "title": "read_file"})
@@ -106,6 +117,38 @@ func firstText(prompt []json.RawMessage) string {
 	}
 	_ = json.Unmarshal(prompt[0], &block)
 	return block.Text
+}
+
+// requestPermission issues an ACP session/request_permission request back to the
+// daemon (the way a real agent's native tool does) and returns the resolved
+// outcome as "<outcome>[:<optionId>]" (e.g. "selected:allow", "cancelled"). It
+// offers the standard allow_always/allow_once/reject_once options and a populated
+// rawInput, so a test exercises the real gate bridge and option selection.
+func requestPermission(conn *rpc.Conn, sessionID string) string {
+	var resp struct {
+		Outcome struct {
+			Outcome  string `json:"outcome"`
+			OptionID string `json:"optionId"`
+		} `json:"outcome"`
+	}
+	_ = conn.Call(context.Background(), acp.PermissionMethod, map[string]any{
+		"sessionId": sessionID,
+		"toolCall": map[string]any{
+			"toolCallId": "perm-1",
+			"title":      "Write file",
+			"kind":       "edit",
+			"rawInput":   map[string]any{"file_path": "/tmp/x.go", "content": "package x"},
+		},
+		"options": []map[string]any{
+			{"kind": "allow_always", "name": "Allow always", "optionId": "allow_always"},
+			{"kind": "allow_once", "name": "Allow", "optionId": "allow"},
+			{"kind": "reject_once", "name": "Reject", "optionId": "reject"},
+		},
+	}, &resp)
+	if resp.Outcome.OptionID != "" {
+		return resp.Outcome.Outcome + ":" + resp.Outcome.OptionID
+	}
+	return resp.Outcome.Outcome
 }
 
 // holdPath returns the release-file path encoded in a "hold:<path>" prompt, so

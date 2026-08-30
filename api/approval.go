@@ -12,6 +12,7 @@ const (
 	ApprovalPaneRun          = "pane_run"
 	ApprovalCodeAction       = "code_action"
 	ApprovalFilesystemAccess = "filesystem_access"
+	ApprovalAgentTool        = "agent_tool"
 )
 
 // Filesystem-access modes (FilesystemAccessApproval.Mode): the read operation an
@@ -36,6 +37,22 @@ type ApprovalDetail struct {
 	PaneRun          *PaneRunApproval          `json:"pane_run,omitempty"`
 	CodeAction       *CodeActionApproval       `json:"code_action,omitempty"`
 	FilesystemAccess *FilesystemAccessApproval `json:"filesystem_access,omitempty"`
+	AgentTool        *AgentToolApproval        `json:"agent_tool,omitempty"`
+}
+
+// AgentToolApproval is the decision context for a provider-native tool call — the
+// agent's OWN Write/Edit/Bash/… — which asks for permission over the ACP
+// session/request_permission request rather than through tend's own mutating
+// methods. Unlike a tend file_edit or pane_run there is no tend change-set or
+// pane (the agent owns the operation and its execution), so the raw tool title,
+// its ACP kind (edit/execute/read/…), and its full input are carried for the
+// client to review and decide. RawInput here is the real, populated tool input —
+// the streamed tool_call event's raw_input is empty at that point.
+type AgentToolApproval struct {
+	ToolCallID string          `json:"tool_call_id"`
+	Title      string          `json:"title"`
+	ToolKind   string          `json:"tool_kind,omitempty"`
+	RawInput   json.RawMessage `json:"raw_input,omitempty"`
 }
 
 // FilesystemAccessApproval is the decision context for reading a file that
