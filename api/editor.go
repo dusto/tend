@@ -74,7 +74,7 @@ type FileBase struct {
 
 // EditorOpenParams asks the bound editor to open files in buffers so changes
 // can be inspected in place. A read-only review affordance: it mutates nothing
-// and is not task-gated.
+// It changes nothing on disk.
 type EditorOpenParams struct {
 	URIs []string `json:"uris"`
 }

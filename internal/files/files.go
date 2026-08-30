@@ -4,11 +4,12 @@
 // returns a content-hash base. The daemon owns the disk read and hash so the
 // same code that produces a base also verifies it on a later apply.
 //
-// file.patch and file.write are the mutating tools: task-bound (they require a
-// session) and approval-gated. Each is a single-target change set — the daemon
-// verifies the cited base is still current, blocks on the approval gate, and on
-// approval re-verifies the base and applies editor-aware (an open buffer through
-// editor.write_buffer, a closed file to disk via temp + atomic rename).
+// file.patch and file.write are the mutating tools: session-scoped and
+// approval-gated (task association optional; see ADR 0006). Each is a
+// single-target change set — the daemon verifies the cited base is still
+// current, blocks on the approval gate, and on approval re-verifies the base and
+// applies editor-aware (an open buffer through editor.write_buffer, a closed file
+// to disk via temp + atomic rename).
 package files
 
 import (
@@ -48,10 +49,6 @@ var (
 	// ErrOutsideWorkspace reports that a uri resolves outside the session's
 	// worktree, so it is refused.
 	ErrOutsideWorkspace = worktree.ErrOutsideWorkspace
-	// ErrNoTask reports a mutation attempted by a task-less session. Work is
-	// task-gated: a session can converse and read without a task, but must have
-	// one assigned (by delegation) before it mutates.
-	ErrNoTask = errors.New("files: a task is required to modify files")
 	// ErrAccessDenied reports that a gated outside-worktree read was refused —
 	// the user denied the filesystem_access approval, or the resolved target
 	// changed between approval and read (a symlink repoint).
@@ -155,7 +152,7 @@ func (s *Service) Read(ctx context.Context, p api.FileReadParams) (api.FileReadR
 }
 
 // Open asks the session's bound editor to open a repo file in a buffer for the
-// user to see. It is non-mutating and not task-gated (it changes editor window
+// user to see. It is non-mutating (it changes editor window
 // state, nothing on disk), but the uri is worktree-bounded: an agent for one
 // repo cannot make the editor open another's files. A headless session (no bound
 // editor) is a no-op — Open is false in the result — rather than an error, so an
@@ -257,9 +254,8 @@ func (s *Service) mutate(ctx context.Context, sessionID api.SessionID, uri strin
 	if !ok {
 		return api.FileMutationResult{}, ErrNoSession
 	}
-	if !sess.HasTask() {
-		return api.FileMutationResult{}, ErrNoTask
-	}
+	// No task requirement: the approval gate below is the supervision boundary
+	// for a mutation, not task association (ADR 0006).
 	path, err := resolvePath(uri, sess.WorktreeRoot)
 	if err != nil {
 		return api.FileMutationResult{}, err
@@ -327,7 +323,7 @@ func (s *Service) mutate(ctx context.Context, sessionID api.SessionID, uri strin
 }
 
 // Diff returns a change set's captured before/after snapshots. Read-only and
-// not task-gated: a review affordance that only surfaces what the named
+// a review affordance that only surfaces what the named
 // proposal or applied set changed.
 func (s *Service) Diff(_ context.Context, p api.FileDiffParams) (api.FileDiffResult, error) {
 	res, ok := s.snapshots.get(p.ChangeSetID)

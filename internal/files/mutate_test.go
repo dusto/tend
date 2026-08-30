@@ -246,9 +246,9 @@ func TestMutateUnknownSession(t *testing.T) {
 	}
 }
 
-func TestMutateTasklessSessionRefused(t *testing.T) {
-	// Work is task-gated: a task-less session cannot mutate, even with a valid
-	// base and an approving gate.
+func TestMutateTasklessSessionAllowedWithApproval(t *testing.T) {
+	// A task-less session may mutate: approval is the supervision boundary, not
+	// task association (ADR 0006). With an approving gate the write applies.
 	ed := &fakeEditor{err: editor.ErrEditorUnavailable}
 	root := t.TempDir()
 	r := session.NewRegistry()
@@ -259,13 +259,43 @@ func TestMutateTasklessSessionRefused(t *testing.T) {
 		t.Fatalf("seed: %v", err)
 	}
 
-	_, err := svc.Write(context.Background(), api.FileWriteParams{
+	res, err := svc.Write(context.Background(), api.FileWriteParams{
 		SessionID: "s1", URI: fileURI(path), Content: "y\n", Base: diskBase("x\n"),
 	})
-	if !errors.Is(err, ErrNoTask) {
-		t.Errorf("err = %v, want ErrNoTask", err)
+	if err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+	if !res.Applied {
+		t.Errorf("task-less write not applied: %+v", res)
+	}
+	if got, _ := os.ReadFile(path); string(got) != "y\n" {
+		t.Errorf("file = %q, want the approved new content", got)
+	}
+}
+
+func TestMutateTasklessSessionStillGatedByApproval(t *testing.T) {
+	// Removing the task gate does not remove supervision: a DENIED task-less write
+	// must not touch the file.
+	ed := &fakeEditor{err: editor.ErrEditorUnavailable}
+	root := t.TempDir()
+	r := session.NewRegistry()
+	r.Create("s1", "codex", "ws1", api.TaskRef{}, root)
+	svc := NewService(r, ed, &fakeApprover{outcome: approvals.Outcome{Approved: false}}, Options{NewChangeSetID: func() api.ChangeSetID { return "cs1" }})
+	path := filepath.Join(root, "a.go")
+	if err := os.WriteFile(path, []byte("x\n"), 0o644); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	res, err := svc.Write(context.Background(), api.FileWriteParams{
+		SessionID: "s1", URI: fileURI(path), Content: "y\n", Base: diskBase("x\n"),
+	})
+	if err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+	if res.Applied {
+		t.Error("a denied task-less write must not apply")
 	}
 	if got, _ := os.ReadFile(path); string(got) != "x\n" {
-		t.Errorf("file mutated by a task-less session: %q", got)
+		t.Errorf("file mutated despite denial: %q", got)
 	}
 }

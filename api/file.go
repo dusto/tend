@@ -30,7 +30,7 @@ type FileReadResult struct {
 
 // FileOpenParams asks the session's bound editor to open a repo file in a buffer
 // for the user to see. SessionID selects the editor; URI is worktree-bounded.
-// Non-mutating and not task-gated — it changes editor window state, nothing on
+// Non-mutating — it changes editor window state, nothing on
 // disk.
 type FileOpenParams struct {
 	SessionID SessionID `json:"session_id"`
@@ -45,7 +45,7 @@ type FileOpenResult struct {
 }
 
 // FilePatchParams applies an ordered set of non-overlapping text edits to a repo
-// file. SessionID makes the edit task-bound; Base is the revision the edits were
+// file. SessionID scopes the edit to a session; Base is the revision the edits were
 // computed against (from file.read) and is re-verified before applying.
 type FilePatchParams struct {
 	SessionID SessionID  `json:"session_id"`
@@ -122,7 +122,7 @@ type FileMutationResult struct {
 }
 
 // FileDiffParams fetches a change set's captured before/after snapshots.
-// Read-only and not task-gated: it surfaces what a named proposal or applied
+// Read-only: it surfaces what a named proposal or applied
 // set changed, never an undefined "current state".
 type FileDiffParams struct {
 	ChangeSetID ChangeSetID `json:"change_set_id"`

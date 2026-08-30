@@ -145,17 +145,14 @@ func (s *Service) run(ctx context.Context, p api.PaneRunParams) (api.PaneRunResu
 	if !ok {
 		return api.PaneRunResult{}, &rpc.Error{Code: rpc.CodeInvalidParams, Message: ErrNoPane.Error()}
 	}
-	// Running a command is task-bound and approval-gated.
+	// pane.run needs a session (to attach the approval to) and is supervised by
+	// the approval below — not by task association, which is optional (ADR 0006).
 	if p.SessionID == "" {
 		return api.PaneRunResult{}, &rpc.Error{Code: rpc.CodeInvalidParams, Message: "pty: pane.run requires a session"}
 	}
 	sess, ok := s.sessions.Get(p.SessionID)
 	if !ok {
 		return api.PaneRunResult{}, &rpc.Error{Code: rpc.CodeInvalidParams, Message: ErrNoSession.Error()}
-	}
-	// Work is task-gated: a task-less session may not run commands.
-	if !sess.HasTask() {
-		return api.PaneRunResult{}, &rpc.Error{Code: rpc.CodeInvalidParams, Message: "pty: a task is required to run commands"}
 	}
 	detail, _ := json.Marshal(api.ApprovalDetail{
 		Kind:    api.ApprovalPaneRun,

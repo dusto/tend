@@ -74,15 +74,15 @@ Schemas live under `schemas/` (`methods/<name>.params.json` / `.result.json`, `e
   - Params: `ClientRegisterParams` · Result: `ClientRegisterResult`
 - **`file.read`** — Read a repo file editor-aware (non-mutating): live buffer content + changedtick when open, else disk content + content hash.
   - Params: `FileReadParams` · Result: `FileReadResult`
-- **`file.open`** — Open a repo file in the session's bound editor for the user to see (non-mutating, not task-gated, worktree-bounded); a no-op for a headless session (open=false).
+- **`file.open`** — Open a repo file in the session's bound editor for the user to see (non-mutating, worktree-bounded); a no-op for a headless session (open=false).
   - Params: `FileOpenParams` · Result: `FileOpenResult`
-- **`file.patch`** — Apply non-overlapping text edits to a repo file (task-bound, approval-gated, base-checked); single-target change set.
+- **`file.patch`** — Apply non-overlapping text edits to a repo file (approval-gated, base-checked; task association optional); single-target change set.
   - Params: `FilePatchParams` · Result: `FileMutationResult`
-- **`file.write`** — Replace a repo file's whole content (task-bound, approval-gated, base-checked); single-target change set.
+- **`file.write`** — Replace a repo file's whole content (approval-gated, base-checked; task association optional); single-target change set.
   - Params: `FileWriteParams` · Result: `FileMutationResult`
 - **`file.apply_change_set`** — Apply a multi-file change set as one approved unit (best-effort atomic: preflight, disk writes, editor buffers last, with partial-failure reporting).
   - Params: `FileApplyChangeSetParams` · Result: `FileApplyChangeSetResult`
-- **`file.diff`** — Fetch a change set's captured before/after snapshots for review (read-only, not task-gated).
+- **`file.diff`** — Fetch a change set's captured before/after snapshots for review (read-only).
   - Params: `FileDiffParams` · Result: `FileDiffResult`
 - **`lsp.diagnostics`** — Editor-fresh LSP diagnostics for a file via the session's bound editor (session-scoped, not approval-gated); empty uri means the editor's current buffer.
   - Params: `LSPDiagnosticsParams` · Result: `LSPDiagnosticsResult`
@@ -120,7 +120,7 @@ Schemas live under `schemas/` (`methods/<name>.params.json` / `.result.json`, `e
   - Params: `PaneReadParams` · Result: `PaneReadResult`
 - **`pane.close`** — Close a pane: terminate its process group and release the PTY.
   - Params: `PaneCloseParams` · Result: `PaneCloseResult`
-- **`pane.run`** — Run a command in a pane (task-bound, approval-gated); output arrives on the pane stream.
+- **`pane.run`** — Run a command in a pane (approval-gated; task association optional); output arrives on the pane stream.
   - Params: `PaneRunParams` · Result: `PaneRunResult`
 
 ### daemon → bound editor
