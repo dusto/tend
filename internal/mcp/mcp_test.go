@@ -50,6 +50,11 @@ func TestInitialize(t *testing.T) {
 	if info["name"] != "tend" || info["version"] != "v1.2.3" {
 		t.Errorf("serverInfo = %v, want tend/v1.2.3", info)
 	}
+	// The initialize result steers the agent toward the editor tools.
+	instr, _ := res["instructions"].(string)
+	if !strings.Contains(instr, "open_buffer") || !strings.Contains(instr, "PREFER") {
+		t.Errorf("instructions missing editor-tool steering: %q", instr)
+	}
 }
 
 func TestToolsList(t *testing.T) {

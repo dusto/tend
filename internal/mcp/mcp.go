@@ -174,6 +174,19 @@ func (s *Server) dispatch(ctx context.Context, req request) (response, bool) {
 // ignored per JSON-RPC.
 func (s *Server) handleNotification(_ request) {}
 
+// serverInstructions steers the agent toward tend's editor tools without
+// disabling its native ones: these tools act on the user's LIVE editor buffers,
+// not the raw filesystem, so they see unsaved edits and route edits through the
+// user's review. The MCP initialize result carries this as server "instructions"
+// (a spec-defined field a client surfaces to the model). It is soft guidance — a
+// preference, not a hard requirement — matching the decision to keep native tools
+// available with the approval bridge as the supervision baseline.
+const serverInstructions = "These tools operate on files through the user's live editor and its open buffers, not the raw filesystem. When the user is working in their editor, PREFER these over reading or writing files directly or shelling out to the editor:\n" +
+	"- read_buffer to read a file as the editor sees it, including unsaved buffer edits (prefer over reading disk).\n" +
+	"- open_buffer whenever asked to open, show, or bring up a file in the editor — do NOT run the editor yourself (e.g. `nvim --remote`) or probe for editor sockets.\n" +
+	"- write_buffer / edit_buffer for edits: they are supervised — the user reviews a diff and it applies to the live buffer on approval (prefer over writing files directly).\n" +
+	"Fall back to direct filesystem access only when these do not apply (e.g. a file the user is not editing, or no editor is attached)."
+
 func (s *Server) initializeResult() map[string]any {
 	return map[string]any{
 		"protocolVersion": ProtocolVersion,
@@ -186,6 +199,8 @@ func (s *Server) initializeResult() map[string]any {
 			"name":    s.name,
 			"version": s.version,
 		},
+		// Soft steering toward the editor tools (see serverInstructions).
+		"instructions": serverInstructions,
 	}
 }
 
