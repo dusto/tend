@@ -102,10 +102,11 @@ func (s *Session) Status() api.SessionStatus {
 	return s.status
 }
 
-// HasTask reports whether a task is bound to the session. Work (file/pane
-// mutation) requires one; a task-less session can converse and read but not
-// mutate until a task is assigned. Task is immutable after Create, so this
-// needs no lock.
+// HasTask reports whether a task is bound to the session. It is optional
+// metadata for attribution, not a gate: a mutation is supervised by its approval,
+// not by task association (ADR 0006), so a task-less session may still edit files
+// and run commands (each approved). Task is immutable after Create, so this needs
+// no lock.
 func (s *Session) HasTask() bool {
 	return s.Task.ID != ""
 }

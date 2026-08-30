@@ -48,10 +48,6 @@ var (
 	// ErrOutsideWorkspace reports that a uri resolves outside the session's
 	// worktree, so it is refused.
 	ErrOutsideWorkspace = worktree.ErrOutsideWorkspace
-	// ErrNoTask reports a mutation attempted by a task-less session. Work is
-	// task-gated: a session can converse and read without a task, but must have
-	// one assigned (by delegation) before it mutates.
-	ErrNoTask = errors.New("files: a task is required to modify files")
 	// ErrAccessDenied reports that a gated outside-worktree read was refused —
 	// the user denied the filesystem_access approval, or the resolved target
 	// changed between approval and read (a symlink repoint).
@@ -257,9 +253,8 @@ func (s *Service) mutate(ctx context.Context, sessionID api.SessionID, uri strin
 	if !ok {
 		return api.FileMutationResult{}, ErrNoSession
 	}
-	if !sess.HasTask() {
-		return api.FileMutationResult{}, ErrNoTask
-	}
+	// No task requirement: the approval gate below is the supervision boundary
+	// for a mutation, not task association (ADR 0006).
 	path, err := resolvePath(uri, sess.WorktreeRoot)
 	if err != nil {
 		return api.FileMutationResult{}, err
