@@ -142,6 +142,15 @@ type ToolCallUpdate struct {
 	SessionID  SessionID `json:"session_id"`
 	ToolCallID string    `json:"tool_call_id"`
 	Status     string    `json:"status"` // e.g. "in_progress" | "completed" | "failed"
+	// Name is the tool's refined title, when the update carries one. A provider
+	// may open a tool_call before its title is known and refine it in an update.
+	Name string `json:"name,omitempty"`
+	// RawInput is the tool's input as refined by this update. Providers stream a
+	// tool_call at content-block start with an EMPTY input (the arguments have not
+	// streamed yet), then send a tool_call_update carrying the populated input once
+	// it completes. Empty when the update does not refine the input, so a consumer
+	// updates the tool's displayed arguments only when this is present.
+	RawInput json.RawMessage `json:"raw_input,omitempty"`
 }
 
 // TurnEnd signals that the agent's turn has ended.

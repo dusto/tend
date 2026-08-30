@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -128,6 +129,59 @@ func TestNormalizeToolCalls(t *testing.T) {
 	_ = json.Unmarshal(evs[2].Payload, &done)
 	if done.Status != "completed" {
 		t.Errorf("complete status = %q, want completed", done.Status)
+	}
+}
+
+func TestToolCallUpdateCarriesRefinedInput(t *testing.T) {
+	c := &capture{}
+	n := NewNormalizer(c, nil)
+
+	// A provider opens the tool_call with an empty input, then refines it in an
+	// update (often with no status change) once the arguments finish streaming.
+	notify(n, SessionUpdateMethod, update("s1", map[string]any{
+		"sessionUpdate": "tool_call", "toolCallId": "t1", "title": "Write", "rawInput": map[string]any{},
+	}))
+	notify(n, SessionUpdateMethod, update("s1", map[string]any{
+		"sessionUpdate": "tool_call_update", "toolCallId": "t1", "status": "",
+		"title": "Write file", "rawInput": map[string]any{"file_path": "/x.go", "content": "package x"},
+	}))
+
+	evs := c.events()
+	if len(evs) != 2 {
+		t.Fatalf("got %d events, want 2", len(evs))
+	}
+	var up api.ToolCallUpdate
+	if err := json.Unmarshal(evs[1].Payload, &up); err != nil {
+		t.Fatalf("unmarshal update: %v", err)
+	}
+	if up.Name != "Write file" {
+		t.Errorf("refined name = %q, want %q", up.Name, "Write file")
+	}
+	if !strings.Contains(string(up.RawInput), "file_path") {
+		t.Errorf("refined input not carried: %s", up.RawInput)
+	}
+	// An empty-input, no-status update must not carry a status or input that would
+	// blank a consumer's existing state.
+	if up.Status != "" {
+		t.Errorf("status = %q, want empty (no change)", up.Status)
+	}
+}
+
+func TestToolCallUpdateDropsEmptyInput(t *testing.T) {
+	c := &capture{}
+	n := NewNormalizer(c, nil)
+	for _, raw := range []any{map[string]any{}, nil} {
+		notify(n, SessionUpdateMethod, update("s1", map[string]any{
+			"sessionUpdate": "tool_call_update", "toolCallId": "t1", "status": "in_progress",
+			"rawInput": raw,
+		}))
+	}
+	for _, ev := range c.events() {
+		var up api.ToolCallUpdate
+		_ = json.Unmarshal(ev.Payload, &up)
+		if up.RawInput != nil {
+			t.Errorf("empty/null input should be dropped, got %s", up.RawInput)
+		}
 	}
 }
 
