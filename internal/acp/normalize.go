@@ -413,18 +413,38 @@ func toolCallUpdateStep() updateStep {
 
 func mapToolCallUpdate(update sessionUpdate) api.Event {
 	var u struct {
-		ToolCallID string `json:"toolCallId"`
-		Status     string `json:"status"`
+		ToolCallID string          `json:"toolCallId"`
+		Status     string          `json:"status"`
+		Title      string          `json:"title"`
+		RawInput   json.RawMessage `json:"rawInput"`
 	}
 	_ = json.Unmarshal(update.Raw, &u)
 	if update.Kind == "tool_call_complete" && u.Status == "" {
 		u.Status = "completed"
 	}
+	// A provider opens a tool_call with an empty input and refines it in a later
+	// update (often with no status change) once the arguments finish streaming.
+	// Carry the refined title and input through so a consumer can show what the
+	// tool is actually doing rather than the initial empty input.
 	return sessionEvent(update.SessionID, "tool_call_update", api.ToolCallUpdate{
 		SessionID:  api.SessionID(update.SessionID),
 		ToolCallID: u.ToolCallID,
 		Status:     u.Status,
+		Name:       u.Title,
+		RawInput:   nonEmptyRaw(u.RawInput),
 	})
+}
+
+// nonEmptyRaw returns raw unless it is absent or a JSON null/empty object, in
+// which case it returns nil so the omitempty field is dropped — an update that
+// does not refine the input should not overwrite a prior populated input.
+func nonEmptyRaw(raw json.RawMessage) json.RawMessage {
+	switch string(raw) {
+	case "", "null", "{}":
+		return nil
+	default:
+		return raw
+	}
 }
 
 func planStep() updateStep {

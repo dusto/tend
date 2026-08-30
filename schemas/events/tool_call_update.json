@@ -9,7 +9,11 @@
     },
     "status": {
       "type": "string"
-    }
+    },
+    "name": {
+      "type": "string"
+    },
+    "raw_input": true
   },
   "additionalProperties": false,
   "type": "object",
