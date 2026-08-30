@@ -60,7 +60,12 @@ const (
 	// added the filesystem_access approval kind + detail (an outside-worktree read
 	// is a consent decision, delivered to clients on approval_requested /
 	// approval.list) — additive, so a client that does not render it still sees
-	// the other approval kinds.
+	// the other approval kinds; 1.2.0 added the agent_tool approval kind + detail
+	// (AgentToolApproval: a provider-native tool — Claude's own Write/Edit/Bash —
+	// requesting permission over ACP session/request_permission, bridged into the
+	// approval gate and delivered on approval_requested / approval.list) —
+	// additive, same compatibility story: a client that does not special-case it
+	// still receives and can answer the approval.
 	//
 	// This is a BREAKING (major) bump, not a minor one. Removing approvals from
 	// the session stream / prompt.raise silently strips live approval delivery
@@ -70,7 +75,7 @@ const (
 	// instead of losing prompts silently — the house rule is reject-at-handshake,
 	// not degrade-in-place. A client is compatible again once it subscribes to the
 	// workspace stream and pins daemon_to_client >= 1.0.0.
-	DaemonToClientVersion = "1.1.0"
+	DaemonToClientVersion = "1.2.0"
 )
 
 // Versions reports the contract version of each method set.

@@ -87,6 +87,77 @@ func TestACPPermissionBridge(t *testing.T) {
 	}
 }
 
+// TestACPPermissionCancelEvictsApproval verifies the turn-context binding: while
+// a native-tool approval is pending, agent.cancel ends the turn and EVICTS the
+// approval (approval_resolved, not answered) rather than leaving a stale pending
+// that could later resolve selected:allow against a dead turn.
+func TestACPPermissionCancelEvictsApproval(t *testing.T) {
+	c := dial(t, fakeDaemon(t))
+	mustCall(t, c, "daemon.hello", api.HelloParams{}, &api.HelloResult{})
+	mustCall(t, c, "client.register", api.ClientRegisterParams{ClientID: "ed", Role: api.RoleEditor, PromptCapable: true}, &api.ClientRegisterResult{})
+
+	var started api.AgentStartResult
+	mustCall(t, c, "agent.start", api.AgentStartParams{ProviderID: "codex", WorkspaceID: "ws1", WorktreeRoot: t.TempDir()}, &started)
+	mustCall(t, c, "events.subscribe", api.EventsSubscribeParams{StreamID: started.StreamID}, &api.EventsSubscribeResult{})
+	wsStream := api.WorkspaceStream("ws1")
+	mustCall(t, c, "events.subscribe", api.EventsSubscribeParams{StreamID: wsStream}, &api.EventsSubscribeResult{})
+
+	turnDone := make(chan error, 1)
+	go func() {
+		var res api.AgentPromptResult
+		cx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		turnDone <- c.Call(cx, "agent.prompt", api.AgentPromptParams{SessionID: started.SessionID, Text: "reqperm"}, &res)
+	}()
+
+	requested := waitApproval(t, c, wsStream, 5*time.Second)
+
+	// Cancel the turn while the approval is still pending.
+	mustCall(t, c, "agent.cancel", api.AgentCancelParams{SessionID: started.SessionID}, &struct{}{})
+
+	// The approval is evicted (resolved, not approved) — its turn is gone.
+	resolved := waitResolved(t, c, wsStream, requested.ApprovalID, 5*time.Second)
+	if resolved.Approved {
+		t.Errorf("evicted approval should not be approved: %+v", resolved)
+	}
+
+	// No stale pending remains, and the evicted id can no longer be answered — so a
+	// late respond can never send selected:allow to the provider.
+	var list api.ApprovalListResult
+	mustCall(t, c, "approval.list", api.ApprovalListParams{}, &list)
+	if len(list.Approvals) != 0 {
+		t.Errorf("approval.list should be empty after eviction, got %+v", list.Approvals)
+	}
+	if err := c.Call(context.Background(), "approval.respond", api.ApprovalRespondParams{ApprovalID: requested.ApprovalID, Approved: true}, &api.ApprovalRespondResult{}); err == nil {
+		t.Error("responding to an evicted approval should fail, not silently allow")
+	}
+
+	select {
+	case <-turnDone:
+	case <-time.After(5 * time.Second):
+		t.Fatal("cancelled turn did not end")
+	}
+}
+
+func waitResolved(t *testing.T, c *Client, stream api.StreamID, id api.ApprovalID, d time.Duration) api.ApprovalResolved {
+	t.Helper()
+	deadline := time.Now().Add(d)
+	for time.Now().Before(deadline) {
+		for _, ev := range c.Events(stream) {
+			if ev.Type != "approval_resolved" {
+				continue
+			}
+			var r api.ApprovalResolved
+			if json.Unmarshal(ev.Payload, &r) == nil && r.ApprovalID == id {
+				return r
+			}
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("no approval_resolved for %s on %s; got %v", id, stream, c.EventTypes(stream))
+	return api.ApprovalResolved{}
+}
+
 func waitApproval(t *testing.T, c *Client, stream api.StreamID, d time.Duration) api.ApprovalRequested {
 	t.Helper()
 	deadline := time.Now().Add(d)

@@ -203,7 +203,11 @@ func New(ln net.Listener, logPath string, opts ...Option) (*Server, error) {
 	// bridged into the approval gate (raised on the workspace stream, answered by a
 	// prompt-capable client) instead of being refused as an unhandled request;
 	// every other inbound message still flows through the normalizer.
-	handler := acp.NewPermissionRouter(norm, s.gate, s.sessions)
+	// The turn-context lookup is resolved lazily: the agent service is constructed
+	// below (it needs the pool that installs this handler), but a permission
+	// request only arrives during a live turn, long after wiring completes.
+	handler := acp.NewPermissionRouter(norm, s.gate, s.sessions,
+		acp.TurnContextFunc(func(id api.SessionID) (context.Context, bool) { return s.agent.TurnContext(id) }))
 	s.pool = acp.NewPool(spawnProvider(o.acp, handler), s.store, acp.Options{Max: maxProcsPerProvider})
 	s.acpMgr = acp.NewManager(s.pool)
 	s.agent = agent.NewService(s.sessions, s.acpMgr, norm)

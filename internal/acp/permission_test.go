@@ -18,14 +18,15 @@ type fakeApprover struct {
 	called  bool
 	gotKind string
 	gotSess *session.Session
+	gotCtx  context.Context
 	detail  json.RawMessage
 	outcome approvals.Outcome
 	err     error
 }
 
-func (f *fakeApprover) Request(_ context.Context, sess *session.Session, kind string, detail json.RawMessage) (approvals.Outcome, error) {
+func (f *fakeApprover) Request(ctx context.Context, sess *session.Session, kind string, detail json.RawMessage) (approvals.Outcome, error) {
 	f.called = true
-	f.gotKind, f.gotSess, f.detail = kind, sess, detail
+	f.gotKind, f.gotSess, f.gotCtx, f.detail = kind, sess, ctx, detail
 	return f.outcome, f.err
 }
 
@@ -101,7 +102,7 @@ type permOutcome struct {
 }
 
 func newRouter(gate acp.Approver, lookup acp.SessionLookup, next rpc.Handler) *acp.PermissionRouter {
-	return acp.NewPermissionRouter(next, gate, lookup)
+	return acp.NewPermissionRouter(next, gate, lookup, nil)
 }
 
 func TestNotificationDelegatesToNext(t *testing.T) {
@@ -269,6 +270,47 @@ func TestApprovedPrefersAllowOnceOverAllowAlways(t *testing.T) {
 	}
 	if got := decode(t, resp); got.OptionID != "allow" {
 		t.Errorf("want allow_once optionId 'allow', got %+v", got)
+	}
+}
+
+func TestApprovalGatedOnTurnContext(t *testing.T) {
+	turnCtx, cancelTurn := context.WithCancel(context.Background())
+	gate := &fakeApprover{outcome: approvals.Outcome{Approved: true}}
+	lookup := fakeLookup{sess: &session.Session{ID: "s1"}, ok: true}
+	turns := acp.TurnContextFunc(func(api.SessionID) (context.Context, bool) { return turnCtx, true })
+	r := acp.NewPermissionRouter(&recordingNext{}, gate, lookup, turns)
+
+	if _, err := r.Handle(context.Background(), permReq(t, permParams("s1"))); err != nil {
+		t.Fatalf("Handle: %v", err)
+	}
+	// The gate must have been handed the turn's context, so cancelling the turn
+	// cancels the pending approval rather than leaving it bound to the connection.
+	if gate.gotCtx == nil {
+		t.Fatal("gate did not receive a context")
+	}
+	if gate.gotCtx.Err() != nil {
+		t.Fatal("turn context should be live before cancel")
+	}
+	cancelTurn()
+	if gate.gotCtx.Err() == nil {
+		t.Error("cancelling the turn did not cancel the gate context")
+	}
+}
+
+func TestApprovalFallsBackToConnContextWithoutTurn(t *testing.T) {
+	connCtx, cancelConn := context.WithCancel(context.Background())
+	gate := &fakeApprover{outcome: approvals.Outcome{Approved: true}}
+	lookup := fakeLookup{sess: &session.Session{ID: "s1"}, ok: true}
+	// No turn in flight → the bridge falls back to the request's connection ctx.
+	turns := acp.TurnContextFunc(func(api.SessionID) (context.Context, bool) { return nil, false })
+	r := acp.NewPermissionRouter(&recordingNext{}, gate, lookup, turns)
+
+	if _, err := r.Handle(connCtx, permReq(t, permParams("s1"))); err != nil {
+		t.Fatalf("Handle: %v", err)
+	}
+	cancelConn()
+	if gate.gotCtx == nil || gate.gotCtx.Err() == nil {
+		t.Error("without a turn, the gate should use (and be cancelled by) the connection ctx")
 	}
 }
 

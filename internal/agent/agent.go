@@ -67,7 +67,7 @@ type Service struct {
 	compact  CompactionTrigger // optional; set via SetCompactionTrigger
 
 	mu       sync.Mutex
-	inflight map[api.SessionID]context.CancelFunc
+	inflight map[api.SessionID]inflightTurn
 
 	// bridgeTokens maps an MCP bridge token to the session it serves. The daemon
 	// declares `tend mcp --bridge <token>` in each session's mcpServers (the
@@ -84,7 +84,7 @@ func NewService(sessions *session.Registry, manager Manager, norm *acp.Normalize
 		sessions:     sessions,
 		manager:      manager,
 		norm:         norm,
-		inflight:     make(map[api.SessionID]context.CancelFunc),
+		inflight:     make(map[api.SessionID]inflightTurn),
 		bridgeTokens: make(map[string]api.SessionID),
 	}
 }
@@ -327,7 +327,7 @@ func (s *Service) Prompt(ctx context.Context, p api.AgentPromptParams) (api.Agen
 	}
 
 	turnCtx, cancel := context.WithCancel(ctx)
-	s.setInflight(p.SessionID, cancel)
+	s.setInflight(p.SessionID, turnCtx, cancel)
 	defer s.clearInflight(p.SessionID)
 	defer cancel()
 
@@ -400,9 +400,18 @@ func (s *Service) Stop(ctx context.Context, p api.AgentStopParams) (struct{}, er
 	return struct{}{}, nil
 }
 
-func (s *Service) setInflight(id api.SessionID, cancel context.CancelFunc) {
+// inflightTurn is the live turn for a session: its context (bound to the turn's
+// lifetime) and the cancel that ends it. The context lets an approval raised for
+// the agent's own tool be gated on the turn — cancelling the turn evicts the
+// pending approval rather than leaving it to resolve against a dead turn.
+type inflightTurn struct {
+	ctx    context.Context
+	cancel context.CancelFunc
+}
+
+func (s *Service) setInflight(id api.SessionID, ctx context.Context, cancel context.CancelFunc) {
 	s.mu.Lock()
-	s.inflight[id] = cancel
+	s.inflight[id] = inflightTurn{ctx: ctx, cancel: cancel}
 	s.mu.Unlock()
 }
 
@@ -414,11 +423,25 @@ func (s *Service) clearInflight(id api.SessionID) {
 
 func (s *Service) cancelInflight(id api.SessionID) {
 	s.mu.Lock()
-	cancel := s.inflight[id]
+	turn := s.inflight[id]
 	s.mu.Unlock()
-	if cancel != nil {
-		cancel()
+	if turn.cancel != nil {
+		turn.cancel()
 	}
+}
+
+// TurnContext returns the context of the session's in-flight turn, if one is
+// running. It satisfies acp.TurnContexts, so the ACP permission bridge can gate a
+// native-tool approval on the turn's lifetime (agent.cancel/stop or turn end
+// evicts the pending approval). ok is false when no turn is in flight.
+func (s *Service) TurnContext(id api.SessionID) (context.Context, bool) {
+	s.mu.Lock()
+	turn, ok := s.inflight[id]
+	s.mu.Unlock()
+	if !ok || turn.ctx == nil {
+		return nil, false
+	}
+	return turn.ctx, true
 }
 
 // promptBlocks builds the ACP prompt content for a turn. With no Content it

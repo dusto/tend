@@ -29,6 +29,23 @@ type Approver interface {
 	Request(ctx context.Context, sess *session.Session, kind string, detail json.RawMessage) (approvals.Outcome, error)
 }
 
+// TurnContexts resolves the context of a session's in-flight turn, so an approval
+// raised for the agent's own tool is bound to the turn's lifetime rather than the
+// long-lived provider connection: cancelling the turn (agent.cancel/stop, or turn
+// end) then evicts the pending approval instead of leaving it to later resolve
+// against a dead turn. *agent.Service satisfies it. ok is false when no turn is in
+// flight, in which case the bridge falls back to the request's connection context.
+type TurnContexts interface {
+	TurnContext(id api.SessionID) (context.Context, bool)
+}
+
+// TurnContextFunc adapts a function to TurnContexts, so the daemon can wire a
+// lazy lookup (the agent service is constructed after this handler).
+type TurnContextFunc func(id api.SessionID) (context.Context, bool)
+
+// TurnContext implements TurnContexts.
+func (f TurnContextFunc) TurnContext(id api.SessionID) (context.Context, bool) { return f(id) }
+
 // PermissionRouter is the inbound ACP handler installed on a provider process. It
 // bridges the agent's own permission requests into tend's approval gate: a
 // session/request_permission request is raised as an approval on the workspace
@@ -40,13 +57,16 @@ type PermissionRouter struct {
 	next   rpc.Handler
 	gate   Approver
 	lookup SessionLookup
+	turns  TurnContexts // optional; nil falls back to the connection context
 }
 
 // NewPermissionRouter wraps next so that session/request_permission is answered
 // through gate (resolving the session via lookup) and everything else is
-// delegated unchanged.
-func NewPermissionRouter(next rpc.Handler, gate Approver, lookup SessionLookup) *PermissionRouter {
-	return &PermissionRouter{next: next, gate: gate, lookup: lookup}
+// delegated unchanged. turns, when non-nil, binds each approval to its turn's
+// context so a cancelled turn evicts the pending approval; nil falls back to the
+// request's connection context.
+func NewPermissionRouter(next rpc.Handler, gate Approver, lookup SessionLookup, turns TurnContexts) *PermissionRouter {
+	return &PermissionRouter{next: next, gate: gate, lookup: lookup, turns: turns}
 }
 
 // Handle implements rpc.Handler.
@@ -126,11 +146,22 @@ func (r *PermissionRouter) handlePermission(ctx context.Context, req *rpc.Reques
 		},
 	})
 
-	outcome, err := r.gate.Request(ctx, sess, api.ApprovalAgentTool, detail)
+	// Gate on the turn's context, not the long-lived provider connection: an
+	// agent.cancel/stop (or the turn ending) then evicts this pending approval,
+	// instead of leaving it to later resolve selected:allow against a dead turn.
+	// Fall back to the connection context when no turn is in flight.
+	gctx := ctx
+	if r.turns != nil {
+		if tctx, ok := r.turns.TurnContext(sess.ID); ok {
+			gctx = tctx
+		}
+	}
+
+	outcome, err := r.gate.Request(gctx, sess, api.ApprovalAgentTool, detail)
 	if err != nil {
-		// The turn died (ctx cancelled → provider process gone) or the session was
-		// not in a gateable state. Either way the tool cannot proceed; tell the
-		// agent to abort.
+		// The turn died (ctx cancelled → agent.cancel/stop or provider gone) or the
+		// session was not in a gateable state. Either way the tool cannot proceed;
+		// tell the agent to abort.
 		slog.Warn("acp: approval request failed; cancelling", "session", p.SessionID, "err", err)
 		return cancelled(), nil
 	}
