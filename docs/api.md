@@ -185,6 +185,8 @@ Schemas live under `schemas/` (`methods/<name>.params.json` / `.result.json`, `e
   - Payload: `ApprovalRequested`
 - **`approval_resolved`** (`workspace` stream) — A pending approval was resolved. Repo-wide: delivered on the workspace stream (see approval_requested).
   - Payload: `ApprovalResolved`
+- **`artifact_written`** (`session` stream) — A file was written or edited through the editor tools and applied. Carries the change's unified diff and the new content, so a client can render the result inline — a diff of the change, or the content rendered by type (markdown, code, SVG, a mermaid diagram) — rather than only noting that a file changed. Content is omitted (truncated set) above a size cap, in which case read_buffer can fetch it.
+  - Payload: `ArtifactWritten`
 - **`memory_searched`** (`workspace` stream) — A workspace's memories were searched (memory.search), so a supervisor can see what an agent recalled. Repo-wide: delivered on the workspace stream.
   - Payload: `MemorySearched`
 - **`memory_written`** (`workspace` stream) — A memory entry was created or updated (memory.write). Repo-wide: delivered on the workspace stream.

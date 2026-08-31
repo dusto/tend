@@ -134,6 +134,97 @@ func TestWriteAppliedToDisk(t *testing.T) {
 	}
 }
 
+// fakeEmitter records published events.
+type fakeEmitter struct{ events []api.Event }
+
+func (e *fakeEmitter) Publish(ev api.Event) (api.Event, error) {
+	e.events = append(e.events, ev)
+	return ev, nil
+}
+
+func TestWriteEmitsArtifact(t *testing.T) {
+	ed := &fakeEditor{err: editor.ErrEditorUnavailable}
+	ap := &fakeApprover{outcome: approvals.Outcome{Approved: true}}
+	em := &fakeEmitter{}
+	root := t.TempDir()
+	r := session.NewRegistry()
+	r.Create("s1", "codex", "ws1", api.TaskRef{}, root)
+	svc := NewService(r, ed, ap, Options{
+		NewChangeSetID: func() api.ChangeSetID { return "cs1" },
+		Emitter:        em,
+	})
+	path := filepath.Join(root, "a.md")
+	if err := os.WriteFile(path, []byte("old\n"), 0o644); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	res, err := svc.Write(context.Background(), api.FileWriteParams{
+		SessionID: "s1", URI: fileURI(path), Content: "# new\n", Base: diskBase("old\n"),
+	})
+	if err != nil || !res.Applied {
+		t.Fatalf("Write: res=%+v err=%v", res, err)
+	}
+
+	var art *api.ArtifactWritten
+	for _, ev := range em.events {
+		if ev.Type == "artifact_written" {
+			var a api.ArtifactWritten
+			if err := json.Unmarshal(ev.Payload, &a); err != nil {
+				t.Fatalf("unmarshal artifact: %v", err)
+			}
+			art = &a
+			if ev.StreamID != api.SessionStream("s1") || ev.Scope != api.ScopeSession {
+				t.Errorf("artifact event stream/scope = %s/%s", ev.StreamID, ev.Scope)
+			}
+		}
+	}
+	if art == nil {
+		t.Fatalf("no artifact_written event emitted; got %d events", len(em.events))
+	}
+	if art.URI != fileURI(path) || art.ChangeSetID != "cs1" {
+		t.Errorf("artifact = %+v", art)
+	}
+	if art.Content != "# new\n" {
+		t.Errorf("artifact content = %q, want the new file text", art.Content)
+	}
+	if art.Diff == "" || art.Truncated {
+		t.Errorf("artifact should carry a diff and not be truncated: %+v", art)
+	}
+}
+
+func TestWriteArtifactTruncatesLargeContent(t *testing.T) {
+	ed := &fakeEditor{err: editor.ErrEditorUnavailable}
+	ap := &fakeApprover{outcome: approvals.Outcome{Approved: true}}
+	em := &fakeEmitter{}
+	root := t.TempDir()
+	r := session.NewRegistry()
+	r.Create("s1", "codex", "ws1", api.TaskRef{}, root)
+	svc := NewService(r, ed, ap, Options{NewChangeSetID: func() api.ChangeSetID { return "cs1" }, Emitter: em})
+	path := filepath.Join(root, "big.txt")
+	if err := os.WriteFile(path, []byte("x"), 0o644); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	big := strings.Repeat("a", maxArtifactContent+1)
+	if _, err := svc.Write(context.Background(), api.FileWriteParams{
+		SessionID: "s1", URI: fileURI(path), Content: big, Base: diskBase("x"),
+	}); err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+	for _, ev := range em.events {
+		if ev.Type != "artifact_written" {
+			continue
+		}
+		var a api.ArtifactWritten
+		_ = json.Unmarshal(ev.Payload, &a)
+		if !a.Truncated || a.Content != "" {
+			t.Errorf("large content should be truncated (omitted): truncated=%v len=%d", a.Truncated, len(a.Content))
+		}
+		return
+	}
+	t.Fatal("no artifact_written event emitted")
+}
+
 func TestPatchDeniedNotApplied(t *testing.T) {
 	ed := &fakeEditor{err: editor.ErrEditorUnavailable}
 	ap := &fakeApprover{outcome: approvals.Outcome{Approved: false, Reason: "nope"}}
