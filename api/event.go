@@ -85,6 +85,7 @@ var EventDefs = []EventDef{
 	{Type: "agent_thought_chunk", Scope: ScopeSession, Payload: AgentThoughtChunk{}, Summary: "A streamed chunk of the agent's reasoning (thinking), distinct from its message."},
 	{Type: "tool_call", Scope: ScopeSession, Payload: ToolCall{}, Summary: "An agent tool call started."},
 	{Type: "tool_call_update", Scope: ScopeSession, Payload: ToolCallUpdate{}, Summary: "Progress update for a tool call."},
+	{Type: "artifact_written", Scope: ScopeSession, Payload: ArtifactWritten{}, Summary: "A file was written or edited through the editor tools and applied. Carries the change's unified diff and the new content, so a client can render the result inline — a diff of the change, or the content rendered by type (markdown, code, SVG, a mermaid diagram) — rather than only noting that a file changed. Content is omitted (truncated set) above a size cap, in which case read_buffer can fetch it."},
 	{Type: "turn_end", Scope: ScopeSession, Payload: TurnEnd{}, Summary: "The agent's turn ended."},
 	{Type: "user_prompt", Scope: ScopeSession, Payload: UserPrompt{}, Summary: "The user's prompt content for a turn, emitted as the turn starts so a replay/resume sees the human side of the conversation (the session stream otherwise carries only agent output). Text only; attachment blob content is not persisted, just counted."},
 	{Type: "agent_prompt_usage", Scope: ScopeSession, Payload: AgentPromptUsage{}, Summary: "The size of the prompt input the daemon composed for a turn: bytes and an approximate, model-agnostic token estimate. Measures only client-side prompt content, not the agent-owned system prompt/history."},
@@ -135,6 +136,22 @@ type ToolCall struct {
 	ToolCallID string          `json:"tool_call_id"`
 	Name       string          `json:"name"`
 	RawInput   json.RawMessage `json:"raw_input,omitempty"`
+}
+
+// ArtifactWritten is a durable record that a file was written or edited through
+// the editor tools (write_buffer / edit_buffer) and applied, so a client can
+// render the result inline — a diff of the change, or the new content rendered by
+// type (markdown, code, an SVG, a mermaid diagram) — rather than only noting that
+// a file changed. Emitted on the session stream after the edit is approved and
+// applied. Content is the new file text; it is omitted and Truncated is set when
+// it exceeds the size cap, in which case a client can fetch it with read_buffer.
+type ArtifactWritten struct {
+	SessionID   SessionID   `json:"session_id"`
+	URI         string      `json:"uri"`
+	ChangeSetID ChangeSetID `json:"change_set_id,omitempty"`
+	Diff        string      `json:"diff,omitempty"`
+	Content     string      `json:"content,omitempty"`
+	Truncated   bool        `json:"truncated,omitempty"`
 }
 
 // ToolCallUpdate is a progress update for an in-flight tool call.

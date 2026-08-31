@@ -85,6 +85,14 @@ type Options struct {
 	// unanswerable prompt, so it hard-denies instead. Nil means "assume prompting
 	// is available" (the daemon always wires it; nil is for tests).
 	PromptCapable func() bool
+	// Emitter publishes the artifact_written session event after a mutation is
+	// applied, so a client can render the result inline. Nil disables it.
+	Emitter Emitter
+}
+
+// Emitter publishes session events. *events.Store satisfies it.
+type Emitter interface {
+	Publish(api.Event) (api.Event, error)
 }
 
 // defaultRetainChangeSets is the per-session snapshot retention when Options
@@ -101,6 +109,7 @@ type Service struct {
 	snapshots     *snapshotStore
 	extraRoots    []string
 	promptCapable func() bool
+	emit          Emitter
 }
 
 // NewService returns a Service. approver may be nil only if the mutating methods
@@ -122,7 +131,43 @@ func NewService(sessions *session.Registry, editors editorClient, gate approver,
 		snapshots:     newSnapshotStore(retain),
 		extraRoots:    opts.ExtraReadableRoots,
 		promptCapable: opts.PromptCapable,
+		emit:          opts.Emitter,
 	}
+}
+
+// maxArtifactContent caps the new-content embedded in an artifact_written event.
+// Above it, content is omitted (Truncated set) and a client fetches the file with
+// read_buffer, so the event stream is not bloated by a very large write.
+const maxArtifactContent = 256 * 1024
+
+// emitArtifact publishes the artifact_written record for an applied mutation, so
+// a client can render the result inline. Best-effort: a nil emitter or a publish
+// error never fails the write.
+func (s *Service) emitArtifact(sessionID api.SessionID, uri string, csid api.ChangeSetID, unified, content string) {
+	if s.emit == nil {
+		return
+	}
+	art := api.ArtifactWritten{
+		SessionID:   sessionID,
+		URI:         uri,
+		ChangeSetID: csid,
+		Diff:        unified,
+	}
+	if len(content) > maxArtifactContent {
+		art.Truncated = true
+	} else {
+		art.Content = content
+	}
+	payload, err := json.Marshal(art)
+	if err != nil {
+		return
+	}
+	_, _ = s.emit.Publish(api.Event{
+		StreamID: api.SessionStream(sessionID),
+		Scope:    api.ScopeSession,
+		Type:     "artifact_written",
+		Payload:  payload,
+	})
 }
 
 // fileState is a file's current content and source: an open editor buffer (with
@@ -319,6 +364,9 @@ func (s *Service) mutate(ctx context.Context, sessionID api.SessionID, uri strin
 		return api.FileMutationResult{}, err
 	}
 	s.snapshots.setApplied(csid, true, map[string]bool{uri: true})
+	// The file is durably written: record it as an artifact so a client can render
+	// the result inline (diff + new content) rather than only noting a file changed.
+	s.emitArtifact(sessionID, uri, csid, unified, string(newContent))
 	return api.FileMutationResult{ChangeSetID: csid, Applied: true, Base: newBase}, nil
 }
 

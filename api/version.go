@@ -70,7 +70,11 @@ const (
 	// tool_call with an empty input and refines it in a later update once the
 	// arguments finish streaming; the daemon now carries the refined title and
 	// input through) — additive, so a client that ignores the fields is unaffected
-	// while one that reads them can show the tool's real arguments.
+	// while one that reads them can show the tool's real arguments; 1.4.0 added the
+	// artifact_written session event (a file written/edited through the editor
+	// tools and applied, carrying the change's diff and new content) so a client
+	// can render the result inline — additive, ignorable by a client that does not
+	// render artifacts.
 	//
 	// This is a BREAKING (major) bump, not a minor one. Removing approvals from
 	// the session stream / prompt.raise silently strips live approval delivery
@@ -80,7 +84,7 @@ const (
 	// instead of losing prompts silently — the house rule is reject-at-handshake,
 	// not degrade-in-place. A client is compatible again once it subscribes to the
 	// workspace stream and pins daemon_to_client >= 1.0.0.
-	DaemonToClientVersion = "1.3.0"
+	DaemonToClientVersion = "1.4.0"
 )
 
 // Versions reports the contract version of each method set.

@@ -164,6 +164,7 @@ func New(ln net.Listener, logPath string, opts ...Option) (*Server, error) {
 	s.files = files.NewService(s.sessions, editors, s.gate, files.Options{
 		ExtraReadableRoots: o.extraReadableRoots,
 		PromptCapable:      s.clients.HasPromptCapable,
+		Emitter:            s.store,
 	})
 	s.lsp = lsp.NewService(s.sessions, editors, s.gate, lsp.Options{
 		ExtraReadableRoots: o.extraReadableRoots,
