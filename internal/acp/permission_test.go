@@ -102,7 +102,7 @@ type permOutcome struct {
 }
 
 func newRouter(gate acp.Approver, lookup acp.SessionLookup, next rpc.Handler) *acp.PermissionRouter {
-	return acp.NewPermissionRouter(next, gate, lookup, nil)
+	return acp.NewPermissionRouter(next, gate, lookup, nil, nil)
 }
 
 func TestNotificationDelegatesToNext(t *testing.T) {
@@ -278,7 +278,7 @@ func TestApprovalGatedOnTurnContext(t *testing.T) {
 	gate := &fakeApprover{outcome: approvals.Outcome{Approved: true}}
 	lookup := fakeLookup{sess: &session.Session{ID: "s1"}, ok: true}
 	turns := acp.TurnContextFunc(func(api.SessionID) (context.Context, bool) { return turnCtx, true })
-	r := acp.NewPermissionRouter(&recordingNext{}, gate, lookup, turns)
+	r := acp.NewPermissionRouter(&recordingNext{}, gate, lookup, turns, nil)
 
 	if _, err := r.Handle(context.Background(), permReq(t, permParams("s1"))); err != nil {
 		t.Fatalf("Handle: %v", err)
@@ -303,7 +303,7 @@ func TestApprovalFallsBackToConnContextWithoutTurn(t *testing.T) {
 	lookup := fakeLookup{sess: &session.Session{ID: "s1"}, ok: true}
 	// No turn in flight → the bridge falls back to the request's connection ctx.
 	turns := acp.TurnContextFunc(func(api.SessionID) (context.Context, bool) { return nil, false })
-	r := acp.NewPermissionRouter(&recordingNext{}, gate, lookup, turns)
+	r := acp.NewPermissionRouter(&recordingNext{}, gate, lookup, turns, nil)
 
 	if _, err := r.Handle(connCtx, permReq(t, permParams("s1"))); err != nil {
 		t.Fatalf("Handle: %v", err)
