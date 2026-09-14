@@ -58,15 +58,19 @@ type PermissionRouter struct {
 	gate   Approver
 	lookup SessionLookup
 	turns  TurnContexts // optional; nil falls back to the connection context
+	emit   Emitter      // optional; nil disables artifact_written emission
 }
 
 // NewPermissionRouter wraps next so that session/request_permission is answered
 // through gate (resolving the session via lookup) and everything else is
 // delegated unchanged. turns, when non-nil, binds each approval to its turn's
 // context so a cancelled turn evicts the pending approval; nil falls back to the
-// request's connection context.
-func NewPermissionRouter(next rpc.Handler, gate Approver, lookup SessionLookup, turns TurnContexts) *PermissionRouter {
-	return &PermissionRouter{next: next, gate: gate, lookup: lookup, turns: turns}
+// request's connection context. emit, when non-nil, publishes an artifact_written
+// record when an approved tool is a native file write (Write/Edit/MultiEdit), so a
+// client can render the result inline even though the agent wrote it directly
+// rather than through tend's editor tools.
+func NewPermissionRouter(next rpc.Handler, gate Approver, lookup SessionLookup, turns TurnContexts, emit Emitter) *PermissionRouter {
+	return &PermissionRouter{next: next, gate: gate, lookup: lookup, turns: turns, emit: emit}
 }
 
 // Handle implements rpc.Handler.
@@ -167,12 +171,18 @@ func (r *PermissionRouter) handlePermission(ctx context.Context, req *rpc.Reques
 	}
 
 	if outcome.Approved {
-		if id, ok := pickOption(p.Options, "allow"); ok {
-			return selected(id), nil
+		id, ok := pickOption(p.Options, "allow")
+		if !ok {
+			// The agent offered no allow option we recognise; safest is to abort — and
+			// since the tool will NOT run, do not record an artifact for it.
+			slog.Warn("acp: approved but no allow option offered; cancelling", "session", p.SessionID)
+			return cancelled(), nil
 		}
-		// The agent offered no allow option we recognise; safest is to abort.
-		slog.Warn("acp: approved but no allow option offered; cancelling", "session", p.SessionID)
-		return cancelled(), nil
+		// Only now that we are actually allowing the call: the agent will perform the
+		// write directly, so record it as an artifact (new content + diff) for the UI,
+		// the same as tend's own editor-tool writes.
+		r.emitArtifact(sess, p.ToolCall.ToolCallID, p.ToolCall.RawInput)
+		return selected(id), nil
 	}
 	if id, ok := pickOption(p.Options, "reject"); ok {
 		return selected(id), nil

@@ -208,7 +208,8 @@ func New(ln net.Listener, logPath string, opts ...Option) (*Server, error) {
 	// below (it needs the pool that installs this handler), but a permission
 	// request only arrives during a live turn, long after wiring completes.
 	handler := acp.NewPermissionRouter(norm, s.gate, s.sessions,
-		acp.TurnContextFunc(func(id api.SessionID) (context.Context, bool) { return s.agent.TurnContext(id) }))
+		acp.TurnContextFunc(func(id api.SessionID) (context.Context, bool) { return s.agent.TurnContext(id) }),
+		s.store)
 	s.pool = acp.NewPool(spawnProvider(o.acp, handler), s.store, acp.Options{Max: maxProcsPerProvider})
 	s.acpMgr = acp.NewManager(s.pool)
 	s.agent = agent.NewService(s.sessions, s.acpMgr, norm)
