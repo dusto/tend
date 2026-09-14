@@ -134,6 +134,26 @@ func TestNoArtifactOutsideWorktree(t *testing.T) {
 	}
 }
 
+func TestNoArtifactThroughSymlinkEscape(t *testing.T) {
+	// A symlink INSIDE the worktree that points OUTSIDE it must not let an artifact
+	// read (or emission) escape — symlinks are resolved before the worktree check.
+	root := t.TempDir()
+	outside := filepath.Join(t.TempDir(), "secret.txt")
+	if err := os.WriteFile(outside, []byte("top secret\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(root, "link.txt")
+	if err := os.Symlink(outside, link); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	arts := callWrite(t, root, map[string]any{
+		"file_path": link, "old_string": "secret", "new_string": "leaked",
+	})
+	if len(arts) != 0 {
+		t.Errorf("a symlink escaping the worktree must emit no artifact, got %+v", arts)
+	}
+}
+
 func TestNoArtifactWhenDenied(t *testing.T) {
 	root := t.TempDir()
 	em := &artifactEmitter{}

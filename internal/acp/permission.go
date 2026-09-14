@@ -171,16 +171,18 @@ func (r *PermissionRouter) handlePermission(ctx context.Context, req *rpc.Reques
 	}
 
 	if outcome.Approved {
-		// The write is approved and the agent will now perform it directly; record it
-		// as an artifact (its new content + diff) so a client can render the result,
-		// the same as it does for tend's own editor-tool writes.
-		r.emitArtifact(sess, p.ToolCall.ToolCallID, p.ToolCall.RawInput)
-		if id, ok := pickOption(p.Options, "allow"); ok {
-			return selected(id), nil
+		id, ok := pickOption(p.Options, "allow")
+		if !ok {
+			// The agent offered no allow option we recognise; safest is to abort — and
+			// since the tool will NOT run, do not record an artifact for it.
+			slog.Warn("acp: approved but no allow option offered; cancelling", "session", p.SessionID)
+			return cancelled(), nil
 		}
-		// The agent offered no allow option we recognise; safest is to abort.
-		slog.Warn("acp: approved but no allow option offered; cancelling", "session", p.SessionID)
-		return cancelled(), nil
+		// Only now that we are actually allowing the call: the agent will perform the
+		// write directly, so record it as an artifact (new content + diff) for the UI,
+		// the same as tend's own editor-tool writes.
+		r.emitArtifact(sess, p.ToolCall.ToolCallID, p.ToolCall.RawInput)
+		return selected(id), nil
 	}
 	if id, ok := pickOption(p.Options, "reject"); ok {
 		return selected(id), nil

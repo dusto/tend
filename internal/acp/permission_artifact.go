@@ -3,6 +3,7 @@ package acp
 import (
 	"encoding/json"
 	"log/slog"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -10,6 +11,7 @@ import (
 	"github.com/dusto/tend/api"
 	"github.com/dusto/tend/internal/diff"
 	"github.com/dusto/tend/internal/session"
+	"github.com/dusto/tend/internal/worktree"
 )
 
 // maxArtifactContent caps the new-content embedded in an artifact_written event
@@ -118,20 +120,23 @@ func applyReplace(s, old, new string, replaceAll bool) string {
 	return strings.Replace(s, old, new, 1)
 }
 
-// resolveInWorktree resolves filePath (absolute, or relative to worktreeRoot) and
-// confirms it stays within the worktree — so an artifact read never escapes it.
+// resolveInWorktree resolves filePath (absolute, or relative to worktreeRoot) to
+// a path confirmed inside the worktree, with SYMLINKS resolved first — so a link
+// inside the worktree that points outside it cannot make the artifact read escape
+// (worktree.ResolvePath handles the not-yet-existing leaf too). ok is false for an
+// out-of-worktree path.
 func resolveInWorktree(filePath, worktreeRoot string) (string, bool) {
-	if worktreeRoot == "" {
+	if worktreeRoot == "" || filePath == "" {
 		return "", false
 	}
-	p := filePath
-	if !filepath.IsAbs(p) {
-		p = filepath.Join(worktreeRoot, p)
+	abs := filePath
+	if !filepath.IsAbs(abs) {
+		abs = filepath.Join(worktreeRoot, abs)
 	}
-	p = filepath.Clean(p)
-	rel, err := filepath.Rel(worktreeRoot, p)
-	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+	// Build a proper file:// URI (encodes spaces etc.) for the shared resolver.
+	resolved, err := worktree.ResolvePath((&url.URL{Scheme: "file", Path: abs}).String(), worktreeRoot)
+	if err != nil {
 		return "", false
 	}
-	return p, true
+	return resolved, true
 }
